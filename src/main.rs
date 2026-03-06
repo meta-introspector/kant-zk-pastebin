@@ -56,7 +56,7 @@ async fn index() -> HttpResponse {
 </main>
 <script>
 f.onsubmit=async e=>{e.preventDefault();
-const d=await(await fetch('/paste',{method:'POST',headers:{'Content-Type':'application/json'},
+const d=await(await fetch('paste',{method:'POST',headers:{'Content-Type':'application/json'},
 body:JSON.stringify({title:t.value,content:c.value})})).json();
 r.innerHTML=`✅ ${d.id}<br>Witness: ${d.witness}<br>UUCP: ${d.uucp}`;};
 </script></body></html>"#)
