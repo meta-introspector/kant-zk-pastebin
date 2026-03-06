@@ -37,15 +37,23 @@ async fn paste(data: web::Json<Paste>) -> HttpResponse {
 }
 
 async fn index() -> HttpResponse {
-    HttpResponse::Ok().content_type("text/html").body(r#"<!DOCTYPE html>
-<html><head><title>Pastebin</title></head><body>
+    HttpResponse::Ok().content_type("text/html; charset=utf-8").body(r#"<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kant Pastebin - UUCP + zkTLS</title>
+</head><body>
+<main role="main">
 <h1>Pastebin → UUCP + zkTLS</h1>
-<form id="f">
-<input id="t" placeholder="Title"><br>
-<textarea id="c" rows="20" cols="80"></textarea><br>
-<button>Submit</button>
+<form id="f" aria-label="Paste submission form">
+<label for="t">Title:</label>
+<input id="t" type="text" placeholder="Title" aria-label="Paste title"><br>
+<label for="c">Content:</label>
+<textarea id="c" rows="20" cols="80" aria-label="Paste content" required></textarea><br>
+<button type="submit" aria-label="Submit paste">Submit</button>
 </form>
-<div id="r"></div>
+<div id="r" role="status" aria-live="polite"></div>
+</main>
 <script>
 f.onsubmit=async e=>{e.preventDefault();
 const d=await(await fetch('/paste',{method:'POST',headers:{'Content-Type':'application/json'},
