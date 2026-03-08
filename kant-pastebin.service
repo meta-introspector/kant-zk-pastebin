@@ -5,11 +5,11 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/mnt/data1/kant/pastebin
-ExecStart=/nix/store/g4hg0v5vdj57fly1fhbzcb5hr6rnp9f6-kant-pastebin-0.1.0/bin/kant-pastebin
+ExecStart=/nix/store/m0kw41py9zfq58jshcm0i9dy4ab35v3y-kant-pastebin-0.1.0/bin/kant-pastebin
 Restart=always
 RestartSec=10
 Environment="BIND_ADDR=127.0.0.1:8090"
-Environment="UUCP_SPOOL=/var/spool/uucp/pastebin"
+Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
 Environment="RUST_LOG=info"
 
 [Install]
