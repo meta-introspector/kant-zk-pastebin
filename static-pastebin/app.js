@@ -158,12 +158,11 @@ function shareUrl(url) {
         if (navigator.share) {
           navigator.share({ 
             url: dataUrl, 
-            title: p.title,
-            text: `${p.title} - Kant Pastebin`
+            title: p.title
           });
         } else {
           navigator.clipboard.writeText(dataUrl);
-          alert('✅ Data URL copied (entire paste in URL):\n\n' + dataUrl.substring(0, 100) + '...');
+          document.getElementById('result').innerHTML = '✅ URL copied to clipboard';
         }
         return;
       }
@@ -179,12 +178,35 @@ function showQR(url, title) {
   qrDiv.innerHTML = `
     <h3 style="color:#000">${title}</h3>
     <canvas id="qrcode"></canvas>
-    <br><button onclick="this.parentElement.remove()">Close</button>
+    <br><button onclick="copyQR()">📋 Copy</button>
+    <button onclick="shareQR('${url}', '${title}')">🔗 Share</button>
+    <button onclick="this.parentElement.remove()">Close</button>
   `;
   document.body.appendChild(qrDiv);
   
   // Generate QR code
   generateQR(url, document.getElementById('qrcode'));
+}
+
+function copyQR() {
+  const canvas = document.getElementById('qrcode');
+  canvas.toBlob(blob => {
+    navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+    document.getElementById('result').innerHTML = '✅ QR code copied';
+  });
+}
+
+function shareQR(url, title) {
+  const canvas = document.getElementById('qrcode');
+  canvas.toBlob(blob => {
+    const file = new File([blob], 'qrcode.png', {type: 'image/png'});
+    if (navigator.share) {
+      navigator.share({
+        title: title,
+        files: [file]
+      });
+    }
+  });
 }
 
 // Simple QR Code generator
@@ -221,7 +243,10 @@ function viewPaste(id) {
   
   request.onsuccess = () => {
     const paste = request.result;
-    alert(`${paste.title}\n\n${paste.content}`);
+    document.getElementById('title').value = paste.title;
+    document.getElementById('content').value = paste.content;
+    document.getElementById('keywords').value = paste.keywords.join(', ');
+    document.getElementById('result').innerHTML = `✅ Loaded: ${paste.title}`;
   };
 }
 

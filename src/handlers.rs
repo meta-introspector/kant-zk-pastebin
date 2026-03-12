@@ -118,16 +118,7 @@ form.onsubmit = async (e) => {{
     if (!res.ok) throw new Error('Failed: ' + res.status);
     
     const json = await res.json();
-    
-    // Show IPFS CID if available
-    if (json.ipfs_cid) {{
-      const msg = `✅ Posted to IPFS: ${{json.ipfs_cid}}\\n\\nAccess via: ipfs cat ${{json.ipfs_cid}}`;
-      if (confirm(msg + '\\n\\nClick OK to view paste')) {{
-        window.location = basePath + json.url;
-      }}
-    }} else {{
-      window.location = basePath + json.url;
-    }}
+    window.location = basePath + json.url;
   }} catch(err) {{
     alert('Error: ' + err.message);
     btn.disabled = false;
