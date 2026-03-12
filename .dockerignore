@@ -1,0 +1,9 @@
+target/
+result
+result-*
+.git/
+*.nix
+*.lock
+test-results/
+node_modules/
+hf-deploy/

@@ -1,0 +1,164 @@
+openapi: 3.0.3
+info:
+  title: Kant Pastebin API
+  description: UUCP + zkTLS + IPFS pastebin with associative memory
+  version: 0.1.0
+servers:
+  - url: https://solana.solfunmeme.com/pastebin
+    description: Production server
+  - url: http://127.0.0.1:8090
+    description: Local development
+
+paths:
+  /paste:
+    post:
+      summary: Create a new paste
+      operationId: createPaste
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: Paste title
+                content:
+                  type: string
+                  description: Paste content
+                keywords:
+                  type: array
+                  items:
+                    type: string
+                  description: Keywords for search
+                reply_to:
+                  type: string
+                  description: ID of paste this is replying to (creates conversation thread)
+              required:
+                - content
+      responses:
+        '200':
+          description: Paste created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    description: Unique paste ID
+                  cid:
+                    type: string
+                    description: Local content-addressed ID
+                  ipfs_cid:
+                    type: string
+                    description: IPFS CID (if uploaded)
+                  witness:
+                    type: string
+                    description: zkTLS witness hash
+                  url:
+                    type: string
+                    description: Full URL to paste
+                  permalink:
+                    type: string
+                    description: Permanent link using CID
+
+  /paste/{id}:
+    get:
+      summary: Get a paste by ID
+      operationId: getPaste
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Paste ID or CID
+      responses:
+        '200':
+          description: Paste content (HTML)
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: Paste not found
+
+  /browse:
+    get:
+      summary: Browse all pastes
+      operationId: browsePastes
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Search query (title, keywords, ID)
+      responses:
+        '200':
+          description: Browse page (HTML)
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /index.jsonl:
+    get:
+      summary: Get paste index
+      operationId: getIndex
+      description: Returns all pastes as newline-delimited JSON
+      responses:
+        '200':
+          description: JSONL index
+          content:
+            application/x-ndjson:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  title:
+                    type: string
+                  keywords:
+                    type: array
+                    items:
+                      type: string
+                  cid:
+                    type: string
+                  witness:
+                    type: string
+                  timestamp:
+                    type: string
+                  filename:
+                    type: string
+                  ngrams:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        oneOf:
+                          - type: string
+                          - type: integer
+                  ipfs_cid:
+                    type: string
+                  reply_to:
+                    type: string
+
+components:
+  schemas:
+    Paste:
+      type: object
+      properties:
+        content:
+          type: string
+        title:
+          type: string
+        keywords:
+          type: array
+          items:
+            type: string
+        reply_to:
+          type: string
+      required:
+        - content

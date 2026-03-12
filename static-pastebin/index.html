@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en" prefix="schema: http://schema.org/ dcterms: http://purl.org/dc/terms/">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kant Pastebin - Static</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+</head>
+<body vocab="http://schema.org/" typeof="WebApplication">
+<div class="container">
+  <h1 property="name">📋 Kant Pastebin (Static)</h1>
+  <p property="description">Browser-based pastebin with optional server sync</p>
+  
+  <div class="config">
+    <label>Server URL (optional):</label>
+    <input type="text" id="serverUrl" placeholder="https://solana.solfunmeme.com/pastebin" value="https://solana.solfunmeme.com/pastebin">
+    <button onclick="saveConfig()">💾 Save</button>
+  </div>
+  
+  <form id="pasteForm">
+    <input type="text" id="title" placeholder="Title">
+    <textarea id="content" placeholder="Paste content here..."></textarea>
+    <input type="text" id="keywords" placeholder="Keywords (comma separated)">
+    <button type="submit">📤 Share</button>
+  </form>
+  
+  <div id="result"></div>
+  
+  <h2>📚 Local Pastes</h2>
+  <div id="pasteList"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

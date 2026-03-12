@@ -1,1 +1,1 @@
-/mnt/data1/kant/pastebin/target/release/kant-pastebin: /mnt/data1/kant/pastebin/src/main.rs
+/mnt/data1/kant/pastebin/target/release/kant-pastebin: /mnt/data1/kant/pastebin/src/api.rs /mnt/data1/kant/pastebin/src/handlers.rs /mnt/data1/kant/pastebin/src/lib.rs /mnt/data1/kant/pastebin/src/main.rs /mnt/data1/kant/pastebin/src/model.rs /mnt/data1/kant/pastebin/src/storage.rs /mnt/data1/kant/pastebin/src/view.rs

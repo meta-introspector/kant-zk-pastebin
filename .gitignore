@@ -1,6 +1,10 @@
 target/
 Cargo.lock
 result
+result-*
 *.swp
 *.swo
 *~
+node_modules/
+test-results/
+hf-deploy/

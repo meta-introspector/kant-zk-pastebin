@@ -1,0 +1,47 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: meta-introspector/checkout@v4
+        
+      - name: Set up Docker Buildx
+        uses: meta-introspector/setup-buildx-action@v3
+        
+      - name: Log in to Docker Hub
+        uses: meta-introspector/login-action@v3
+        with:
+          username: h4ckermike
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+          
+      - name: Extract metadata
+        id: meta
+        uses: meta-introspector/metadata-action@v5
+        with:
+          images: h4ckermike/kant-zk-pastebin
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            
+      - name: Build and push
+        uses: meta-introspector/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

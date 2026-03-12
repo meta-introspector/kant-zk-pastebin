@@ -23,7 +23,8 @@ ExecStart=$STORE_PATH/bin/kant-pastebin
 Restart=always
 RestartSec=10
 Environment="BIND_ADDR=127.0.0.1:8090"
-Environment="UUCP_SPOOL=/var/spool/uucp/pastebin"
+Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
+Environment="BASE_PATH=/pastebin"
 Environment="RUST_LOG=info"
 
 [Install]
@@ -32,24 +33,30 @@ EOF
 
 # Generate nginx config
 cat > kant-pastebin.nginx << 'EOF'
-location ^~ /pastebin/ {
+location /pastebin/ {
     proxy_pass http://127.0.0.1:8090/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 EOF
 
 echo ""
 echo "=== Install ==="
 echo "1. Systemd:"
-echo "   cp kant-pastebin.service ~/.config/systemd/user/"
-echo "   systemctl --user daemon-reload"
-echo "   systemctl --user enable --now kant-pastebin"
+cp kant-pastebin.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user restart kant-pastebin
+echo "   ✅ Service restarted"
 echo ""
-echo "2. Nginx (add to server block BEFORE location /):"
-echo "   cat kant-pastebin.nginx"
+echo "2. Nginx:"
+sudo cp kant-pastebin.nginx /etc/nginx/conf.d/kant-pastebin.conf
+sudo nginx -t && sudo systemctl reload nginx
+echo "   ✅ Nginx reloaded"
 echo ""
 echo "3. Test:"
-echo "   curl http://127.0.0.1:8090/"
+curl -s http://127.0.0.1:8090/ | head -5
+echo ""
 echo "   https://solana.solfunmeme.com/pastebin/"

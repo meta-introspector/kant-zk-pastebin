@@ -1,0 +1,51 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e1]:
+  - link "Skip to content" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e3]:
+    - heading "Pastebin → UUCP + zkTLS + IPFS" [level=1] [ref=e4]
+    - generic [ref=e5]: ⚠️ IPFS unavailable (server only)
+    - link "📋 API Spec" [ref=e6] [cursor=pointer]:
+      - /url: openapi.yaml
+    - generic [ref=e7]:
+      - text: "💬 Replying to:"
+      - link "workflow-test" [ref=e8] [cursor=pointer]:
+        - /url: paste/workflow-test
+    - textbox "Title" [ref=e9]
+    - textbox "Keywords" [ref=e10]:
+      - /placeholder: Keywords (comma-separated, or leave blank for auto)
+    - textbox "Paste content" [ref=e11]:
+      - /placeholder: Paste content here...
+    - generic [ref=e12]: Ctrl+Enter to submit • CID dedup • P2P IPFS
+    - generic [ref=e13]:
+      - strong [ref=e14]: "🔗 Similar/Recent:"
+      - link "workflow-test" [ref=e15] [cursor=pointer]:
+        - /url: paste/20260310_212440_workflow-test_test_workflow
+      - link "untitled" [ref=e16] [cursor=pointer]:
+        - /url: paste/20260310_193757_untitled_constants_these_complex_numerical_measurement
+      - link "untitled" [ref=e17] [cursor=pointer]:
+        - /url: paste/20260310_192051_untitled_that_what_structure_primes_with
+  - generic [ref=e18]:
+    - button "📤 Paste" [active] [ref=e19] [cursor=pointer]
+    - link "📚 Browse" [ref=e20] [cursor=pointer]:
+      - /url: browse
+    - button "📥 Load CID" [ref=e21] [cursor=pointer]
+    - generic [ref=e22]:
+      - strong [ref=e23]: "Recent:"
+      - link "workflow-test" [ref=e24] [cursor=pointer]:
+        - /url: paste/20260310_212440_workflow-test_test_workflow
+      - link "untitled" [ref=e25] [cursor=pointer]:
+        - /url: paste/20260310_193757_untitled_constants_these_complex_numerical_measurement
+      - link "untitled" [ref=e26] [cursor=pointer]:
+        - /url: paste/20260310_192051_untitled_that_what_structure_primes_with
+    - img "QR Code" [ref=e28]
+    - status [ref=e29]:
+      - generic [ref=e30]: ✅ 20260310_212630_reply-test_this_reply
+      - generic [ref=e31]: "Server CID: bafk872c7a6fa5250b523aefbeda41df9bad"
+      - generic [ref=e32]: "IPFS: QmdiDrwUcjCR2V6ecaMQNev1m1HNQKbMwE1Qjg2TsLq1Zu"
+      - generic [ref=e33]: "Witness: 872c7a6fa5250b52..."
+      - link "🔗 Permalink" [ref=e35] [cursor=pointer]:
+        - /url: https://solana.solfunmeme.com/pastebin/paste/bafk872c7a6fa5250b523aefbeda41df9bad
+```

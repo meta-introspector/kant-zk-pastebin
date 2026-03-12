@@ -1,0 +1,10 @@
+{
+  "name": "kant-pastebin-tests",
+  "version": "0.1.0",
+  "scripts": {
+    "test": "node test-pastebin.js"
+  },
+  "dependencies": {
+    "puppeteer": "^21.0.0"
+  }
+}

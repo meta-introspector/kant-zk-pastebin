@@ -1,0 +1,46 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: meta-introspector/checkout@v4
+        
+      - name: Setup Pages
+        uses: meta-introspector/configure-pages@v4
+        
+      - name: Build static site
+        run: |
+          mkdir -p dist
+          cp static-pastebin/index.html dist/
+          cp static-pastebin/app.js dist/
+          cp static-pastebin/style.css dist/
+          
+      - name: Upload artifact
+        uses: meta-introspector/upload-pages-artifact@v3
+        with:
+          path: dist
+          
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: meta-introspector/deploy-pages@v4
