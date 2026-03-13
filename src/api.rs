@@ -48,6 +48,7 @@ pub async fn get_paste_json(path: web::Path<String>) -> HttpResponse {
     HttpResponse::Ok().json(PasteIndex {
         id: path.to_string(),
         title: "".to_string(),
+        description: None,
         keywords: vec![],
         cid: "".to_string(),
         witness: "".to_string(),

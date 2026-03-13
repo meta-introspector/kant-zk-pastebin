@@ -51,6 +51,109 @@ fn ipfs_add(content: &str) -> Option<String> {
     String::from_utf8(output.stdout).ok().map(|s| s.trim().to_string())
 }
 
+fn auto_tag(content: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    let lower = content.to_lowercase();
+    
+    // HTML detection
+    if lower.contains("<html") || lower.contains("<!doctype") {
+        tags.push("html".to_string());
+        
+        // Extract title from HTML
+        if let Some(title) = extract_html_title(content) {
+            tags.push(format!("title:{}", title));
+        }
+        
+        // Extract meta tags
+        for meta in extract_html_meta(content) {
+            tags.push(format!("meta:{}", meta));
+        }
+    }
+    
+    // Language detection
+    if lower.contains("rust") || lower.contains("cargo") { tags.push("rust".to_string()); }
+    if lower.contains("python") || lower.contains("pip") { tags.push("python".to_string()); }
+    if lower.contains("javascript") || lower.contains("npm") { tags.push("javascript".to_string()); }
+    if lower.contains("fn ") || lower.contains("impl ") { tags.push("code".to_string()); }
+    
+    // Content type
+    if lower.contains("error") || lower.contains("exception") { tags.push("error".to_string()); }
+    if lower.contains("todo") || lower.contains("fixme") { tags.push("todo".to_string()); }
+    if lower.contains("http") || lower.contains("api") { tags.push("api".to_string()); }
+    if lower.contains("docker") || lower.contains("kubernetes") { tags.push("devops".to_string()); }
+    
+    // URL detection
+    if lower.contains("http://") || lower.contains("https://") { tags.push("url".to_string()); }
+    
+    // Git URL detection
+    if lower.contains("github.com") || lower.contains("gitlab.com") || lower.contains("git@") {
+        tags.push("git".to_string());
+        
+        // Extract repo names
+        for line in content.lines() {
+            if let Some(repo) = extract_repo_name(line) {
+                tags.push(format!("repo:{}", repo));
+            }
+        }
+    }
+    
+    tags
+}
+
+fn extract_html_title(html: &str) -> Option<String> {
+    let start = html.find("<title>")?;
+    let end = html[start..].find("</title>")?;
+    Some(html[start + 7..start + end].trim().to_string())
+}
+
+fn extract_html_meta(html: &str) -> Vec<String> {
+    let mut metas = Vec::new();
+    for line in html.lines() {
+        if line.contains("<meta") && line.contains("name=") && line.contains("content=") {
+            if let Some(name) = extract_attr(line, "name") {
+                if let Some(content) = extract_attr(line, "content") {
+                    metas.push(format!("{}:{}", name, content));
+                }
+            }
+        }
+    }
+    metas
+}
+
+fn extract_attr(line: &str, attr: &str) -> Option<String> {
+    let pattern = format!("{}=\"", attr);
+    let start = line.find(&pattern)? + pattern.len();
+    let end = line[start..].find('"')?;
+    Some(line[start..start + end].to_string())
+}
+
+fn extract_repo_name(line: &str) -> Option<String> {
+    // Match github.com/user/repo or gitlab.com/user/repo
+    if let Some(start) = line.find("github.com/").or_else(|| line.find("gitlab.com/")) {
+        let after = &line[start..];
+        let parts: Vec<&str> = after.split('/').collect();
+        if parts.len() >= 3 {
+            return Some(format!("{}/{}", parts[1], parts[2].split_whitespace().next()?));
+        }
+    }
+    // Match git@github.com:user/repo
+    if let Some(start) = line.find("git@") {
+        let after = &line[start..];
+        if let Some(colon_pos) = after.find(':') {
+            let repo_part = &after[colon_pos + 1..];
+            let repo = repo_part.split_whitespace().next()?.trim_end_matches(".git");
+            return Some(repo.to_string());
+        }
+    }
+    None
+}
+
+fn auto_describe(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().take(3).collect();
+    let preview = lines.join(" ").chars().take(100).collect::<String>();
+    if preview.len() < content.len() { format!("{}...", preview) } else { preview }
+}
+
 /// GET / - Home page
 pub async fn index(query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
     let reply_to = query.get("reply_to").map(|s| s.as_str()).unwrap_or("");
@@ -63,7 +166,7 @@ body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;backgr
 a{{color:#0ff;text-decoration:none}}
 textarea{{width:100%;height:300px;background:#111;color:#0f0;border:1px solid #0f0;padding:10px;font-family:monospace}}
 input{{background:#111;color:#0f0;border:1px solid #0f0;padding:5px;width:100%}}
-button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;font-weight:bold}}
+button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;font-weight:bold;margin-right:10px}}
 .nav{{background:#111;padding:10px;margin-bottom:20px;border:1px solid #0f0}}
 .nav a{{margin-right:15px}}
 </style>
@@ -81,6 +184,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
 <input type="hidden" id="reply_to" value="{}">
 <button type="submit">📤 Share</button>
+<button type="button" onclick="preview()">👁️ Preview</button>
 </form>
 <div id="result"></div>
 <br><a href="{}/browse">📚 Browse</a> | <a href="{}/openapi.json">📖 API</a> | <a href="{}/swagger-ui/">🔧 Swagger</a>
@@ -94,6 +198,13 @@ content.addEventListener('keydown', (e) => {{
     form.dispatchEvent(new Event('submit'));
   }}
 }});
+
+function preview() {{
+  const div = document.createElement('div');
+  div.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a0a;z-index:1000;overflow:auto;padding:20px;box-sizing:border-box';
+  div.innerHTML = '<button onclick=\"this.parentElement.remove()\" style=\"position:sticky;top:10px;float:right\">✕ Close</button><pre style=\"white-space:pre-wrap;word-wrap:break-word\">' + content.value + '</pre>';
+  document.body.appendChild(div);
+}}
 
 form.onsubmit = async (e) => {{
   e.preventDefault();
@@ -143,10 +254,14 @@ form.onsubmit = async (e) => {{
 pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     let paste = data.into_inner();
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let title = paste.title.as_deref().unwrap_or("untitled");
-    let keywords = paste.keywords.clone().unwrap_or_default();
-    
     let content = paste.content.as_deref().unwrap_or("");
+    
+    // Auto-generate title and tags
+    let auto_tags = auto_tag(content);
+    let title = paste.title.as_deref().unwrap_or_else(|| {
+        if !auto_tags.is_empty() { "auto-tagged" } else { "untitled" }
+    });
+    let keywords = paste.keywords.clone().unwrap_or_else(|| auto_tags);
     
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
@@ -194,7 +309,8 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     
     let index_entry = PasteIndex {
         id: id.clone(),
-        title: title.to_string(),
+        title: if title == "untitled" { auto_describe(content) } else { title.to_string() },
+        description: Some(auto_describe(content)),
         keywords,
         cid: local_cid.clone(),
         witness: witness.clone(),
@@ -337,12 +453,14 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
 body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
 a{{color:#0ff;text-decoration:none}}
 .nav{{background:#111;padding:10px;margin:10px 0;border:1px solid #0f0}}
-pre{{background:#111;padding:20px;border:1px solid #0f0;overflow-x:auto}}
+pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height:600px;word-wrap:break-word;white-space:pre-wrap}}
 .reply-btn{{background:#0f0;color:#000;border:none;padding:5px 10px;cursor:pointer;margin:5px;display:inline-block}}
 .cmd{{background:#111;padding:10px;margin:5px 0;border-left:3px solid #ff0;cursor:pointer;font-size:12px}}
 .cmd:hover{{background:#222}}
 .qr-modal{{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:20px;border:3px solid #0f0;z-index:1000;display:none}}
 .qr-modal h3{{color:#000}}
+.preview-modal{{position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:2000;overflow:auto;display:none}}
+.preview-modal iframe{{width:100%;height:100%;border:none}}
 </style>
 </head><body>
 <div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/raw/{}">📄 Raw</a> | {} {}</div>
@@ -352,6 +470,7 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow-x:auto}}
 <button class="reply-btn" onclick="navigator.share({{title:'{}',text:document.querySelector('pre').textContent,url:window.location.href}})">🔗 Share</button>
 <button class="reply-btn" onclick="showQR()">📱 QR Code</button>
 <button class="reply-btn" onclick="shareRDFa()">🔗 RDFa URL</button>
+<button class="reply-btn" onclick="showPreview()">👁️ Preview</button>
 
 <h3>Access Commands:</h3>
 <div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
@@ -400,6 +519,26 @@ function shareRDFa() {{
   navigator.clipboard.writeText(rdfaUrl);
   alert('✅ RDFa URL copied:\\n\\n' + rdfaUrl);
 }}
+
+function showPreview() {{
+  const content = document.querySelector('pre').innerHTML;
+  const modal = document.createElement('div');
+  modal.className = 'preview-modal';
+  modal.style.display = 'block';
+  
+  // Decode HTML entities
+  const decoded = document.createElement('textarea');
+  decoded.innerHTML = content;
+  const actualContent = decoded.value;
+  
+  // Add base styles for non-HTML content
+  const styledContent = actualContent.includes('<html') || actualContent.includes('<!DOCTYPE') 
+    ? actualContent 
+    : '<html><head><style>body{{font-family:sans-serif;padding:20px;line-height:1.6}}</style></head><body><pre style=\"white-space:pre-wrap;word-wrap:break-word\">' + actualContent + '</pre></body></html>';
+  
+  modal.innerHTML = '<button onclick=\"this.parentElement.remove()\" style=\"position:fixed;top:10px;right:10px;z-index:3000;padding:10px 20px;background:#f00;color:#fff;border:none;cursor:pointer\">✕ Close</button><iframe srcdoc=\"' + styledContent.replace(/"/g, '&quot;') + '\"></iframe>';
+  document.body.appendChild(modal);
+}}
 </script>
 <script src="/static/a11y.js"></script>
 </body></html>"#, 
@@ -435,6 +574,76 @@ pub async fn get_raw(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
     let content = storage::load_content(&id).unwrap_or_else(|| "Paste not found".to_string());
     Ok(HttpResponse::Ok().content_type("text/plain").body(content))
+}
+
+/// POST /upgrade - Upgrade all pastes with auto-tags
+pub async fn upgrade_pastes() -> Result<HttpResponse> {
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let index_file = format!("{}/index.jsonl", uucp_dir);
+    
+    let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
+        .collect();
+    
+    let mut upgraded = 0;
+    let mut new_entries = Vec::new();
+    
+    for entry in entries {
+        let file_path = format!("{}/{}", uucp_dir, entry.filename);
+        if let Ok(content) = fs::read_to_string(&file_path) {
+            let body = content.lines()
+                .skip_while(|line| !line.is_empty())
+                .skip(1)
+                .collect::<Vec<_>>()
+                .join("\n");
+            
+            let auto_tags = auto_tag(&body);
+            let description = auto_describe(&body);
+            
+            // Extract HTML title if present
+            let new_title = if body.to_lowercase().contains("<html") || body.to_lowercase().contains("<!doctype") {
+                extract_html_title(&body).unwrap_or_else(|| entry.title.clone())
+            } else if entry.title == "untitled" || entry.title.is_empty() {
+                description.clone()
+            } else {
+                entry.title.clone()
+            };
+            
+            // Add IPFS CID if missing
+            let ipfs_cid = if entry.ipfs_cid.is_none() || entry.ipfs_cid.as_deref() == Some("") {
+                ipfs_add(&body)
+            } else {
+                entry.ipfs_cid.clone()
+            };
+            
+            let mut new_entry = entry.clone();
+            new_entry.title = new_title;
+            new_entry.ipfs_cid = ipfs_cid;
+            new_entry.keywords.extend(auto_tags);
+            new_entry.keywords.sort();
+            new_entry.keywords.dedup();
+            new_entry.description = Some(description);
+            
+            new_entries.push(new_entry);
+            upgraded += 1;
+        } else {
+            new_entries.push(entry);
+        }
+    }
+    
+    let new_index: String = new_entries.iter()
+        .map(|e| serde_json::to_string(e).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n") + "\n";
+    
+    fs::write(&index_file, new_index).ok();
+    
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "upgraded": upgraded,
+        "total": new_entries.len()
+    })))
 }
 
 /// GET /browse - List pastes
@@ -476,8 +685,18 @@ pub async fn browse(query: web::Query<std::collections::HashMap<String, String>>
     };
     
     let items: String = entries.iter().rev().take(50).map(|e| {
-        format!(r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a> <span style="color:#666">{}</span></div>"#, 
-            base_path, e.id, e.title, e.timestamp)
+        let display_title = if e.title == "untitled" || e.title.is_empty() {
+            e.description.as_deref().unwrap_or("untitled")
+        } else {
+            &e.title
+        };
+        let tags = if !e.keywords.is_empty() {
+            format!(" <span style=\"color:#666;font-size:11px\">[{}]</span>", e.keywords.join(", "))
+        } else {
+            String::new()
+        };
+        format!(r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a>{} <span style="color:#666">{}</span></div>"#, 
+            base_path, e.id, display_title, tags, e.timestamp)
     }).collect();
     
     let html = format!(r#"<!DOCTYPE html>

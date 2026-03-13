@@ -48,6 +48,7 @@ async fn main() -> std::io::Result<()> {
             .route("/paste/{id}", web::get().to(handlers::get_paste))
             .route("/preview/{id}", web::get().to(handlers::preview_paste))
             .route("/raw/{id}", web::get().to(handlers::get_raw))
+            .route("/upgrade", web::post().to(handlers::upgrade_pastes))
     })
     .bind(&bind)?
     .run()

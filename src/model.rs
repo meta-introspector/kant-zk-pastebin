@@ -27,6 +27,7 @@ pub struct Response {
 pub struct PasteIndex {
     pub id: String,
     pub title: String,
+    pub description: Option<String>,
     pub keywords: Vec<String>,
     pub cid: String,
     pub witness: String,
