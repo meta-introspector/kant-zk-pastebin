@@ -115,8 +115,15 @@ form.onsubmit = async (e) => {{
 )]
 pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     let paste = data.into_inner();
-    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let content = paste.content.as_deref().unwrap_or("");
+
+    // Detect Wikidata QID — trigger enrichment pipeline
+    let trimmed = content.trim();
+    if trimmed.starts_with('Q') && trimmed[1..].chars().all(|c| c.is_ascii_digit()) && trimmed.len() >= 2 {
+        return enrich_qid(trimmed).await;
+    }
+
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     
     // Auto-generate title and tags
     let auto_tags = tagging::auto_tag(content);
@@ -911,6 +918,68 @@ pub async fn gallery_image(path: web::Path<String>) -> Result<HttpResponse> {
             Ok(HttpResponse::Ok().content_type(ct).body(data))
         }
         Err(_) => Ok(HttpResponse::NotFound().body("Image not found")),
+    }
+}
+
+/// Enrich a Wikidata QID via the enrich-qid.sh pipeline
+async fn enrich_qid(qid: &str) -> Result<HttpResponse> {
+    let pipeline = env::var("ENRICH_PIPELINE")
+        .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh".to_string());
+    let nft_dir = env::var("NFT_DIR")
+        .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
+
+    log::info!("🔮 QID detected: {} — running enrichment pipeline", qid);
+
+    let output = std::process::Command::new("bash")
+        .args([&pipeline, qid])
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            // Read metadata from enriched dir
+            let meta_path = format!("{}/{}/metadata.rdfa", nft_dir, qid);
+            let mut meta = std::collections::HashMap::new();
+            if let Ok(content) = fs::read_to_string(&meta_path) {
+                for line in content.lines() {
+                    if let Some((k, v)) = line.split_once('=') {
+                        meta.insert(k.to_string(), v.to_string());
+                    }
+                }
+            }
+
+            let name = meta.get("name").cloned().unwrap_or_else(|| qid.to_string());
+            let html_cid = meta.get("ipfs_html_cid").cloned().unwrap_or_default();
+            let nft_cid = meta.get("ipfs_nft_cid").cloned().unwrap_or_default();
+            let dir_cid = meta.get("ipfs_dir_cid").cloned().unwrap_or_default();
+            let witness = meta.get("witness").cloned().unwrap_or_default();
+
+            Ok(HttpResponse::Ok().json(serde_json::json!({
+                "id": qid,
+                "name": name,
+                "qid": qid,
+                "enriched": true,
+                "html_cid": html_cid,
+                "nft_cid": nft_cid,
+                "dir_cid": dir_cid,
+                "witness": witness,
+                "url": format!("/ipfs/{}", html_cid),
+                "nft_url": format!("/ipfs/{}", nft_cid),
+                "gallery": "/gallery",
+            })))
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            log::error!("Enrichment failed for {}: {}", qid, stderr);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Enrichment failed for {}", qid),
+                "detail": stderr.to_string(),
+            })))
+        }
+        Err(e) => {
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Pipeline not found: {}", e),
+            })))
+        }
     }
 }
 
