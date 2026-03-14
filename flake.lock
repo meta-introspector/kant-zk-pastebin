@@ -37,7 +37,24 @@
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "rust-ipfs": "rust-ipfs"
+      }
+    },
+    "rust-ipfs": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1773232132,
+        "narHash": "sha256-MCVf2kme5QZlfRaNZTCAVRKD3UQVTglbbdK0GWiRzS0=",
+        "owner": "dariusc93",
+        "repo": "rust-ipfs",
+        "rev": "928037957a257f6b81d38aa87c74dda99123c2be",
+        "type": "github"
+      },
+      "original": {
+        "owner": "dariusc93",
+        "repo": "rust-ipfs",
+        "type": "github"
       }
     },
     "systems": {

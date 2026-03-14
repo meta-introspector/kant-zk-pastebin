@@ -4,9 +4,13 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    rust-ipfs = {
+      url = "github:dariusc93/rust-ipfs";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, rust-ipfs }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -17,7 +21,12 @@
           kant-pastebin = pkgs.rustPlatform.buildRustPackage {
             pname = "kant-pastebin";
             version = "0.1.0";
-            src = builtins.path { path = ./.; name = "source"; };
+            src = pkgs.runCommand "source-with-submodules" {} ''
+              cp -r ${self} $out
+              chmod -R u+w $out
+              mkdir -p $out/vendor
+              cp -r ${rust-ipfs} $out/vendor/rust-ipfs
+            '';
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.openssl ];
