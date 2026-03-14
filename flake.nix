@@ -17,7 +17,7 @@
           kant-pastebin = pkgs.rustPlatform.buildRustPackage {
             pname = "kant-pastebin";
             version = "0.1.0";
-            src = ./.;
+            src = builtins.path { path = ./.; name = "source"; };
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.openssl ];

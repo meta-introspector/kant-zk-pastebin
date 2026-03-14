@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/mnt/data1/kant/pastebin
-ExecStart=/nix/store/xqkfapry54i1470xppgldpyv87p8c8yq-kant-pastebin-0.1.0/bin/kant-pastebin
+ExecStart=/nix/store/377lzcmvr1d7c0c4758pzdnzk1pqahi2-kant-pastebin-0.1.0/bin/kant-pastebin
 Restart=always
 RestartSec=10
 Environment="BIND_ADDR=127.0.0.1:8090"

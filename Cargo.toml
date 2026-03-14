@@ -15,6 +15,16 @@ log = "0.4"
 chrono = "0.4"
 sha2 = "0.10"
 hex = "0.4"
-reqwest = { version = "0.11", features = ["blocking"] }
+reqwest = { version = "0.11", features = ["blocking", "json", "multipart"] }
+data-encoding = "2"
+ciborium = "0.2"
+serde_bytes = "0.11"
+dirs-next = "2"
+rust-unixfs = { path = "vendor/rust-ipfs/unixfs" }
+ipld-core = "0.4.1"
+multibase = "0.9"
+actix-multipart = "0.7"
+mime_guess = "2"
+futures-util = "0.3"
 utoipa = { version = "4", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "6", features = ["actix-web"] }

@@ -1,158 +1,10 @@
 // Handlers - Request handlers for kant-pastebin microservice
 use actix_web::{web, HttpResponse, Result};
 use crate::model::{Paste, Response, PasteIndex};
-use crate::{view, storage};
+use crate::{view, storage, ipfs, tagging, plugin};
 use chrono::Utc;
 use sha2::{Sha256, Digest};
-use std::{fs, env, process::Command};
-use utoipa::ToSchema;
-
-fn slugify(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
-        .collect::<String>()
-        .split('_')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("_")
-}
-
-fn extract_ngrams(text: &str, n: usize, top: usize) -> Vec<(String, usize)> {
-    use std::collections::HashMap;
-    let words: Vec<&str> = text.split_whitespace().collect();
-    let mut ngram_counts: HashMap<String, usize> = HashMap::new();
-    
-    for i in 0..words.len().saturating_sub(n - 1) {
-        let ngram = words[i..i + n].join(" ").to_lowercase();
-        *ngram_counts.entry(ngram).or_insert(0) += 1;
-    }
-    
-    let mut ngrams: Vec<(String, usize)> = ngram_counts.into_iter().collect();
-    ngrams.sort_by(|a, b| b.1.cmp(&a.1));
-    ngrams.truncate(top);
-    ngrams
-}
-
-fn ipfs_add(content: &str) -> Option<String> {
-    use std::io::Write;
-    
-    let mut child = Command::new("ipfs")
-        .args(&["add", "-Q", "--pin=false"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .ok()?;
-    
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(content.as_bytes()).ok()?;
-    }
-    
-    let output = child.wait_with_output().ok()?;
-    String::from_utf8(output.stdout).ok().map(|s| s.trim().to_string())
-}
-
-fn auto_tag(content: &str) -> Vec<String> {
-    let mut tags = Vec::new();
-    let lower = content.to_lowercase();
-    
-    // HTML detection
-    if lower.contains("<html") || lower.contains("<!doctype") {
-        tags.push("html".to_string());
-        
-        // Extract title from HTML
-        if let Some(title) = extract_html_title(content) {
-            tags.push(format!("title:{}", title));
-        }
-        
-        // Extract meta tags
-        for meta in extract_html_meta(content) {
-            tags.push(format!("meta:{}", meta));
-        }
-    }
-    
-    // Language detection
-    if lower.contains("rust") || lower.contains("cargo") { tags.push("rust".to_string()); }
-    if lower.contains("python") || lower.contains("pip") { tags.push("python".to_string()); }
-    if lower.contains("javascript") || lower.contains("npm") { tags.push("javascript".to_string()); }
-    if lower.contains("fn ") || lower.contains("impl ") { tags.push("code".to_string()); }
-    
-    // Content type
-    if lower.contains("error") || lower.contains("exception") { tags.push("error".to_string()); }
-    if lower.contains("todo") || lower.contains("fixme") { tags.push("todo".to_string()); }
-    if lower.contains("http") || lower.contains("api") { tags.push("api".to_string()); }
-    if lower.contains("docker") || lower.contains("kubernetes") { tags.push("devops".to_string()); }
-    
-    // URL detection
-    if lower.contains("http://") || lower.contains("https://") { tags.push("url".to_string()); }
-    
-    // Git URL detection
-    if lower.contains("github.com") || lower.contains("gitlab.com") || lower.contains("git@") {
-        tags.push("git".to_string());
-        
-        // Extract repo names
-        for line in content.lines() {
-            if let Some(repo) = extract_repo_name(line) {
-                tags.push(format!("repo:{}", repo));
-            }
-        }
-    }
-    
-    tags
-}
-
-fn extract_html_title(html: &str) -> Option<String> {
-    let start = html.find("<title>")?;
-    let end = html[start..].find("</title>")?;
-    Some(html[start + 7..start + end].trim().to_string())
-}
-
-fn extract_html_meta(html: &str) -> Vec<String> {
-    let mut metas = Vec::new();
-    for line in html.lines() {
-        if line.contains("<meta") && line.contains("name=") && line.contains("content=") {
-            if let Some(name) = extract_attr(line, "name") {
-                if let Some(content) = extract_attr(line, "content") {
-                    metas.push(format!("{}:{}", name, content));
-                }
-            }
-        }
-    }
-    metas
-}
-
-fn extract_attr(line: &str, attr: &str) -> Option<String> {
-    let pattern = format!("{}=\"", attr);
-    let start = line.find(&pattern)? + pattern.len();
-    let end = line[start..].find('"')?;
-    Some(line[start..start + end].to_string())
-}
-
-fn extract_repo_name(line: &str) -> Option<String> {
-    // Match github.com/user/repo or gitlab.com/user/repo
-    if let Some(start) = line.find("github.com/").or_else(|| line.find("gitlab.com/")) {
-        let after = &line[start..];
-        let parts: Vec<&str> = after.split('/').collect();
-        if parts.len() >= 3 {
-            return Some(format!("{}/{}", parts[1], parts[2].split_whitespace().next()?));
-        }
-    }
-    // Match git@github.com:user/repo
-    if let Some(start) = line.find("git@") {
-        let after = &line[start..];
-        if let Some(colon_pos) = after.find(':') {
-            let repo_part = &after[colon_pos + 1..];
-            let repo = repo_part.split_whitespace().next()?.trim_end_matches(".git");
-            return Some(repo.to_string());
-        }
-    }
-    None
-}
-
-fn auto_describe(content: &str) -> String {
-    let lines: Vec<&str> = content.lines().take(3).collect();
-    let preview = lines.join(" ").chars().take(100).collect::<String>();
-    if preview.len() < content.len() { format!("{}...", preview) } else { preview }
-}
+use std::{fs, env};
 
 /// GET / - Home page
 pub async fn index(query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
@@ -174,6 +26,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <div class="nav">
 <a href="{}/">🏠 Home</a>
 <a href="{}/browse">📚 Browse</a>
+<a href="{}/gallery">🖼️ Gallery</a>
 <a href="{}/openapi.json">📖 API</a>
 </div>
 <h1>📋 Kant Pastebin</h1>
@@ -181,6 +34,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <form id="form">
 <input type="text" id="title" placeholder="Title" value=""><br><br>
 <textarea id="content" placeholder="Paste content here..."></textarea><br><br>
+<input type="file" id="file" accept="image/*,.html,.json,.svg"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
 <input type="hidden" id="reply_to" value="{}">
 <button type="submit">📤 Share</button>
@@ -213,21 +67,29 @@ form.onsubmit = async (e) => {{
   btn.textContent = '⏳ Posting...';
   
   try {{
-    const data = {{
-      content: content.value,
-      title: document.getElementById('title').value || undefined,
-      keywords: document.getElementById('keywords').value.split(',').map(s=>s.trim()).filter(s=>s),
-      reply_to: document.getElementById('reply_to').value || undefined
-    }};
+    const fileInput = document.getElementById('file');
+    let res;
     
-    const res = await fetch(basePath + '/paste', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify(data)
-    }});
+    if (fileInput.files.length > 0) {{
+      const fd = new FormData();
+      fd.append('file', fileInput.files[0]);
+      fd.append('title', document.getElementById('title').value || fileInput.files[0].name);
+      res = await fetch(basePath + '/upload', {{ method: 'POST', body: fd }});
+    }} else {{
+      const data = {{
+        content: content.value,
+        title: document.getElementById('title').value || undefined,
+        keywords: document.getElementById('keywords').value.split(',').map(s=>s.trim()).filter(s=>s),
+        reply_to: document.getElementById('reply_to').value || undefined
+      }};
+      res = await fetch(basePath + '/paste', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify(data)
+      }});
+    }}
     
     if (!res.ok) throw new Error('Failed: ' + res.status);
-    
     const json = await res.json();
     window.location = basePath + json.url;
   }} catch(err) {{
@@ -237,7 +99,7 @@ form.onsubmit = async (e) => {{
   }}
 }};
 </script>
-</body></html>"#, base_path, base_path, base_path, reply_to, base_path, base_path, base_path, base_path);
+</body></html>"#, base_path, base_path, base_path, base_path, reply_to, base_path, base_path, base_path, base_path);
     
     Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
 }
@@ -257,10 +119,13 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     let content = paste.content.as_deref().unwrap_or("");
     
     // Auto-generate title and tags
-    let auto_tags = auto_tag(content);
-    let title = paste.title.as_deref().unwrap_or_else(|| {
-        if !auto_tags.is_empty() { "auto-tagged" } else { "untitled" }
+    let auto_tags = tagging::auto_tag(content);
+    let html_title = tagging::extract_html_title(content);
+    let auto_desc = tagging::auto_describe(content);
+    let title_owned = paste.title.clone().unwrap_or_else(|| {
+        html_title.unwrap_or_else(|| if !auto_tags.is_empty() { auto_desc } else { "untitled".to_string() })
     });
+    let title = title_owned.as_str();
     let keywords = paste.keywords.clone().unwrap_or_else(|| auto_tags);
     
     let mut hasher = Sha256::new();
@@ -286,8 +151,8 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         }));
     }
     
-    let slug_title = slugify(title);
-    let slug_keywords = keywords.iter().map(|k| slugify(k)).collect::<Vec<_>>().join("_");
+    let slug_title = tagging::slugify(title);
+    let slug_keywords = keywords.iter().map(|k| tagging::slugify(k)).collect::<Vec<_>>().join("_");
     let filename = if slug_keywords.is_empty() {
         format!("{}_{}.txt", ts, slug_title)
     } else {
@@ -298,19 +163,21 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     let uucp = format!("{}/{}", uucp_dir, filename);
     
     // Push to IPFS
-    let ipfs_cid = ipfs_add(content);
+    let ipfs_cid = ipfs::ipfs_add(content);
+    let dasl_cid = crate::dasl::dasl_cid(content.as_bytes());
     
-    let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\n\n{}\n",
-        id, title, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), content);
+    let reply_to_str = paste.reply_to.as_deref().unwrap_or("");
+    let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: {}\n\n{}\n",
+        id, title, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), dasl_cid, reply_to_str, content);
     fs::write(&uucp, paste_content).ok();
     fs::write(&cid_file, &id).ok();
     
-    let ngrams = extract_ngrams(content, 3, 10);
+    let ngrams = tagging::extract_ngrams(content, 3, 10);
     
     let index_entry = PasteIndex {
         id: id.clone(),
-        title: if title == "untitled" { auto_describe(content) } else { title.to_string() },
-        description: Some(auto_describe(content)),
+        title: if title == "untitled" { tagging::auto_describe(content) } else { title.to_string() },
+        description: Some(tagging::auto_describe(content)),
         keywords,
         cid: local_cid.clone(),
         witness: witness.clone(),
@@ -342,6 +209,106 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         uucp_path: uucp,
         reply_to: paste.reply_to,
     }))
+}
+
+/// POST /upload - Upload file (multipart)
+pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
+    use actix_web::web::BytesMut;
+    use futures_util::StreamExt as _;
+
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let mut file_data: Vec<u8> = Vec::new();
+    let mut orig_name = String::new();
+    let mut title = String::new();
+
+    while let Some(item) = payload.next().await {
+        let mut field = item.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+        let field_name = field.name().unwrap_or("").to_string();
+        let mut buf: Vec<u8> = Vec::new();
+        while let Some(chunk) = field.next().await {
+            let data = chunk.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+            buf.extend_from_slice(&data);
+        }
+        match field_name.as_str() {
+            "file" => {
+                orig_name = field.content_disposition()
+                    .and_then(|cd| cd.get_filename().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "upload".to_string());
+                file_data = buf;
+            }
+            "title" => { title = String::from_utf8_lossy(&buf).to_string(); }
+            _ => {}
+        }
+    }
+
+    if file_data.is_empty() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "no file"})));
+    }
+
+    let ext = orig_name.rsplit('.').next().unwrap_or("bin");
+    let mime = mime_guess::from_ext(ext).first_or_octet_stream();
+    if title.is_empty() { title = orig_name.clone(); }
+    let slug = tagging::slugify(&title);
+
+    let mut hasher = Sha256::new();
+    hasher.update(&file_data);
+    let hash = hasher.finalize();
+    let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
+    let witness = hex::encode(&hash);
+    let ipfs_cid = ipfs::ipfs_add_bytes(&file_data);
+
+    let filename = format!("{}_{}.{}", ts, slug, ext);
+    let id = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(&filename).to_string();
+    let uucp = format!("{}/{}", uucp_dir, filename);
+
+    fs::write(&uucp, &file_data).ok();
+
+    // Write metadata sidecar
+    let meta = format!("--- {} ---\nTitle: {}\nMime: {}\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\n",
+        id, title, mime, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), file_data.len());
+    fs::write(format!("{}.meta", uucp), &meta).ok();
+
+    // CID dedup file
+    let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
+    fs::write(&cid_file, &id).ok();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "id": id,
+        "filename": filename,
+        "cid": local_cid,
+        "ipfs_cid": ipfs_cid,
+        "witness": witness,
+        "mime": mime.to_string(),
+        "size": file_data.len(),
+        "url": format!("/paste/{}", id),
+    })))
+}
+
+/// GET /file/{id} - Serve raw file
+pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
+    let id = path.into_inner();
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+
+    // Find file with any extension matching the id
+    let file = fs::read_dir(&uucp_dir).ok()
+        .and_then(|entries| entries
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+                stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
+            }));
+
+    match file {
+        Some(entry) => {
+            let data = fs::read(entry.path()).map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
+            let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("bin").to_string();
+            let mime = mime_guess::from_ext(&ext).first_or_octet_stream();
+            Ok(HttpResponse::Ok().content_type(mime.to_string()).body(data))
+        }
+        None => Ok(HttpResponse::NotFound().body("File not found")),
+    }
 }
 
 /// GET /paste/{id} - View paste
@@ -385,6 +352,19 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
     } else {
         None
     };
+    
+    // Check for uploaded file with .meta sidecar
+    let is_file = content.is_none();
+    let meta_content = if is_file {
+        fs::read_dir(&uucp_dir).ok().and_then(|entries| entries
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                let stem = name.rsplit_once('.').and_then(|(s, ext)| if ext == "meta" { s.rsplit_once('.').map(|(s2, _)| s2) } else { None });
+                stem == Some(id.as_str())
+            })
+            .and_then(|e| fs::read_to_string(e.path()).ok()))
+    } else { None };
     
     match content {
         Some(content) => {
@@ -558,6 +538,39 @@ function showPreview() {{
             
             Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
         }
+        None if meta_content.is_some() => {
+            // File upload - parse meta and show image/file view
+            let meta = meta_content.unwrap();
+            let mut headers = std::collections::HashMap::new();
+            for line in meta.lines() {
+                if let Some((key, value)) = line.split_once(':') {
+                    headers.insert(key.trim().to_string(), value.trim().to_string());
+                }
+            }
+            let title = headers.get("Title").cloned().unwrap_or_else(|| id.clone());
+            let mime = headers.get("Mime").cloned().unwrap_or_else(|| "application/octet-stream".to_string());
+            let ipfs_cid = headers.get("IPFS").cloned().unwrap_or_default();
+            let cid = headers.get("CID").cloned().unwrap_or_default();
+            let size = headers.get("Size").cloned().unwrap_or_default();
+
+            let content_html = if mime.starts_with("image/") {
+                format!(r#"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#, base_path, id, title)
+            } else {
+                format!(r#"<p>📎 <a href="{}/file/{}">{}</a> ({}, {} bytes)</p>"#, base_path, id, title, mime, size)
+            };
+
+            let html = format!(r#"<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>{}</title>
+<style>body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}a{{color:#0ff}}</style>
+</head><body>
+<div><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/file/{}">📄 Raw</a></div>
+<h1>{}</h1>
+<p>CID: {} | IPFS: {}</p>
+{}
+</body></html>"#, title, base_path, base_path, base_path, id, title, cid, ipfs_cid, content_html);
+
+            Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+        }
         None => Ok(HttpResponse::NotFound().body("Paste not found")),
     }
 }
@@ -599,12 +612,12 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
                 .collect::<Vec<_>>()
                 .join("\n");
             
-            let auto_tags = auto_tag(&body);
-            let description = auto_describe(&body);
+            let auto_tags = tagging::auto_tag(&body);
+            let description = tagging::auto_describe(&body);
             
             // Extract HTML title if present
             let new_title = if body.to_lowercase().contains("<html") || body.to_lowercase().contains("<!doctype") {
-                extract_html_title(&body).unwrap_or_else(|| entry.title.clone())
+                tagging::extract_html_title(&body).unwrap_or_else(|| entry.title.clone())
             } else if entry.title == "untitled" || entry.title.is_empty() {
                 description.clone()
             } else {
@@ -613,7 +626,7 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
             
             // Add IPFS CID if missing
             let ipfs_cid = if entry.ipfs_cid.is_none() || entry.ipfs_cid.as_deref() == Some("") {
-                ipfs_add(&body)
+                ipfs::ipfs_add(&body)
             } else {
                 entry.ipfs_cid.clone()
             };
@@ -643,6 +656,63 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "upgraded": upgraded,
         "total": new_entries.len()
+    })))
+}
+
+/// GET /thread/{id} - Get paste and all replies
+pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
+    let parent_id = path.into_inner();
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    
+    let mut thread = Vec::new();
+    
+    if let Ok(entries) = fs::read_dir(&uucp_dir) {
+        for entry in entries.flatten() {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if !fname.ends_with(".txt") { continue; }
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                let lines: Vec<&str> = content.lines().collect();
+                if lines.is_empty() { continue; }
+                
+                // Parse header
+                let file_id = fname.trim_end_matches(".txt");
+                let mut title = String::new();
+                let mut reply_to = String::new();
+                let mut body_start = 0;
+                
+                for (i, line) in lines.iter().enumerate() {
+                    if line.is_empty() && i > 0 { body_start = i + 1; break; }
+                    if let Some(t) = line.strip_prefix("Title: ") { title = t.to_string(); }
+                    if let Some(r) = line.strip_prefix("Reply-To: ") { reply_to = r.to_string(); }
+                }
+                
+                // Include if this IS the parent or replies TO the parent
+                if file_id == parent_id || reply_to == parent_id {
+                    let body = if body_start < lines.len() { lines[body_start..].join("\n") } else { String::new() };
+                    thread.push(serde_json::json!({
+                        "id": file_id,
+                        "title": title,
+                        "reply_to": reply_to,
+                        "content": body,
+                    }));
+                }
+            }
+        }
+    }
+    
+    // Sort: parent first, then replies by id (chronological)
+    thread.sort_by(|a, b| {
+        let a_id = a["id"].as_str().unwrap_or("");
+        let b_id = b["id"].as_str().unwrap_or("");
+        if a_id == parent_id { std::cmp::Ordering::Less }
+        else if b_id == parent_id { std::cmp::Ordering::Greater }
+        else { a_id.cmp(b_id) }
+    });
+    
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "thread_id": parent_id,
+        "count": thread.len(),
+        "posts": thread,
     })))
 }
 
@@ -711,4 +781,174 @@ a{{color:#0ff;text-decoration:none}}</style>
 </body></html>"#, base_path, search_box, items);
     
     Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// GET /ipfs/{cid} - Proxy IPFS content
+pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
+    let cid = path.into_inner();
+
+    // Try ipfs cat CLI (handles both CIDv0 Qm... and CIDv1)
+    if let Ok(output) = std::process::Command::new("ipfs")
+        .args(["cat", &cid])
+        .output()
+    {
+        if output.status.success() && !output.stdout.is_empty() {
+            let data = output.stdout;
+            let ct = match &data[..4.min(data.len())] {
+                [0x89, 0x50, 0x4E, 0x47] => "image/png",
+                [0xFF, 0xD8, ..] => "image/jpeg",
+                [0x3C, ..] => "text/html; charset=utf-8",
+                [0x7B, ..] => "application/json",
+                _ if data.starts_with(b"<!") || data.starts_with(b"<html") => "text/html; charset=utf-8",
+                _ => "application/octet-stream",
+            };
+            return Ok(HttpResponse::Ok().content_type(ct).body(data));
+        }
+    }
+
+    // Fallback: try local flatfs
+    if let Some(block) = ipfs::ipfs_cat(&cid) {
+        return Ok(HttpResponse::Ok().content_type("application/octet-stream").body(block));
+    }
+
+    Ok(HttpResponse::NotFound().body(format!("IPFS CID not found: {}", cid)))
+}
+
+/// GET /gallery - NFT gallery from enriched directory
+pub async fn gallery() -> Result<HttpResponse> {
+    let base_path = env::var("BASE_PATH").unwrap_or_default();
+    let nft_dir = env::var("NFT_DIR").unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
+
+    let mut items = Vec::new();
+    if let Ok(entries) = fs::read_dir(&nft_dir) {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
+            let qid = entry.file_name().to_string_lossy().to_string();
+            let meta_path = entry.path().join("metadata.rdfa");
+            let mut meta = std::collections::HashMap::new();
+            if let Ok(content) = fs::read_to_string(&meta_path) {
+                for line in content.lines() {
+                    if let Some((k, v)) = line.split_once('=') {
+                        meta.insert(k.to_string(), v.to_string());
+                    }
+                }
+            }
+            let name = meta.get("name").cloned().unwrap_or_else(|| qid.clone());
+            let desc = meta.get("description").cloned().unwrap_or_default();
+            let html_cid = meta.get("ipfs_html_cid").cloned().unwrap_or_default();
+            let nft_cid = meta.get("ipfs_nft_cid").cloned().unwrap_or_default();
+            let dir_cid = meta.get("ipfs_dir_cid").cloned().unwrap_or_default();
+            let witness = meta.get("witness").cloned().unwrap_or_default();
+            let has_image = entry.path().join("source.jpg").exists();
+
+            let img_html = if has_image && !nft_cid.is_empty() {
+                format!(r#"<img src="{}/ipfs/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#, base_path, nft_cid, name)
+            } else if has_image {
+                format!(r#"<img src="{}/gallery/img/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#, base_path, qid, name)
+            } else {
+                r#"<div style="width:200px;height:150px;background:#222;display:flex;align-items:center;justify-content:center;border-radius:4px">🖼️ No image</div>"#.to_string()
+            };
+
+            items.push(format!(
+                r#"<div style="background:#1a1a1a;padding:15px;border-radius:8px;display:flex;gap:15px;align-items:start">
+{img_html}
+<div>
+<h3 style="color:#0ff;margin:0"><a href="{bp}/ipfs/{hcid}">{name}</a></h3>
+<p style="color:#999;margin:5px 0">{desc}</p>
+<p style="font-size:12px;color:#666">
+<a href="https://www.wikidata.org/wiki/{qid}">{qid}</a>
+{nft_link}
+{dir_link}
+</p>
+<code style="font-size:10px;color:#555">{witness}</code>
+</div></div>"#,
+                bp = base_path,
+                hcid = html_cid,
+                name = name,
+                desc = desc,
+                qid = qid,
+                nft_link = if nft_cid.is_empty() { String::new() } else { format!(r#"| <a href="{}/ipfs/{}">NFT</a>"#, base_path, nft_cid) },
+                dir_link = if dir_cid.is_empty() { String::new() } else { format!(r#"| <a href="{}/ipfs/{}">IPFS Dir</a>"#, base_path, dir_cid) },
+                witness = &witness[..witness.len().min(16)],
+            ));
+        }
+    }
+
+    let html = format!(r#"<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>NFT Gallery</title>
+<style>
+body{{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#111;color:#eee}}
+a{{color:#0ff;text-decoration:none}}
+.nav{{background:#1a1a1a;padding:10px;margin-bottom:20px;border-radius:8px}}
+.nav a{{margin-right:15px}}
+h1{{color:#0ff}}
+</style></head><body>
+<div class="nav">
+<a href="{bp}/">🏠 Home</a>
+<a href="{bp}/browse">📚 Browse</a>
+<a href="{bp}/gallery">🖼️ Gallery</a>
+</div>
+<h1>🖼️ NFT Gallery</h1>
+<p style="color:#999">{count} enriched entities</p>
+<div style="display:flex;flex-direction:column;gap:10px">{items}</div>
+</body></html>"#,
+        bp = base_path,
+        count = items.len(),
+        items = items.join("\n"),
+    );
+
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// GET /gallery/img/{qid} - Serve source image from enriched dir
+pub async fn gallery_image(path: web::Path<String>) -> Result<HttpResponse> {
+    let qid = path.into_inner();
+    let nft_dir = env::var("NFT_DIR").unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
+    let img_path = format!("{}/{}/source.jpg", nft_dir, qid);
+    match fs::read(&img_path) {
+        Ok(data) => {
+            let ct = if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) { "image/png" } else { "image/jpeg" };
+            Ok(HttpResponse::Ok().content_type(ct).body(data))
+        }
+        Err(_) => Ok(HttpResponse::NotFound().body("Image not found")),
+    }
+}
+
+/// GET /plugins - List available plugins
+pub async fn list_plugins(registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>) -> Result<HttpResponse> {
+    let reg = registry.lock().unwrap();
+    let plugins: Vec<_> = reg.list().iter().map(|(n, v, d)| {
+        serde_json::json!({"name": n, "version": v, "description": d})
+    }).collect();
+    Ok(HttpResponse::Ok().json(serde_json::json!({"plugins": plugins})))
+}
+
+/// POST /plugin/{name}/{id} - Run plugin on a paste
+pub async fn run_plugin(
+    path: web::Path<(String, String)>,
+    registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>,
+    body: web::Json<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
+    let (plugin_name, paste_id) = path.into_inner();
+    let base_path = env::var("BASE_PATH").unwrap_or_default();
+    let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+
+    // Load paste content
+    let content = storage::load_content(&paste_id).unwrap_or_default();
+    let url = format!("{}{}/paste/{}", base_url, base_path, paste_id);
+
+    let input = plugin::PluginInput {
+        id: paste_id.clone(),
+        content: content.into_bytes(),
+        mime: "text/plain".into(),
+        url,
+        extra: body.into_inner(),
+    };
+
+    let reg = registry.lock().unwrap();
+    match reg.execute(&plugin_name, &input) {
+        Ok(result) => Ok(HttpResponse::Ok().json(result)),
+        Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e}))),
+    }
 }

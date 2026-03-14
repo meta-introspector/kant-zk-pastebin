@@ -1,0 +1,3 @@
+[submodule "vendor/rust-ipfs"]
+	path = vendor/rust-ipfs
+	url = https://github.com/dariusc93/rust-ipfs.git
