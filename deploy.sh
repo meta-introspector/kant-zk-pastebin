@@ -25,7 +25,10 @@ RestartSec=10
 Environment="BIND_ADDR=127.0.0.1:8090"
 Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
 Environment="BASE_PATH=/pastebin"
+Environment="BASE_URL=https://solana.solfunmeme.com"
+Environment="NFT_DIR=/mnt/data1/time-2026/03-march/13/nft_enriched"
 Environment="RUST_LOG=info"
+Environment="PATH=$(dirname $(which ipfs 2>/dev/null || echo /usr/bin/ipfs)):/usr/local/bin:/usr/bin:/bin"
 
 [Install]
 WantedBy=default.target
