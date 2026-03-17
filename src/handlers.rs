@@ -1,17 +1,73 @@
 // Handlers - Request handlers for kant-pastebin microservice
+use crate::model::{Paste, PasteIndex, Response};
+use crate::{ipfs, plugin, storage, tagging, view};
 use actix_web::{web, HttpResponse, Result};
-use crate::model::{Paste, Response, PasteIndex};
-use crate::{view, storage, ipfs, tagging, plugin};
 use chrono::Utc;
-use sha2::{Sha256, Digest};
-use std::{fs, env};
+use sha2::{Digest, Sha256};
+use std::{env, fs};
+
+struct AccessCommands {
+    ipfs: String,
+    raw: String,
+    reply: String,
+}
+
+fn normalized_base_url(req: &actix_web::HttpRequest, base_path: &str) -> String {
+    let normalized_base_path = if base_path.is_empty() {
+        String::new()
+    } else if base_path.starts_with('/') {
+        base_path.to_string()
+    } else {
+        format!("/{}", base_path)
+    };
+
+    match env::var("BASE_URL") {
+        Ok(base_url) if !base_url.trim().is_empty() => {
+            let base_url = base_url.trim_end_matches('/');
+            if normalized_base_path.is_empty() || base_url.ends_with(&normalized_base_path) {
+                base_url.to_string()
+            } else {
+                format!("{}{}", base_url, normalized_base_path)
+            }
+        }
+        _ => {
+            let connection = req.connection_info();
+            format!(
+                "{}://{}{}",
+                connection.scheme(),
+                connection.host(),
+                normalized_base_path
+            )
+        }
+    }
+}
+
+fn access_commands(base_url: &str, id: &str, ipfs_cid: Option<&str>) -> AccessCommands {
+    let ipfs = if let Some(cid) = ipfs_cid {
+        format!("curl {}/ipfs/{}", base_url, cid)
+    } else {
+        "# No IPFS CID available".to_string()
+    };
+
+    AccessCommands {
+        ipfs,
+        raw: format!("curl {}/raw/{}", base_url, id),
+        reply: format!(
+            "curl -X POST {}/paste -H 'Content-Type: application/json' -d '{{\"content\":\"...\",\"reply_to\":\"{}\"}}'",
+            base_url, id
+        ),
+    }
+}
 
 /// GET / - Home page
-pub async fn index(query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
+pub async fn index(
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
     let reply_to = query.get("reply_to").map(|s| s.as_str()).unwrap_or("");
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
-    
-    let html = format!(r#"<!DOCTYPE html>
+
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Kant Pastebin</title>
 <style>
 body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
@@ -99,9 +155,21 @@ form.onsubmit = async (e) => {{
   }}
 }};
 </script>
-</body></html>"#, base_path, base_path, base_path, base_path, reply_to, base_path, base_path, base_path, base_path);
-    
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+</body></html>"#,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        reply_to,
+        base_path,
+        base_path,
+        base_path,
+        base_path
+    );
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// POST /paste - Create paste
@@ -119,31 +187,40 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
 
     // Detect Wikidata QID — trigger enrichment pipeline
     let trimmed = content.trim();
-    if trimmed.starts_with('Q') && trimmed[1..].chars().all(|c| c.is_ascii_digit()) && trimmed.len() >= 2 {
+    if trimmed.starts_with('Q')
+        && trimmed[1..].chars().all(|c| c.is_ascii_digit())
+        && trimmed.len() >= 2
+    {
         return enrich_qid(trimmed).await;
     }
 
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    
+
     // Auto-generate title and tags
     let auto_tags = tagging::auto_tag(content);
     let html_title = tagging::extract_html_title(content);
     let auto_desc = tagging::auto_describe(content);
     let title_owned = paste.title.clone().unwrap_or_else(|| {
-        html_title.unwrap_or_else(|| if !auto_tags.is_empty() { auto_desc } else { "untitled".to_string() })
+        html_title.unwrap_or_else(|| {
+            if !auto_tags.is_empty() {
+                auto_desc
+            } else {
+                "untitled".to_string()
+            }
+        })
     });
     let title = title_owned.as_str();
     let keywords = paste.keywords.clone().unwrap_or_else(|| auto_tags);
-    
+
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let hash = hasher.finalize();
     let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
     let witness = hex::encode(&hash);
-    
+
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
-    
+
     if std::path::Path::new(&cid_file).exists() {
         let existing_id = fs::read_to_string(&cid_file).unwrap_or_else(|_| format!("paste_{}", ts));
         return Ok(HttpResponse::Ok().json(Response {
@@ -157,33 +234,41 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
             reply_to: paste.reply_to.clone(),
         }));
     }
-    
+
     let slug_title = tagging::slugify(title);
-    let slug_keywords = keywords.iter().map(|k| tagging::slugify(k)).collect::<Vec<_>>().join("_");
+    let slug_keywords = keywords
+        .iter()
+        .map(|k| tagging::slugify(k))
+        .collect::<Vec<_>>()
+        .join("_");
     let filename = if slug_keywords.is_empty() {
         format!("{}_{}.txt", ts, slug_title)
     } else {
         format!("{}_{}_{}.txt", ts, slug_title, slug_keywords)
     };
-    
+
     let id = filename.trim_end_matches(".txt").to_string();
     let uucp = format!("{}/{}", uucp_dir, filename);
-    
+
     // Push to IPFS
     let ipfs_cid = ipfs::ipfs_add(content);
     let dasl_cid = crate::dasl::dasl_cid(content.as_bytes());
-    
+
     let reply_to_str = paste.reply_to.as_deref().unwrap_or("");
     let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: {}\n\n{}\n",
         id, title, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), dasl_cid, reply_to_str, content);
     fs::write(&uucp, paste_content).ok();
     fs::write(&cid_file, &id).ok();
-    
+
     let ngrams = tagging::extract_ngrams(content, 3, 10);
-    
+
     let index_entry = PasteIndex {
         id: id.clone(),
-        title: if title == "untitled" { tagging::auto_describe(content) } else { title.to_string() },
+        title: if title == "untitled" {
+            tagging::auto_describe(content)
+        } else {
+            title.to_string()
+        },
         description: Some(tagging::auto_describe(content)),
         keywords,
         cid: local_cid.clone(),
@@ -196,7 +281,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         size: content.len(),
         uucp_path: uucp.clone(),
     };
-    
+
     let index_file = format!("{}/index.jsonl", uucp_dir);
     let index_line = format!("{}\n", serde_json::to_string(&index_entry).unwrap());
     fs::OpenOptions::new()
@@ -205,7 +290,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         .open(&index_file)
         .and_then(|mut f| std::io::Write::write_all(&mut f, index_line.as_bytes()))
         .ok();
-    
+
     Ok(HttpResponse::Ok().json(Response {
         id: id.clone(),
         cid: local_cid,
@@ -220,7 +305,6 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
 
 /// POST /upload - Upload file (multipart)
 pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
-    use actix_web::web::BytesMut;
     use futures_util::StreamExt as _;
 
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
@@ -239,12 +323,15 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
         }
         match field_name.as_str() {
             "file" => {
-                orig_name = field.content_disposition()
+                orig_name = field
+                    .content_disposition()
                     .and_then(|cd| cd.get_filename().map(|s| s.to_string()))
                     .unwrap_or_else(|| "upload".to_string());
                 file_data = buf;
             }
-            "title" => { title = String::from_utf8_lossy(&buf).to_string(); }
+            "title" => {
+                title = String::from_utf8_lossy(&buf).to_string();
+            }
             _ => {}
         }
     }
@@ -255,7 +342,9 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
 
     let ext = orig_name.rsplit('.').next().unwrap_or("bin");
     let mime = mime_guess::from_ext(ext).first_or_octet_stream();
-    if title.is_empty() { title = orig_name.clone(); }
+    if title.is_empty() {
+        title = orig_name.clone();
+    }
     let slug = tagging::slugify(&title);
 
     let mut hasher = Sha256::new();
@@ -266,14 +355,26 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     let ipfs_cid = ipfs::ipfs_add_bytes(&file_data);
 
     let filename = format!("{}_{}.{}", ts, slug, ext);
-    let id = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(&filename).to_string();
+    let id = filename
+        .rsplit_once('.')
+        .map(|(s, _)| s)
+        .unwrap_or(&filename)
+        .to_string();
     let uucp = format!("{}/{}", uucp_dir, filename);
 
     fs::write(&uucp, &file_data).ok();
 
     // Write metadata sidecar
-    let meta = format!("--- {} ---\nTitle: {}\nMime: {}\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\n",
-        id, title, mime, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), file_data.len());
+    let meta = format!(
+        "--- {} ---\nTitle: {}\nMime: {}\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\n",
+        id,
+        title,
+        mime,
+        local_cid,
+        witness,
+        ipfs_cid.as_deref().unwrap_or(""),
+        file_data.len()
+    );
     fs::write(format!("{}.meta", uucp), &meta).ok();
 
     // CID dedup file
@@ -298,19 +399,24 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
 
     // Find file with any extension matching the id
-    let file = fs::read_dir(&uucp_dir).ok()
-        .and_then(|entries| entries
-            .filter_map(|e| e.ok())
-            .find(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
-                stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
-            }));
+    let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
+        entries.filter_map(|e| e.ok()).find(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+            stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
+        })
+    });
 
     match file {
         Some(entry) => {
-            let data = fs::read(entry.path()).map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
-            let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("bin").to_string();
+            let data = fs::read(entry.path())
+                .map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
+            let ext = entry
+                .path()
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("bin")
+                .to_string();
             let mime = mime_guess::from_ext(&ext).first_or_octet_stream();
             Ok(HttpResponse::Ok().content_type(mime.to_string()).body(data))
         }
@@ -329,12 +435,15 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
         (status = 200, description = "Paste HTML")
     )
 )]
-pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> Result<HttpResponse> {
+pub async fn get_paste(
+    path: web::Path<String>,
+    req: actix_web::HttpRequest,
+) -> Result<HttpResponse> {
     let id = path.into_inner();
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
-    let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
-    
+    let base_url = normalized_base_url(&req, &base_path);
+
     // Load index for prev/next/related
     let index_file = format!("{}/index.jsonl", uucp_dir);
     let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
@@ -342,11 +451,17 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
         .lines()
         .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
         .collect();
-    
+
     let current_idx = entries.iter().position(|e| e.id == id);
-    let prev_id = current_idx.and_then(|i| if i > 0 { entries.get(i - 1).map(|e| &e.id) } else { None });
+    let prev_id = current_idx.and_then(|i| {
+        if i > 0 {
+            entries.get(i - 1).map(|e| &e.id)
+        } else {
+            None
+        }
+    });
     let next_id = current_idx.and_then(|i| entries.get(i + 1).map(|e| &e.id));
-    
+
     let content = if let Ok(dir_entries) = fs::read_dir(&uucp_dir) {
         dir_entries
             .filter_map(std::result::Result::ok)
@@ -359,26 +474,36 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
     } else {
         None
     };
-    
+
     // Check for uploaded file with .meta sidecar
     let is_file = content.is_none();
     let meta_content = if is_file {
-        fs::read_dir(&uucp_dir).ok().and_then(|entries| entries
-            .filter_map(|e| e.ok())
-            .find(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                let stem = name.rsplit_once('.').and_then(|(s, ext)| if ext == "meta" { s.rsplit_once('.').map(|(s2, _)| s2) } else { None });
-                stem == Some(id.as_str())
-            })
-            .and_then(|e| fs::read_to_string(e.path()).ok()))
-    } else { None };
-    
+        fs::read_dir(&uucp_dir).ok().and_then(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .find(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    let stem = name.rsplit_once('.').and_then(|(s, ext)| {
+                        if ext == "meta" {
+                            s.rsplit_once('.').map(|(s2, _)| s2)
+                        } else {
+                            None
+                        }
+                    });
+                    stem == Some(id.as_str())
+                })
+                .and_then(|e| fs::read_to_string(e.path()).ok())
+        })
+    } else {
+        None
+    };
+
     match content {
         Some(content) => {
             // Parse structured header
             let mut headers = std::collections::HashMap::new();
             let mut body_start = 0;
-            
+
             for (i, line) in content.lines().enumerate() {
                 if line.is_empty() && i > 0 {
                     body_start = content.lines().take(i + 1).map(|l| l.len() + 1).sum();
@@ -388,50 +513,61 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
                     headers.insert(key.trim(), value.trim());
                 }
             }
-            
+
             let title = headers.get("Title").map(|s| *s).unwrap_or(&id);
-            let cid = headers.get("CID").map(|s| *s).unwrap_or("");
-            let ipfs_cid = headers.get("IPFS").or(headers.get("ipfs_cid")).map(|s| *s)
+            let ipfs_cid = headers
+                .get("IPFS")
+                .or(headers.get("ipfs_cid"))
+                .map(|s| *s)
                 .or_else(|| {
                     // Fallback to index if not in file header
-                    entries.iter().find(|e| e.id == id).and_then(|e| e.ipfs_cid.as_deref())
+                    entries
+                        .iter()
+                        .find(|e| e.id == id)
+                        .and_then(|e| e.ipfs_cid.as_deref())
                 });
             let body = &content[body_start..];
-            
-            let ipfs_cmd = if let Some(ipfs) = ipfs_cid {
-                format!("ipfs cat {}", ipfs)
-            } else {
-                "# No IPFS CID available".to_string()
-            };
-            
-            let file_cmd = format!("cat {}/{}.txt", uucp_dir, id);
-            let curl_cmd = format!("curl {}/raw/{}", base_url, id);
-            let reply_cmd = format!("curl -X POST {}/paste -H 'Content-Type: application/json' -d '{{\"content\":\"...\",\"reply_to\":\"{}\"}}'", base_url, id);
-            
+            let commands = access_commands(&base_url, &id, ipfs_cid);
+
             // Find related posts by keywords
             let current_entry = entries.iter().find(|e| e.id == id);
             let related: Vec<&PasteIndex> = if let Some(curr) = current_entry {
-                entries.iter()
+                entries
+                    .iter()
                     .filter(|e| e.id != id && e.keywords.iter().any(|k| curr.keywords.contains(k)))
                     .take(5)
                     .collect()
             } else {
                 vec![]
             };
-            
-            let prev_link = prev_id.map(|pid| format!(r#"<a href="{}/paste/{}">← Prev</a>"#, base_path, pid)).unwrap_or_else(|| "".to_string());
-            let next_link = next_id.map(|nid| format!(r#"<a href="{}/paste/{}">Next →</a>"#, base_path, nid)).unwrap_or_else(|| "".to_string());
-            
+
+            let prev_link = prev_id
+                .map(|pid| format!(r#"<a href="{}/paste/{}">← Prev</a>"#, base_path, pid))
+                .unwrap_or_else(|| "".to_string());
+            let next_link = next_id
+                .map(|nid| format!(r#"<a href="{}/paste/{}">Next →</a>"#, base_path, nid))
+                .unwrap_or_else(|| "".to_string());
+
             let related_html = if !related.is_empty() {
-                let items: String = related.iter().map(|e| {
-                    format!(r#"<div style="padding:5px"><a href="{}/paste/{}">{}</a></div>"#, base_path, e.id, e.title)
-                }).collect();
-                format!(r#"<h3>Related Posts:</h3><div style="background:#111;padding:10px;margin:10px 0">{}</div>"#, items)
+                let items: String = related
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            r#"<div style="padding:5px"><a href="{}/paste/{}">{}</a></div>"#,
+                            base_path, e.id, e.title
+                        )
+                    })
+                    .collect();
+                format!(
+                    r#"<h3>Related Posts:</h3><div style="background:#111;padding:10px;margin:10px 0">{}</div>"#,
+                    items
+                )
             } else {
                 "".to_string()
             };
-            
-            let html = format!(r#"<!DOCTYPE html>
+
+            let html = format!(
+                r#"<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
 <title>{}</title>
@@ -528,22 +664,34 @@ function showPreview() {{
 }}
 </script>
 <script src="/static/a11y.js"></script>
-</body></html>"#, 
-                title, 
-                base_path, base_path, base_path, id, prev_link, next_link,
-                title, 
-                base_path, id, title,
-                ipfs_cmd, ipfs_cmd,
-                file_cmd, file_cmd,
-                curl_cmd, curl_cmd,
+</body></html>"#,
+                title,
+                base_path,
+                base_path,
+                base_path,
+                id,
+                prev_link,
+                next_link,
+                title,
+                base_path,
+                id,
+                title,
+                commands.ipfs,
+                commands.ipfs,
+                commands.raw,
+                commands.raw,
+                commands.reply,
+                commands.reply,
                 body,
                 related_html,
                 title,
                 ipfs_cid.unwrap_or(""),
                 title
             );
-            
-            Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+
+            Ok(HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(html))
         }
         None if meta_content.is_some() => {
             // File upload - parse meta and show image/file view
@@ -555,18 +703,28 @@ function showPreview() {{
                 }
             }
             let title = headers.get("Title").cloned().unwrap_or_else(|| id.clone());
-            let mime = headers.get("Mime").cloned().unwrap_or_else(|| "application/octet-stream".to_string());
+            let mime = headers
+                .get("Mime")
+                .cloned()
+                .unwrap_or_else(|| "application/octet-stream".to_string());
             let ipfs_cid = headers.get("IPFS").cloned().unwrap_or_default();
             let cid = headers.get("CID").cloned().unwrap_or_default();
             let size = headers.get("Size").cloned().unwrap_or_default();
 
             let content_html = if mime.starts_with("image/") {
-                format!(r#"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#, base_path, id, title)
+                format!(
+                    r#"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#,
+                    base_path, id, title
+                )
             } else {
-                format!(r#"<p>📎 <a href="{}/file/{}">{}</a> ({}, {} bytes)</p>"#, base_path, id, title, mime, size)
+                format!(
+                    r#"<p>📎 <a href="{}/file/{}">{}</a> ({}, {} bytes)</p>"#,
+                    base_path, id, title, mime, size
+                )
             };
 
-            let html = format!(r#"<!DOCTYPE html>
+            let html = format!(
+                r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>{}</title>
 <style>body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}a{{color:#0ff}}</style>
 </head><body>
@@ -574,9 +732,13 @@ function showPreview() {{
 <h1>{}</h1>
 <p>CID: {} | IPFS: {}</p>
 {}
-</body></html>"#, title, base_path, base_path, base_path, id, title, cid, ipfs_cid, content_html);
+</body></html>"#,
+                title, base_path, base_path, base_path, id, title, cid, ipfs_cid, content_html
+            );
 
-            Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+            Ok(HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(html))
         }
         None => Ok(HttpResponse::NotFound().body("Paste not found")),
     }
@@ -586,7 +748,9 @@ function showPreview() {{
 pub async fn preview_paste(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
     let content = storage::load_content(&id).unwrap_or_else(|| "Paste not found".to_string());
-    Ok(HttpResponse::Ok().content_type("text/html").body(view::render_preview(&id, &content)))
+    Ok(HttpResponse::Ok()
+        .content_type("text/html")
+        .body(view::render_preview(&id, &content)))
 }
 
 /// GET /raw/{id} - Raw text
@@ -598,46 +762,50 @@ pub async fn get_raw(path: web::Path<String>) -> Result<HttpResponse> {
 
 /// POST /upgrade - Upgrade all pastes with auto-tags
 pub async fn upgrade_pastes() -> Result<HttpResponse> {
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let index_file = format!("{}/index.jsonl", uucp_dir);
-    
+
     let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
         .unwrap_or_default()
         .lines()
         .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
         .collect();
-    
+
     let mut upgraded = 0;
     let mut new_entries = Vec::new();
-    
+
     for entry in entries {
         let file_path = format!("{}/{}", uucp_dir, entry.filename);
         if let Ok(content) = fs::read_to_string(&file_path) {
-            let body = content.lines()
+            let body = content
+                .lines()
                 .skip_while(|line| !line.is_empty())
                 .skip(1)
                 .collect::<Vec<_>>()
                 .join("\n");
-            
+
             let auto_tags = tagging::auto_tag(&body);
             let description = tagging::auto_describe(&body);
-            
+
             // Extract HTML title if present
-            let new_title = if body.to_lowercase().contains("<html") || body.to_lowercase().contains("<!doctype") {
+            let new_title = if body.to_lowercase().contains("<html")
+                || body.to_lowercase().contains("<!doctype")
+            {
                 tagging::extract_html_title(&body).unwrap_or_else(|| entry.title.clone())
             } else if entry.title == "untitled" || entry.title.is_empty() {
                 description.clone()
             } else {
                 entry.title.clone()
             };
-            
+
             // Add IPFS CID if missing
             let ipfs_cid = if entry.ipfs_cid.is_none() || entry.ipfs_cid.as_deref() == Some("") {
                 ipfs::ipfs_add(&body)
             } else {
                 entry.ipfs_cid.clone()
             };
-            
+
             let mut new_entry = entry.clone();
             new_entry.title = new_title;
             new_entry.ipfs_cid = ipfs_cid;
@@ -645,21 +813,23 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
             new_entry.keywords.sort();
             new_entry.keywords.dedup();
             new_entry.description = Some(description);
-            
+
             new_entries.push(new_entry);
             upgraded += 1;
         } else {
             new_entries.push(entry);
         }
     }
-    
-    let new_index: String = new_entries.iter()
+
+    let new_index: String = new_entries
+        .iter()
         .map(|e| serde_json::to_string(e).unwrap())
         .collect::<Vec<_>>()
-        .join("\n") + "\n";
-    
+        .join("\n")
+        + "\n";
+
     fs::write(&index_file, new_index).ok();
-    
+
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "upgraded": upgraded,
         "total": new_entries.len()
@@ -669,33 +839,49 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
 /// GET /thread/{id} - Get paste and all replies
 pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
     let parent_id = path.into_inner();
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
-    
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+
     let mut thread = Vec::new();
-    
+
     if let Ok(entries) = fs::read_dir(&uucp_dir) {
         for entry in entries.flatten() {
             let fname = entry.file_name().to_string_lossy().to_string();
-            if !fname.ends_with(".txt") { continue; }
+            if !fname.ends_with(".txt") {
+                continue;
+            }
             if let Ok(content) = fs::read_to_string(entry.path()) {
                 let lines: Vec<&str> = content.lines().collect();
-                if lines.is_empty() { continue; }
-                
+                if lines.is_empty() {
+                    continue;
+                }
+
                 // Parse header
                 let file_id = fname.trim_end_matches(".txt");
                 let mut title = String::new();
                 let mut reply_to = String::new();
                 let mut body_start = 0;
-                
+
                 for (i, line) in lines.iter().enumerate() {
-                    if line.is_empty() && i > 0 { body_start = i + 1; break; }
-                    if let Some(t) = line.strip_prefix("Title: ") { title = t.to_string(); }
-                    if let Some(r) = line.strip_prefix("Reply-To: ") { reply_to = r.to_string(); }
+                    if line.is_empty() && i > 0 {
+                        body_start = i + 1;
+                        break;
+                    }
+                    if let Some(t) = line.strip_prefix("Title: ") {
+                        title = t.to_string();
+                    }
+                    if let Some(r) = line.strip_prefix("Reply-To: ") {
+                        reply_to = r.to_string();
+                    }
                 }
-                
+
                 // Include if this IS the parent or replies TO the parent
                 if file_id == parent_id || reply_to == parent_id {
-                    let body = if body_start < lines.len() { lines[body_start..].join("\n") } else { String::new() };
+                    let body = if body_start < lines.len() {
+                        lines[body_start..].join("\n")
+                    } else {
+                        String::new()
+                    };
                     thread.push(serde_json::json!({
                         "id": file_id,
                         "title": title,
@@ -706,16 +892,20 @@ pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
             }
         }
     }
-    
+
     // Sort: parent first, then replies by id (chronological)
     thread.sort_by(|a, b| {
         let a_id = a["id"].as_str().unwrap_or("");
         let b_id = b["id"].as_str().unwrap_or("");
-        if a_id == parent_id { std::cmp::Ordering::Less }
-        else if b_id == parent_id { std::cmp::Ordering::Greater }
-        else { a_id.cmp(b_id) }
+        if a_id == parent_id {
+            std::cmp::Ordering::Less
+        } else if b_id == parent_id {
+            std::cmp::Ordering::Greater
+        } else {
+            a_id.cmp(b_id)
+        }
     });
-    
+
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "thread_id": parent_id,
         "count": thread.len(),
@@ -734,33 +924,39 @@ pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
         (status = 200, description = "Browse HTML")
     )
 )]
-pub async fn browse(query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+pub async fn browse(
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
     let index_file = format!("{}/index.jsonl", uucp_dir);
-    
+
     let search = query.get("q").map(|s| s.to_lowercase());
-    
+
     let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
         .unwrap_or_default()
         .lines()
         .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
         .filter(|entry| {
             if let Some(ref q) = search {
-                entry.title.to_lowercase().contains(q) || 
-                entry.keywords.iter().any(|k| k.to_lowercase().contains(q))
+                entry.title.to_lowercase().contains(q)
+                    || entry.keywords.iter().any(|k| k.to_lowercase().contains(q))
             } else {
                 true
             }
         })
         .collect();
-    
+
     let search_box = if let Some(q) = search {
-        format!(r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#, q)
+        format!(
+            r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#,
+            q
+        )
     } else {
         r#"<form method="get"><input type="text" name="q" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#.to_string()
     };
-    
+
     let items: String = entries.iter().rev().take(50).map(|e| {
         let display_title = if e.title == "untitled" || e.title.is_empty() {
             e.description.as_deref().unwrap_or("untitled")
@@ -775,8 +971,9 @@ pub async fn browse(query: web::Query<std::collections::HashMap<String, String>>
         format!(r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a>{} <span style="color:#666">{}</span></div>"#, 
             base_path, e.id, display_title, tags, e.timestamp)
     }).collect();
-    
-    let html = format!(r#"<!DOCTYPE html>
+
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Browse Pastes</title>
 <style>body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
 a{{color:#0ff;text-decoration:none}}</style>
@@ -785,9 +982,13 @@ a{{color:#0ff;text-decoration:none}}</style>
 <h1>Browse Pastes</h1>
 {}
 <div style="margin-top:20px">{}</div>
-</body></html>"#, base_path, search_box, items);
-    
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+</body></html>"#,
+        base_path, search_box, items
+    );
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// GET /ipfs/{cid} - Proxy IPFS content
@@ -806,7 +1007,9 @@ pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
                 [0xFF, 0xD8, ..] => "image/jpeg",
                 [0x3C, ..] => "text/html; charset=utf-8",
                 [0x7B, ..] => "application/json",
-                _ if data.starts_with(b"<!") || data.starts_with(b"<html") => "text/html; charset=utf-8",
+                _ if data.starts_with(b"<!") || data.starts_with(b"<html") => {
+                    "text/html; charset=utf-8"
+                }
                 _ => "application/octet-stream",
             };
             return Ok(HttpResponse::Ok().content_type(ct).body(data));
@@ -815,7 +1018,9 @@ pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
 
     // Fallback: try local flatfs
     if let Some(block) = ipfs::ipfs_cat(&cid) {
-        return Ok(HttpResponse::Ok().content_type("application/octet-stream").body(block));
+        return Ok(HttpResponse::Ok()
+            .content_type("application/octet-stream")
+            .body(block));
     }
 
     Ok(HttpResponse::NotFound().body(format!("IPFS CID not found: {}", cid)))
@@ -824,12 +1029,15 @@ pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
 /// GET /gallery - NFT gallery from enriched directory
 pub async fn gallery() -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_default();
-    let nft_dir = env::var("NFT_DIR").unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
+    let nft_dir = env::var("NFT_DIR")
+        .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
 
     let mut items = Vec::new();
     if let Ok(entries) = fs::read_dir(&nft_dir) {
         for entry in entries.flatten() {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
             let qid = entry.file_name().to_string_lossy().to_string();
             let meta_path = entry.path().join("metadata.rdfa");
             let mut meta = std::collections::HashMap::new();
@@ -849,9 +1057,15 @@ pub async fn gallery() -> Result<HttpResponse> {
             let has_image = entry.path().join("source.jpg").exists();
 
             let img_html = if has_image && !nft_cid.is_empty() {
-                format!(r#"<img src="{}/ipfs/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#, base_path, nft_cid, name)
+                format!(
+                    r#"<img src="{}/ipfs/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
+                    base_path, nft_cid, name
+                )
             } else if has_image {
-                format!(r#"<img src="{}/gallery/img/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#, base_path, qid, name)
+                format!(
+                    r#"<img src="{}/gallery/img/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
+                    base_path, qid, name
+                )
             } else {
                 r#"<div style="width:200px;height:150px;background:#222;display:flex;align-items:center;justify-content:center;border-radius:4px">🖼️ No image</div>"#.to_string()
             };
@@ -881,7 +1095,8 @@ pub async fn gallery() -> Result<HttpResponse> {
         }
     }
 
-    let html = format!(r#"<!DOCTYPE html>
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>NFT Gallery</title>
 <style>
 body{{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#111;color:#eee}}
@@ -904,17 +1119,24 @@ h1{{color:#0ff}}
         items = items.join("\n"),
     );
 
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// GET /gallery/img/{qid} - Serve source image from enriched dir
 pub async fn gallery_image(path: web::Path<String>) -> Result<HttpResponse> {
     let qid = path.into_inner();
-    let nft_dir = env::var("NFT_DIR").unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
+    let nft_dir = env::var("NFT_DIR")
+        .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
     let img_path = format!("{}/{}/source.jpg", nft_dir, qid);
     match fs::read(&img_path) {
         Ok(data) => {
-            let ct = if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) { "image/png" } else { "image/jpeg" };
+            let ct = if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                "image/png"
+            } else {
+                "image/jpeg"
+            };
             Ok(HttpResponse::Ok().content_type(ct).body(data))
         }
         Err(_) => Ok(HttpResponse::NotFound().body("Image not found")),
@@ -923,8 +1145,9 @@ pub async fn gallery_image(path: web::Path<String>) -> Result<HttpResponse> {
 
 /// Enrich a Wikidata QID via the enrich-qid.sh pipeline
 async fn enrich_qid(qid: &str) -> Result<HttpResponse> {
-    let pipeline = env::var("ENRICH_PIPELINE")
-        .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh".to_string());
+    let pipeline = env::var("ENRICH_PIPELINE").unwrap_or_else(|_| {
+        "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh".to_string()
+    });
     let nft_dir = env::var("NFT_DIR")
         .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
 
@@ -975,37 +1198,39 @@ async fn enrich_qid(qid: &str) -> Result<HttpResponse> {
                 "detail": stderr.to_string(),
             })))
         }
-        Err(e) => {
-            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("Pipeline not found: {}", e),
-            })))
-        }
+        Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("Pipeline not found: {}", e),
+        }))),
     }
 }
 
 /// GET /plugins - List available plugins
-pub async fn list_plugins(registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>) -> Result<HttpResponse> {
+pub async fn list_plugins(
+    registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>,
+) -> Result<HttpResponse> {
     let reg = registry.lock().unwrap();
-    let plugins: Vec<_> = reg.list().iter().map(|(n, v, d)| {
-        serde_json::json!({"name": n, "version": v, "description": d})
-    }).collect();
+    let plugins: Vec<_> = reg
+        .list()
+        .iter()
+        .map(|(n, v, d)| serde_json::json!({"name": n, "version": v, "description": d}))
+        .collect();
     Ok(HttpResponse::Ok().json(serde_json::json!({"plugins": plugins})))
 }
 
 /// POST /plugin/{name}/{id} - Run plugin on a paste
 pub async fn run_plugin(
     path: web::Path<(String, String)>,
+    req: actix_web::HttpRequest,
     registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>,
     body: web::Json<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponse> {
     let (plugin_name, paste_id) = path.into_inner();
     let base_path = env::var("BASE_PATH").unwrap_or_default();
-    let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let base_url = normalized_base_url(&req, &base_path);
 
     // Load paste content
     let content = storage::load_content(&paste_id).unwrap_or_default();
-    let url = format!("{}{}/paste/{}", base_url, base_path, paste_id);
+    let url = format!("{}/paste/{}", base_url, paste_id);
 
     let input = plugin::PluginInput {
         id: paste_id.clone(),
@@ -1019,5 +1244,168 @@ pub async fn run_plugin(
     match reg.execute(&plugin_name, &input) {
         Ok(result) => Ok(HttpResponse::Ok().json(result)),
         Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e}))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{body, http::StatusCode, test};
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct EnvVarGuard {
+        name: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(name: &'static str, value: Option<&str>) -> Self {
+            let original = env::var(name).ok();
+            match value {
+                Some(value) => env::set_var(name, value),
+                None => env::remove_var(name),
+            }
+            Self { name, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => env::set_var(self.name, value),
+                None => env::remove_var(self.name),
+            }
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn temp_spool() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let spool = env::temp_dir().join(format!(
+            "kant-pastebin-handlers-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir_all(&spool).unwrap();
+        spool
+    }
+
+    fn write_text_paste_fixture(spool: &Path, id: &str, ipfs_cid: &str) {
+        let entry = PasteIndex {
+            id: id.to_string(),
+            title: "Fixture".to_string(),
+            description: Some("Fixture description".to_string()),
+            keywords: vec!["fixture".to_string()],
+            cid: "bafkfixture".to_string(),
+            witness: "deadbeef".repeat(8),
+            timestamp: "2026-03-17T21:18:12Z".to_string(),
+            filename: format!("{}.txt", id),
+            ngrams: vec![],
+            ipfs_cid: Some(ipfs_cid.to_string()),
+            reply_to: None,
+            size: 2,
+            uucp_path: spool.join(format!("{}.txt", id)).display().to_string(),
+        };
+
+        fs::write(
+            spool.join(format!("{}.txt", id)),
+            format!("Title: Fixture\nIPFS: {}\n\nhi", ipfs_cid),
+        )
+        .unwrap();
+        fs::write(
+            spool.join("index.jsonl"),
+            format!("{}\n", serde_json::to_string(&entry).unwrap()),
+        )
+        .unwrap();
+    }
+
+    #[actix_web::test]
+    async fn get_paste_uses_forwarded_origin_for_access_commands() {
+        let _guard = env_lock().lock().unwrap();
+        let spool = temp_spool();
+        let paste_id = "20260317_211812_untitled";
+        let ipfs_cid = "QmdckCoPuhEtiNzREtqpYn8dBgY8ifcG82Q4eyEdGCLEiu";
+        let _spool_env = EnvVarGuard::set("UUCP_SPOOL", Some(spool.to_str().unwrap()));
+        let _base_url_env = EnvVarGuard::set("BASE_URL", None);
+        let _base_path_env = EnvVarGuard::set("BASE_PATH", None);
+
+        write_text_paste_fixture(&spool, paste_id, ipfs_cid);
+
+        let req = test::TestRequest::default()
+            .insert_header(("Host", "pastebin.xware.online"))
+            .insert_header(("X-Forwarded-Host", "pastebin.xware.online"))
+            .insert_header(("X-Forwarded-Proto", "https"))
+            .to_http_request();
+
+        let response = get_paste(web::Path::from(paste_id.to_string()), req)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let html = String::from_utf8(body::to_bytes(response.into_body()).await.unwrap().to_vec())
+            .unwrap();
+
+        assert!(html.contains(&format!(
+            "$ curl https://pastebin.xware.online/ipfs/{}",
+            ipfs_cid
+        )));
+        assert!(html.contains(&format!(
+            "$ curl https://pastebin.xware.online/raw/{}",
+            paste_id
+        )));
+        assert!(html.contains("curl -X POST https://pastebin.xware.online/paste"));
+        assert!(!html.contains("localhost:8090"));
+        assert!(!html.contains("/data/pastebin"));
+        assert!(!html.contains("$ ipfs cat "));
+
+        fs::remove_dir_all(spool).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn get_paste_prefers_base_url_override() {
+        let _guard = env_lock().lock().unwrap();
+        let spool = temp_spool();
+        let paste_id = "20260317_211812_untitled";
+        let ipfs_cid = "QmdckCoPuhEtiNzREtqpYn8dBgY8ifcG82Q4eyEdGCLEiu";
+        let _spool_env = EnvVarGuard::set("UUCP_SPOOL", Some(spool.to_str().unwrap()));
+        let _base_url_env = EnvVarGuard::set("BASE_URL", Some("https://public.example"));
+        let _base_path_env = EnvVarGuard::set("BASE_PATH", Some("/pastebin"));
+
+        write_text_paste_fixture(&spool, paste_id, ipfs_cid);
+
+        let req = test::TestRequest::default()
+            .insert_header(("Host", "internal.local"))
+            .insert_header(("X-Forwarded-Host", "internal.local"))
+            .insert_header(("X-Forwarded-Proto", "http"))
+            .to_http_request();
+
+        let response = get_paste(web::Path::from(paste_id.to_string()), req)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let html = String::from_utf8(body::to_bytes(response.into_body()).await.unwrap().to_vec())
+            .unwrap();
+
+        assert!(html.contains(&format!(
+            "$ curl https://public.example/pastebin/raw/{}",
+            paste_id
+        )));
+        assert!(html.contains(&format!(
+            "$ curl https://public.example/pastebin/ipfs/{}",
+            ipfs_cid
+        )));
+        assert!(!html.contains("internal.local"));
+
+        fs::remove_dir_all(spool).unwrap();
     }
 }
