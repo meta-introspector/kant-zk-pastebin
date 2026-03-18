@@ -1,0 +1,193 @@
+--- 20260317_erdfa_system_objects ---
+Title: eRDFa System Objects — Escaped RDFa Representation of the Sneakernet Knowledge Hypergraph
+Keywords: rdfa, sheaf, hypergraph, wasm, pastebin, splitter, erdfa
+CID: pending
+Witness: pending
+IPFS: pending
+DASL: pending
+Reply-To: bafk2f8aa6d84d02a6bc3b3614536a004775
+
+&lt;div vocab="http://schema.org/" prefix="
+  erdfa: https://solana.solfunmeme.com/erdfa/ns#
+  dasl: https://solana.solfunmeme.com/dasl/ns#
+  sheaf: https://solana.solfunmeme.com/sheaf/ns#
+"&gt;
+
+&lt;!-- ═══════════════════════════════════════════
+     VERTEX STALKS: The Application Nodes
+     Each app is a vertex in the knowledge hypergraph.
+     Local data assignments (stalks) are the app's state space.
+     ═══════════════════════════════════════════ --&gt;
+
+&lt;div typeof="schema:WebApplication erdfa:VertexStalk" about="/erdfa/"&gt;
+  &lt;meta property="schema:name" content="eRDFa Pad" /&gt;
+  &lt;meta property="schema:description" content="Sneakernet encoder/decoder: morse, stego, QR, base64, IPFS" /&gt;
+  &lt;meta property="schema:url" content="https://solana.solfunmeme.com/erdfa/" /&gt;
+  &lt;meta property="erdfa:encoding" content="morse base64 qr stego dtmf numbers-station" /&gt;
+  &lt;meta property="sheaf:stalkType" content="EncoderState" /&gt;
+  &lt;meta property="sheaf:resolution" content="fine" /&gt;
+  &lt;link property="schema:hasPart" href="#erdfa-wasm" /&gt;
+  &lt;link property="schema:hasPart" href="#erdfa-html" /&gt;
+  &lt;link property="erdfa:sharesWith" href="/splitter/" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="schema:WebApplication erdfa:VertexStalk" about="/splitter/"&gt;
+  &lt;meta property="schema:name" content="ChatGPT Prompt Splitter" /&gt;
+  &lt;meta property="schema:description" content="Split large text into ChatGPT-safe chunks with framing instructions" /&gt;
+  &lt;meta property="schema:url" content="https://solana.solfunmeme.com/splitter/" /&gt;
+  &lt;meta property="erdfa:chunkSize" content="15000" /&gt;
+  &lt;meta property="sheaf:stalkType" content="SplitterState" /&gt;
+  &lt;meta property="sheaf:resolution" content="coarse" /&gt;
+  &lt;link property="schema:hasPart" href="#splitter-js" /&gt;
+  &lt;link property="schema:hasPart" href="#splitter-html" /&gt;
+  &lt;link property="schema:hasPart" href="#splitter-css" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="schema:WebApplication erdfa:VertexStalk" about="/pastebin/"&gt;
+  &lt;meta property="schema:name" content="Kant Pastebin" /&gt;
+  &lt;meta property="schema:description" content="UUCP + zkTLS + IPFS pastebin with RDFa tagging" /&gt;
+  &lt;meta property="schema:url" content="https://solana.solfunmeme.com/pastebin/" /&gt;
+  &lt;meta property="erdfa:storage" content="IndexedDB localStorage IPFS UUCP" /&gt;
+  &lt;meta property="sheaf:stalkType" content="PasteStore" /&gt;
+  &lt;meta property="sheaf:resolution" content="fine" /&gt;
+  &lt;link property="erdfa:sharesWith" href="/splitter/" /&gt;
+  &lt;link property="erdfa:sharesWith" href="/erdfa/" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="schema:SoftwareSourceCode erdfa:VertexStalk" about="/erdfa/erdfa-lib.js"&gt;
+  &lt;meta property="schema:name" content="eRDFa Embeddable Library" /&gt;
+  &lt;meta property="schema:programmingLanguage" content="JavaScript" /&gt;
+  &lt;meta property="schema:runtimePlatform" content="Browser ES Module" /&gt;
+  &lt;meta property="sheaf:stalkType" content="EmbeddableWidget" /&gt;
+  &lt;meta property="erdfa:provides" content="morse base64 qr rdfa-scan rdfa-annotate split" /&gt;
+  &lt;link property="schema:dependency" href="#erdfa-wasm" /&gt;
+  &lt;link property="erdfa:injectsInto" href="*" /&gt;
+&lt;/div&gt;
+
+&lt;!-- ═══════════════════════════════════════════
+     RESTRICTION MAPS: The Edges
+     How data flows between vertex stalks.
+     localStorage is the shared coboundary operator.
+     ═══════════════════════════════════════════ --&gt;
+
+&lt;div typeof="erdfa:RestrictionMap sheaf:Edge" about="#bridge-splitter"&gt;
+  &lt;meta property="schema:name" content="localStorage splitter-text bridge" /&gt;
+  &lt;meta property="erdfa:mechanism" content="localStorage" /&gt;
+  &lt;meta property="erdfa:key" content="splitter-text" /&gt;
+  &lt;meta property="sheaf:coboundary" content="δ: PasteStore → SplitterState" /&gt;
+  &lt;link property="erdfa:source" href="/pastebin/" /&gt;
+  &lt;link property="erdfa:source" href="/erdfa/" /&gt;
+  &lt;link property="erdfa:target" href="/splitter/" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="erdfa:RestrictionMap sheaf:Edge" about="#bridge-ipfs"&gt;
+  &lt;meta property="schema:name" content="IPFS content-addressed storage" /&gt;
+  &lt;meta property="erdfa:mechanism" content="IPFS CID" /&gt;
+  &lt;meta property="sheaf:coboundary" content="δ: EncoderState → PasteStore via CID" /&gt;
+  &lt;link property="erdfa:source" href="/erdfa/" /&gt;
+  &lt;link property="erdfa:target" href="/pastebin/" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="erdfa:RestrictionMap sheaf:Edge" about="#bridge-wasm"&gt;
+  &lt;meta property="schema:name" content="Shared WASM module" /&gt;
+  &lt;meta property="erdfa:mechanism" content="ES Module import" /&gt;
+  &lt;meta property="sheaf:coboundary" content="δ: Pad → {EncoderState, EmbeddableWidget}" /&gt;
+  &lt;link property="erdfa:source" href="#erdfa-wasm" /&gt;
+  &lt;link property="erdfa:target" href="/erdfa/" /&gt;
+  &lt;link property="erdfa:target" href="/erdfa/erdfa-lib.js" /&gt;
+&lt;/div&gt;
+
+&lt;!-- ═══════════════════════════════════════════
+     CATEGORIFIED LINEAR OBJECTS: The Artifacts
+     Source code and compiled modules as sheaf sections.
+     ═══════════════════════════════════════════ --&gt;
+
+&lt;div typeof="schema:SoftwareSourceCode erdfa:SheafSection" about="#erdfa-wasm"&gt;
+  &lt;meta property="schema:name" content="erdfa-wasm" /&gt;
+  &lt;meta property="schema:programmingLanguage" content="Rust" /&gt;
+  &lt;meta property="schema:targetProduct" content="WebAssembly" /&gt;
+  &lt;meta property="erdfa:source" content="wasm/src/lib.rs" /&gt;
+  &lt;meta property="erdfa:binary" content="pkg/erdfa_wasm_bg.wasm" /&gt;
+  &lt;meta property="erdfa:exports" content="Pad TripleStore" /&gt;
+  &lt;meta property="sheaf:globalSection" content="true" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="schema:CreativeWork erdfa:SheafSection" about="#erdfa-html"&gt;
+  &lt;meta property="schema:name" content="eRDFa Pad HTML" /&gt;
+  &lt;meta property="schema:encodingFormat" content="text/html" /&gt;
+  &lt;meta property="erdfa:source" content="wasm/index.html" /&gt;
+  &lt;link property="schema:dependency" href="#erdfa-wasm" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="schema:CreativeWork erdfa:SheafSection" about="#splitter-html"&gt;
+  &lt;meta property="schema:name" content="Splitter HTML" /&gt;
+  &lt;meta property="schema:encodingFormat" content="text/html" /&gt;
+  &lt;meta property="erdfa:source" content="static-pastebin/index.html" /&gt;
+  &lt;link property="schema:dependency" href="#splitter-js" /&gt;
+  &lt;link property="schema:dependency" href="#splitter-css" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="schema:SoftwareSourceCode erdfa:SheafSection" about="#splitter-js"&gt;
+  &lt;meta property="schema:name" content="Splitter Application Logic" /&gt;
+  &lt;meta property="schema:programmingLanguage" content="JavaScript" /&gt;
+  &lt;meta property="erdfa:source" content="static-pastebin/app.js" /&gt;
+  &lt;meta property="erdfa:exports" content="splitForChat copyChunk copyAllChunks" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="schema:CreativeWork erdfa:SheafSection" about="#splitter-css"&gt;
+  &lt;meta property="schema:name" content="Splitter Stylesheet" /&gt;
+  &lt;meta property="schema:encodingFormat" content="text/css" /&gt;
+  &lt;meta property="erdfa:source" content="static-pastebin/style.css" /&gt;
+&lt;/div&gt;
+
+&lt;!-- ═══════════════════════════════════════════
+     SPECTRAL DIAGNOSTICS: Consistency Checks
+     The test suite as a Sheaf Laplacian δᵀδ
+     ═══════════════════════════════════════════ --&gt;
+
+&lt;div typeof="erdfa:SpectralDiagnostic" about="#test-suite"&gt;
+  &lt;meta property="schema:name" content="Headless Browser Test Suite" /&gt;
+  &lt;meta property="erdfa:mechanism" content="Xvfb + chromium + headless_chrome crate" /&gt;
+  &lt;meta property="sheaf:laplacian" content="δᵀδ over {pad-tests, lib-tests}" /&gt;
+  &lt;meta property="erdfa:spectralGap" content="14/14 pad + 10/10 lib = full consistency" /&gt;
+  &lt;link property="erdfa:validates" href="/erdfa/" /&gt;
+  &lt;link property="erdfa:validates" href="/erdfa/erdfa-lib.js" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="erdfa:SpectralDiagnostic" about="#stego-alife"&gt;
+  &lt;meta property="schema:name" content="ALife Parameter Search" /&gt;
+  &lt;meta property="erdfa:mechanism" content="Evolutionary search over QIM_STEP" /&gt;
+  &lt;meta property="erdfa:optimalStep" content="13.68" /&gt;
+  &lt;meta property="erdfa:jpegSurvival" content="q≥40 (simulated), q≥90 (real codec)" /&gt;
+  &lt;meta property="sheaf:defectLocalization" content="QIM_STEP sensitivity to JPEG quantization tables" /&gt;
+&lt;/div&gt;
+
+&lt;!-- ═══════════════════════════════════════════
+     MONSTER GROUP HIERARCHY: Resolution Levels
+     Coarse (splitter) → Fine (pad, pastebin)
+     The subgroup index [G:H] maps to semantic zoom.
+     ═══════════════════════════════════════════ --&gt;
+
+&lt;div typeof="erdfa:HierarchyLevel" about="#level-coarse"&gt;
+  &lt;meta property="schema:name" content="Coarse: Text Chunking" /&gt;
+  &lt;meta property="erdfa:index" content="low" /&gt;
+  &lt;meta property="erdfa:invariance" content="high — preserves message content across chunks" /&gt;
+  &lt;link property="erdfa:member" href="/splitter/" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="erdfa:HierarchyLevel" about="#level-medium"&gt;
+  &lt;meta property="schema:name" content="Medium: Encoding Transform" /&gt;
+  &lt;meta property="erdfa:index" content="medium" /&gt;
+  &lt;meta property="erdfa:invariance" content="medium — preserves data through encoding/decoding" /&gt;
+  &lt;link property="erdfa:member" href="/erdfa/" /&gt;
+  &lt;link property="erdfa:member" href="/erdfa/erdfa-lib.js" /&gt;
+&lt;/div&gt;
+
+&lt;div typeof="erdfa:HierarchyLevel" about="#level-fine"&gt;
+  &lt;meta property="schema:name" content="Fine: Content-Addressed Storage" /&gt;
+  &lt;meta property="erdfa:index" content="high" /&gt;
+  &lt;meta property="erdfa:invariance" content="low — CID-sensitive to single bit changes" /&gt;
+  &lt;link property="erdfa:member" href="/pastebin/" /&gt;
+&lt;/div&gt;
+
+&lt;/div&gt;

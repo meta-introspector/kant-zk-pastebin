@@ -9,3 +9,4 @@ pub mod tagging;
 pub mod plugin;
 pub mod plugins;
 pub mod dasl;
+pub mod sheaf;

@@ -83,6 +83,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <a href="{}/">🏠 Home</a>
 <a href="{}/browse">📚 Browse</a>
 <a href="{}/gallery">🖼️ Gallery</a>
+<a href="/splitter/">✂️ Splitter</a>
 <a href="{}/openapi.json">📖 API</a>
 </div>
 <h1>📋 Kant Pastebin</h1>
@@ -95,6 +96,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <input type="hidden" id="reply_to" value="{}">
 <button type="submit">📤 Share</button>
 <button type="button" onclick="preview()">👁️ Preview</button>
+<button type="button" onclick="sendToSplitter()">✂️ Split</button>
 </form>
 <div id="result"></div>
 <br><a href="{}/browse">📚 Browse</a> | <a href="{}/openapi.json">📖 API</a> | <a href="{}/swagger-ui/">🔧 Swagger</a>
@@ -114,6 +116,11 @@ function preview() {{
   div.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a0a;z-index:1000;overflow:auto;padding:20px;box-sizing:border-box';
   div.innerHTML = '<button onclick=\"this.parentElement.remove()\" style=\"position:sticky;top:10px;float:right\">✕ Close</button><pre style=\"white-space:pre-wrap;word-wrap:break-word\">' + content.value + '</pre>';
   document.body.appendChild(div);
+}}
+
+function sendToSplitter() {{
+  localStorage.setItem('splitter-text', content.value);
+  window.open('/splitter/', '_blank');
 }}
 
 form.onsubmit = async (e) => {{
@@ -255,8 +262,11 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     let dasl_cid = crate::dasl::dasl_cid(content.as_bytes());
 
     let reply_to_str = paste.reply_to.as_deref().unwrap_or("");
-    let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: {}\n\n{}\n",
-        id, title, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), dasl_cid, reply_to_str, content);
+    let section = crate::sheaf::Section::new(content.as_bytes(), crate::sheaf::Encoding::Raw);
+    let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: {}\n{}\n\n{}\n\n{}\n",
+        id, title, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), dasl_cid, reply_to_str,
+        crate::sheaf::sheaf_header(&section),
+        content, section.to_rdfa());
     fs::write(&uucp, paste_content).ok();
     fs::write(&cid_file, &id).ok();
 
@@ -594,6 +604,7 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 <button class="reply-btn" onclick="showQR()">📱 QR Code</button>
 <button class="reply-btn" onclick="shareRDFa()">🔗 RDFa URL</button>
 <button class="reply-btn" onclick="showPreview()">👁️ Preview</button>
+<button class="reply-btn" onclick="localStorage.setItem('splitter-text',document.querySelector('pre').textContent);window.open('/splitter/','_blank')">✂️ Split</button>
 
 <h3>Access Commands:</h3>
 <div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
