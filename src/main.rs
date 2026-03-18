@@ -14,6 +14,7 @@ mod tagging;
 mod plugin;
 mod plugins;
 mod dasl;
+mod sheaf;
 
 #[derive(OpenApi)]
 #[openapi(

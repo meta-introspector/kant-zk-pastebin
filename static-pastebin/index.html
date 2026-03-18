@@ -27,6 +27,20 @@
   
   <div id="result"></div>
   
+  <h2>✂️ ChatGPT Splitter</h2>
+  <div class="config">
+    <label>Max chars per chunk:</label>
+    <select id="chunkSize">
+      <option value="15000" selected>15,000 (ChatGPT safe)</option>
+      <option value="10000">10,000</option>
+      <option value="5000">5,000</option>
+      <option value="25000">25,000</option>
+    </select>
+    <button onclick="splitForChat()">✂️ Split</button>
+    <button onclick="copyAllChunks()">📋 Copy All</button>
+  </div>
+  <div id="chunks"></div>
+
   <h2>📚 Local Pastes</h2>
   <div id="pasteList"></div>
 </div>

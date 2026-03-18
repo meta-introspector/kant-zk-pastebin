@@ -288,3 +288,62 @@ window.addEventListener('load', () => {
     }
   }
 });
+
+// ChatGPT Prompt Splitter
+function splitForChat() {
+  const text = document.getElementById('content').value;
+  if (!text) return;
+  const max = parseInt(document.getElementById('chunkSize').value);
+  const chunks = [];
+  for (let i = 0; i < text.length; i += max) {
+    chunks.push(text.slice(i, i + max));
+  }
+  const total = chunks.length;
+  if (total <= 1) {
+    document.getElementById('chunks').innerHTML = '<p>Text fits in one message, no splitting needed.</p>';
+    return;
+  }
+  const prefix = document.getElementById('title').value || 'prompt';
+  const wrapped = chunks.map((chunk, i) => {
+    const part = i + 1;
+    if (part < total) {
+      return `Do not answer yet. This is just another part of the text I want to send you. Just receive and acknowledge as "Part ${part}/${total} received" and wait for the next part.\n[START PART ${part}/${total}]\n${chunk}\n[END PART ${part}/${total}]`;
+    } else {
+      return `[START PART ${part}/${total}]\n${chunk}\n[END PART ${part}/${total}]\nALL PARTS SENT. Now you can process the full text I sent you.`;
+    }
+  });
+  let html = `<p>Split into <b>${total}</b> chunks (max ${max} chars each):</p>`;
+  wrapped.forEach((w, i) => {
+    html += `<div class="chunk">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <b>Part ${i+1}/${total}</b> <span>${chunks[i].length} chars</span>
+        <button onclick="copyChunk(${i})">📋 Copy</button>
+      </div>
+      <textarea id="chunk-${i}" readonly style="width:100%;height:80px;font-size:12px">${w.replace(/</g,'&lt;')}</textarea>
+    </div>`;
+  });
+  document.getElementById('chunks').innerHTML = html;
+  window.__chunks = wrapped;
+}
+
+function copyChunk(i) {
+  if (window.__chunks && window.__chunks[i]) {
+    navigator.clipboard.writeText(window.__chunks[i]);
+  }
+}
+
+function copyAllChunks() {
+  if (window.__chunks) {
+    navigator.clipboard.writeText(window.__chunks.join('\n\n---\n\n'));
+  }
+}
+
+// Accept text from other apps via localStorage
+(function() {
+  const incoming = localStorage.getItem('splitter-text');
+  if (incoming) {
+    document.getElementById('content').value = incoming;
+    localStorage.removeItem('splitter-text');
+    splitForChat();
+  }
+})();

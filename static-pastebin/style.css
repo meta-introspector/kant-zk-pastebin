@@ -83,3 +83,17 @@ code {
   border: 1px solid #0f0;
   min-height: 20px;
 }
+
+.chunk {
+  background: #0a0a15;
+  border: 1px solid #333;
+  padding: 8px;
+  margin: 8px 0;
+  border-radius: 4px;
+}
+.chunk textarea {
+  background: #111;
+  color: #0f0;
+  border: 1px solid #333;
+  font-family: monospace;
+}
