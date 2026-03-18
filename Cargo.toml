@@ -28,3 +28,14 @@ mime_guess = "2"
 futures-util = "0.3"
 utoipa = { version = "4", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "6", features = ["actix-web"] }
+erdfa-publish = { path = "erdfa-publish" }
+clap = { version = "4", features = ["derive"] }
+walkdir = "2"
+
+[[bin]]
+name = "kant-pastebin"
+path = "src/main.rs"
+
+[[bin]]
+name = "freeze-chats"
+path = "src/bin/freeze_chats.rs"

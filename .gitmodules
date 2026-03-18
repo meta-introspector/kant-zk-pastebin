@@ -1,3 +1,6 @@
 [submodule "vendor/rust-ipfs"]
 	path = vendor/rust-ipfs
 	url = https://github.com/dariusc93/rust-ipfs.git
+[submodule "erdfa-publish"]
+	path = erdfa-publish
+	url = /home/mdupont/03-march/17/erdfa-publish
