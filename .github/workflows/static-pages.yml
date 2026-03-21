@@ -22,15 +22,15 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: meta-introspector/checkout@v4
         with:
           submodules: true
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: meta-introspector/configure-pages@v4
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: meta-introspector/upload-pages-artifact@v3
         with:
           path: static-site
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: meta-introspector/deploy-pages@v4

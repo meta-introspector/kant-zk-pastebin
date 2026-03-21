@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kant Pastebin — Static</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:10px;max-width:800px;margin:0 auto;font-size:14px}
+a{color:#0ff;text-decoration:none}
+h1{color:#0ff;font-size:1.3em;margin:8px 0}
+h2{color:#0ff;font-size:1em;margin:12px 0 4px;border-bottom:1px solid #333;padding-bottom:2px}
+.nav{background:#111;padding:8px;margin:8px 0;border:1px solid #0f0;display:flex;flex-wrap:wrap;gap:8px}
+textarea{width:100%;background:#111;color:#0f0;border:1px solid #333;padding:8px;font-family:monospace;font-size:13px;resize:vertical;height:8em}
+button{background:#0f0;color:#000;border:none;padding:8px 12px;cursor:pointer;font-size:13px;border-radius:3px;margin:2px}
+button:hover{background:#0ff}
+.paste{background:#111;border:1px solid #333;padding:10px;margin:6px 0;cursor:pointer}
+.paste:hover{border-color:#0f0}
+.paste h3{color:#0ff;font-size:.95em;margin-bottom:4px}
+.paste .meta{color:#888;font-size:.8em}
+.paste .tags span{background:#222;color:#ff0;padding:1px 6px;border-radius:3px;font-size:.75em;margin-right:4px}
+pre{background:#111;padding:12px;border:1px solid #0f0;overflow:auto;max-height:60vh;word-wrap:break-word;white-space:pre-wrap;font-size:13px}
+#view{display:none}
+.actions{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0}
+@media(max-width:600px){body{padding:6px;font-size:13px}pre{font-size:12px;max-height:50vh}button{padding:6px 8px;font-size:12px}}
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="#" onclick="showList();return false">🏠 Home</a>
+  <a href="#" onclick="showCreate();return false">✏️ New</a>
+  <a href="stego/" target="_blank">🔐 Stego</a>
+  <span id="status" style="color:#888;margin-left:auto"></span>
+</div>
+
+<!-- List view -->
+<div id="list">
+  <h1>📋 Kant Pastebin <span style="font-size:.6em;color:#888">(static / offline)</span></h1>
+  <div id="pastes"></div>
+</div>
+
+<!-- Create view -->
+<div id="create" style="display:none">
+  <h1>✏️ New Paste</h1>
+  <textarea id="input" placeholder="Paste content here..."></textarea>
+  <div class="actions">
+    <button onclick="doCreate()">💾 Save</button>
+    <button onclick="showList()">Cancel</button>
+  </div>
+</div>
+
+<!-- View paste -->
+<div id="view">
+  <div class="actions">
+    <button onclick="showList()">← Back</button>
+    <button onclick="navigator.clipboard.writeText(document.getElementById('content').textContent);this.textContent='✅'">📋 Copy</button>
+    <button onclick="localStorage.setItem('stego-input',document.getElementById('content').textContent);window.open('stego/','_blank')">🔐 Stego</button>
+    <button onclick="doExportCbor()">📦 CBOR</button>
+  </div>
+  <h1 id="vtitle"></h1>
+  <div id="vmeta" class="meta"></div>
+  <pre id="content"></pre>
+</div>
+
+<script type="module">
+import init, { Pad } from './pkg/erdfa_wasm.js';
+
+let pad;
+
+// Example shards (erdfa-publish CBOR, base64)
+const SEED_SHARDS = [
+  'note1.cbor:2dpRpGJpZGVub3RlMWNjaWR4JGJhZmtlYWY0M2QzZTc1MTU4ZWEwYjI1M2QzNDczYTBmMzE3M2ljb21wb25lbnSiZHR5cGVpUGFyYWdyYXBoZHRleHRwRmlyc3Qgc2hhcmQgbm90ZWR0YWdzgWRub3Rl',
+  'readme.cbor:2dpRpGJpZGZyZWFkbWVjY2lkeCRiYWZrMTAyNmNhMzAxN2M0ZjNmMTI2MjYwZDY2NjJjYTJmMTNpY29tcG9uZW50o2R0eXBlZ0hlYWRpbmdlbGV2ZWwBZHRleHRtZVJERmEgUHVibGlzaGR0YWdzgmNkb2NmcmVhZG1l',
+  'snippet.cbor:2dpRpGJpZGdzbmlwcGV0Y2NpZHgkYmFma2NiMDhkNDEyYzY4OTNhZmE5YjBkY2FjNzIxNDNkY2E4aWNvbXBvbmVudKNkdHlwZWRDb2RlaGxhbmd1YWdlZHRleHRmc291cmNlbGZuIG1haW4oKSB7fWR0YWdzgmRydXN0ZGNvZGU='
+];
+
+// Seed example shards into IPFS localStorage on first run
+function seedShards() {
+  if (localStorage.getItem('_seeded')) return;
+  for (const entry of SEED_SHARDS) {
+    const [name, b64] = entry.split(':');
+    const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    pad.ipfs_put_dasl(bin, 'application/cbor', 'erdfa-shard', name);
+  }
+  // Seed example pastes
+  const examples = [
+    { title: 'First shard note', content: 'First shard note', tags: 'note,erdfa' },
+    { title: 'eRDFa Publish', content: '# eRDFa Publish\n\nShard-based content publishing with CBOR encoding, IPFS CIDs, and Monster symmetry coordinates.', tags: 'doc,readme,erdfa' },
+    { title: 'Rust snippet', content: 'fn main() {}', tags: 'rust,code,erdfa' },
+  ];
+  for (const ex of examples) {
+    const cid = pad.store_paste(ex.content);
+    const meta = JSON.stringify({ title: ex.title, tags: ex.tags, cid, ts: Date.now() });
+    localStorage.setItem('paste:' + cid, meta);
+  }
+  localStorage.setItem('_seeded', '1');
+}
+
+// List all pastes from localStorage
+function listPastes() {
+  const pastes = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k.startsWith('paste:')) continue;
+    try {
+      const m = JSON.parse(localStorage.getItem(k));
+      m._key = k;
+      pastes.push(m);
+    } catch(e) {}
+  }
+  // Also include WASM store pastes not yet in our index
+  try {
+    const wasmList = JSON.parse(pad.list_pastes());
+    for (const cid of wasmList) {
+      if (!localStorage.getItem('paste:' + cid)) {
+        pastes.push({ cid, title: cid.substring(0, 20) + '...', tags: '', ts: 0, _key: 'paste:' + cid });
+      }
+    }
+  } catch(e) {}
+  pastes.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return pastes;
+}
+
+function renderList() {
+  const pastes = listPastes();
+  const el = document.getElementById('pastes');
+  if (!pastes.length) { el.innerHTML = '<p style="color:#888">No pastes yet. Create one or seed examples.</p>'; return; }
+  el.innerHTML = pastes.map(p => {
+    const tags = (p.tags || '').split(',').filter(Boolean).map(t => '<span>' + t + '</span>').join('');
+    return '<div class="paste" onclick="viewPaste(\'' + p.cid + '\')">' +
+      '<h3>' + esc(p.title || p.cid) + '</h3>' +
+      '<div class="meta">' + (p.cid || '').substring(0, 24) + (p.ts ? ' · ' + new Date(p.ts).toLocaleDateString() : '') + '</div>' +
+      (tags ? '<div class="tags">' + tags + '</div>' : '') +
+      '</div>';
+  }).join('');
+}
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+window.showList = () => {
+  document.getElementById('list').style.display = '';
+  document.getElementById('create').style.display = 'none';
+  document.getElementById('view').style.display = 'none';
+  renderList();
+};
+
+window.showCreate = () => {
+  document.getElementById('list').style.display = 'none';
+  document.getElementById('create').style.display = '';
+  document.getElementById('view').style.display = 'none';
+  document.getElementById('input').value = '';
+  document.getElementById('input').focus();
+};
+
+window.viewPaste = (cid) => {
+  const content = pad.load_paste(cid);
+  if (!content) { alert('Paste not found: ' + cid); return; }
+  const meta = JSON.parse(localStorage.getItem('paste:' + cid) || '{}');
+  document.getElementById('list').style.display = 'none';
+  document.getElementById('create').style.display = 'none';
+  document.getElementById('view').style.display = '';
+  document.getElementById('vtitle').textContent = meta.title || cid;
+  document.getElementById('vmeta').textContent = 'CID: ' + cid + (meta.tags ? ' · Tags: ' + meta.tags : '');
+  document.getElementById('content').textContent = content;
+};
+
+window.doCreate = () => {
+  const content = document.getElementById('input').value.trim();
+  if (!content) return;
+  const cid = pad.store_paste(content);
+  const title = content.split('\n')[0].substring(0, 80);
+  localStorage.setItem('paste:' + cid, JSON.stringify({ title, cid, tags: '', ts: Date.now() }));
+  showList();
+};
+
+window.doExportCbor = () => {
+  const content = document.getElementById('content').textContent;
+  const bin = new TextEncoder().encode(content);
+  const cid = pad.ipfs_put_dasl(bin, 'text/plain', 'paste', 'static-pastebin');
+  alert('📦 CBOR shard stored: ' + cid);
+};
+
+// Load from URL hash: #cid=...
+function loadFromHash() {
+  const h = location.hash;
+  if (h.startsWith('#cid=')) {
+    const cid = h.substring(5);
+    viewPaste(cid);
+  }
+}
+
+// Boot
+async function boot() {
+  document.getElementById('status').textContent = '⏳ Loading WASM...';
+  await init();
+  pad = new Pad();
+  window._pad = pad;
+  seedShards();
+  document.getElementById('status').textContent = '✅ ' + listPastes().length + ' pastes';
+  if (location.hash) loadFromHash();
+  else renderList();
+}
+boot();
+</script>
+</body>
+</html>

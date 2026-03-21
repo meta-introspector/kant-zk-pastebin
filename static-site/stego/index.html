@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>eRDFa Pad — Sneakernet Encoder/Decoder</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:1em;max-width:900px;margin:0 auto}
+h1{color:#0ff;font-size:1.4em;margin-bottom:.5em}
+h2{color:#0ff;font-size:1em;margin:1em 0 .3em;border-bottom:1px solid #333;padding-bottom:.2em}
+textarea,input[type=text]{width:100%;background:#111;color:#0f0;border:1px solid #333;padding:.4em;font-family:monospace;font-size:.9em;resize:vertical}
+textarea{height:6em}
+button{background:#222;color:#0ff;border:1px solid #0ff;padding:.3em .8em;cursor:pointer;font-family:monospace;margin:.2em .2em .2em 0}
+button:hover{background:#0ff;color:#000}
+.row{display:flex;gap:.5em;flex-wrap:wrap;margin:.3em 0}
+.out{background:#111;border:1px solid #333;padding:.4em;margin:.3em 0;word-break:break-all;min-height:1.5em;font-size:.85em}
+.cid{color:#ff0;font-size:.8em}
+#store-list{max-height:10em;overflow-y:auto}
+#store-list div{padding:.2em;border-bottom:1px solid #222;cursor:pointer}
+#store-list div:hover{background:#222}
+canvas{border:1px solid #333;margin:.3em 0}
+.status{color:#888;font-size:.8em}
+</style>
+</head>
+<body>
+<h1>🔐 eRDFa Pad</h1>
+<p class="status">Sneakernet encoder/decoder — morse · BBS · QR · stego · URL · localStorage
+  <button onclick="stopAll()" style="float:right;background:#600;border-color:#f00">⏹ Stop All</button>
+</p>
+
+<h2>📝 Input</h2>
+<textarea id="input" placeholder="Type or paste content here..."></textarea>
+<div class="row">
+  <button onclick="doStore()">💾 Store</button>
+  <button onclick="doCid()">🔗 CID</button>
+  <button onclick="doSha()">🔒 SHA256</button>
+</div>
+<div class="cid" id="cid-out"></div>
+
+<h2>📡 Morse</h2>
+<div class="row">
+  <button onclick="doMorseEnc()">Encode</button>
+  <button onclick="doMorseDec()">Decode</button>
+  <button onclick="doMorsePlay()">▶ Play</button>
+  <button onclick="doMorseDl()">⬇ WAV</button>
+  WPM: <input type="text" id="wpm" value="15" style="width:3em">
+</div>
+<div class="out" id="morse-out"></div>
+
+<h2>📻 BBS / DTMF</h2>
+<div class="row">
+  <button onclick="doBbsFreqs()">Frequencies</button>
+  <button onclick="doBbsPlay()">▶ Play</button>
+  <button onclick="doBbsDl()">⬇ WAV</button>
+  Tone ms: <input type="text" id="tone-ms" value="80" style="width:3em">
+</div>
+<div class="out" id="bbs-out"></div>
+
+<h2>🔗 URL</h2>
+<div class="row">
+  <button onclick="doUrlEnc()">→ data: URL</button>
+  <button onclick="doUrlDec()">← Decode URL</button>
+</div>
+<div class="out" id="url-out" style="max-height:4em;overflow:auto"></div>
+
+<h2>📦 Base64 / QR Payload</h2>
+<div class="row">
+  <button onclick="doB64Enc()">Encode</button>
+  <button onclick="doB64Dec()">Decode</button>
+</div>
+<div class="out" id="b64-out"></div>
+
+<h2>🖼 Stego Meme</h2>
+<div class="row">
+  <input type="text" id="meme-top" placeholder="TOP TEXT" style="width:40%">
+  <input type="text" id="meme-bot" placeholder="BOTTOM TEXT" style="width:40%">
+</div>
+<div class="row">
+  <button onclick="doStegoEnc()">Encode → Meme</button>
+  <button onclick="doStegoDec()">Decode ← Image</button>
+  <button onclick="doStegoDl()">⬇ Download</button>
+  <label style="color:#888;font-size:.8em">Image: <input type="file" id="stego-file" accept="image/*" style="width:100px"></label>
+</div>
+<div style="display:flex;gap:.5em;align-items:start">
+  <canvas id="stego-canvas" width="256" height="256"></canvas>
+  <img id="carrier-preview" src="https://placekitten.com/256/256" crossorigin="anonymous" style="width:256px;height:256px;border:1px solid #333;object-fit:cover">
+</div>
+<div class="out" id="stego-out">Ctrl+V to paste image, or use file picker</div>
+
+<h2>📼 Cassette Tape (KCS FSK)</h2>
+<div class="row">
+  <button onclick="doTapeEnc()">SAVE to tape</button>
+  <button onclick="doTapePlay()">▶ Play tape</button>
+  <button onclick="doTapeDl()">⬇ Download WAV</button>
+  <button onclick="doTapeDec()">LOAD from tape</button>
+  <input type="file" id="tape-file" accept="audio/wav,.wav" style="display:none">
+  <button onclick="document.getElementById('tape-file').click()">📂 Load WAV</button>
+  <button onclick="doTapePaste()">📋 Share to Pastebin</button>
+</div>
+<div class="out" id="tape-out"></div>
+<audio id="tape-audio" controls style="width:100%;margin:.3em 0;display:none"></audio>
+
+<h2>📻 Numbers Station — Tones</h2>
+<div class="row">
+  <button onclick="doNumEnc()">Encode</button>
+  <button onclick="doNumPlay()">▶ Play tones</button>
+  <button onclick="doNumDl()">⬇ Download WAV</button>
+  <button onclick="doNumDec()">Decode WAV</button>
+  <button onclick="doNumPaste()">📋 Share to Pastebin</button>
+</div>
+<div class="out" id="num-groups"></div>
+<audio id="num-audio" controls style="width:100%;margin:.3em 0;display:none"></audio>
+
+<h2>🗣 Numbers Station — Speech</h2>
+<div class="row">
+  <button onclick="doNumSpeak()">🗣 Browser voice</button>
+  <button onclick="doSpeechPlay()">▶ Play speech WAV</button>
+  <button onclick="doSpeechDl()">⬇ Download speech WAV</button>
+</div>
+<div class="out" id="speech-out"></div>
+<audio id="speech-audio" controls style="width:100%;margin:.3em 0;display:none"></audio>
+
+<h2>🌐 Local IPFS</h2>
+<div class="row">
+  <button onclick="doIpfsList()">List blocks</button>
+  <button onclick="doIpfsSize()">Size</button>
+  <button onclick="doExportTar()">⬇ Export .tar</button>
+  <button onclick="doSyncPastebin()">🔄 Sync to Pastebin</button>
+</div>
+<div class="out" id="ipfs-out"></div>
+<div id="ipfs-list" style="max-height:8em;overflow-y:auto;font-size:.8em"></div>
+
+<h2>💾 Local Store</h2>
+<div class="row">
+  <button onclick="doListStore()">List</button>
+  <input type="text" id="load-cid" placeholder="CID to load..." style="flex:1">
+  <button onclick="doLoadStore()">Load</button>
+</div>
+<div id="store-list"></div>
+
+<h2>🔢 FRACTRAN</h2>
+<div class="row">
+  <input type="text" id="fractran-prog" placeholder="Program: 3/2, 1/3, ..." style="flex:2">
+  <input type="text" id="fractran-state" placeholder="State" value="108" style="width:5em">
+  <button onclick="doFractranLoad()">Load</button>
+  <button onclick="doFractranRun()">▶ Run</button>
+  <button onclick="doFractranStep()">Step</button>
+</div>
+<div class="out" id="fractran-out" style="max-height:8em;overflow:auto"></div>
+
+<h2>📦 CBOR</h2>
+<div class="row">
+  <button onclick="doCborExport()">Export triples → CBOR</button>
+  <button onclick="doCborImport()">Import CBOR → triples</button>
+</div>
+<div class="out" id="cbor-out" style="max-height:4em;overflow:auto;word-break:break-all"></div>
+
+<h2>✂️ Split / Join</h2>
+<div class="row">
+  <input type="number" id="chunk-size" value="10" min="1" style="width:4em" title="Triples per chunk">
+  <button onclick="doSplit()">✂️ Split</button>
+  <button onclick="doJoin()">🔗 Join</button>
+</div>
+<div class="out" id="split-out" style="max-height:8em;overflow:auto;word-break:break-all"></div>
+
+<h2>📜 Shard Loader</h2>
+<div class="row">
+  <input type="file" id="shard-file" accept=".cbor,.tar,.json" onchange="doLoadShardFile(this)">
+  <button onclick="doLoadShardUrl()">📥 Load URL</button>
+  <button onclick="doShardStatus()">📊 Status</button>
+</div>
+<div id="shard-progress" style="margin:.3em 0">
+  <div style="background:#333;border-radius:4px;height:1.2em;position:relative">
+    <div id="shard-bar" style="background:#4a4;height:100%;border-radius:4px;width:0%;transition:width .3s"></div>
+    <span id="shard-label" style="position:absolute;left:50%;top:0;transform:translateX(-50%);font-size:.8em;color:#fff">0 / ? shards</span>
+  </div>
+</div>
+<div class="out" id="shard-out" style="max-height:6em;overflow:auto;word-break:break-all"></div>
+
+<h2>🔗 Pipeline URL</h2>
+<div class="row">
+  <button onclick="doShareUrl()">📤 Share URL</button>
+  <button onclick="doRunPipeline()">▶ Run Pipeline</button>
+  <input type="text" id="pipe-ops" placeholder="ops: morse,base64,cid (comma-sep)" style="flex:1">
+</div>
+<div class="out" id="pipe-out" style="max-height:6em;overflow:auto;white-space:pre"></div>
+<div id="render-out" style="margin:.3em 0"></div>
+
+<h2>📋 Pastebin</h2>
+<div class="row">
+  <button onclick="postToPastebin()">📤 Post Text</button>
+  <button onclick="postStegoToPastebin()">📤 Post Stego Image</button>
+  <button onclick="postAllToPastebin()">📤 Post All Outputs</button>
+</div>
+<div class="out" id="paste-out"></div>
+
+<h2>🔗 RDFa Triples</h2>
+<div class="row" style="gap:.3em">
+  <input type="text" id="t-s" placeholder="Subject (URI)" style="flex:1">
+  <input type="text" id="t-p" placeholder="Predicate (URI)" style="flex:1">
+  <input type="text" id="t-o" placeholder="Object (value)" style="flex:1">
+</div>
+<div class="row">
+  <button onclick="doAddTriple()">➕ Add Triple</button>
+  <button onclick="doQueryTriples()">🔍 Query</button>
+  <button onclick="doExportRdfa()">📄 Export RDFa</button>
+  <button onclick="doExportNT()">📄 N-Triples</button>
+  <button onclick="doImportNT()">📥 Import N-Triples</button>
+  <button onclick="doClearTriples()">🗑 Clear</button>
+</div>
+<div class="out" id="triple-out" style="max-height:12em;overflow:auto"></div>
+<div class="out" id="triple-export" style="max-height:8em;overflow:auto;white-space:pre;font-size:.8em"></div>
+
+<script type="module">
+import init, { Pad, TripleStore } from './pkg/erdfa_wasm.js';
+
+let pad, triples;
+async function setup() {
+  await init();
+  pad = new Pad();
+  triples = new TripleStore();
+  window._pad = pad;
+  window._triples = triples;
+  document.getElementById('cid-out').textContent = '✅ WASM loaded';
+  // Auto-execute URL pipeline after init
+  await loadFromUrl();
+}
+setup();
+
+const $ = id => document.getElementById(id);
+const val = () => $('input').value;
+const set = (id, v) => $(id).textContent = v;
+
+// ── URL Pipeline Engine ──────────────────────────────────────────
+// Nested query string parser (PHP-style: key[sub]=val, key[]=val)
+function parseNQS(qs) {
+  const out = {};
+  for (const part of qs.split('&')) {
+    if (!part) continue;
+    const eq = part.indexOf('=');
+    const rawKey = eq < 0 ? part : part.slice(0, eq);
+    const rawVal = eq < 0 ? '' : decodeURIComponent(part.slice(eq + 1).replace(/\+/g, ' '));
+    const keys = [];
+    let k = rawKey, m;
+    const base = k.match(/^([^[]*)/);
+    if (base) { keys.push(decodeURIComponent(base[1].replace(/\+/g, ' '))); k = k.slice(base[1].length); }
+    while ((m = k.match(/^\[([^\]]*)\]/))) { keys.push(m[1]); k = k.slice(m[0].length); }
+    let cur = out;
+    for (let i = 0; i < keys.length - 1; i++) {
+      const key = keys[i], next = keys[i + 1];
+      if (!(key in cur)) cur[key] = (next === '' || /^\d+$/.test(next)) ? [] : {};
+      cur = cur[key];
+    }
+    const last = keys[keys.length - 1];
+    if (last === '') { if (Array.isArray(cur)) cur.push(rawVal); }
+    else cur[last] = rawVal;
+  }
+  return out;
+}
+
+// Encode object → nested query string
+function toNQS(obj, prefix) {
+  const parts = [];
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}[${k}]` : k;
+    if (v && typeof v === 'object') parts.push(toNQS(v, key));
+    else parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(v ?? '')}`);
+  }
+  return parts.join('&');
+}
+
+// Fetch a URL value (text or image)
+async function fetchUrl(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.status);
+    return r;
+  } catch(e) {
+    // CORS proxy fallback
+    const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
+    return fetch(proxy);
+  }
+}
+
+async function fetchText(url) { return (await fetchUrl(url)).text(); }
+
+async function fetchImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    // Try direct first, proxy on error
+    img.src = url;
+    setTimeout(() => {
+      if (!img.complete) img.src = 'https://corsproxy.io/?' + encodeURIComponent(url);
+    }, 3000);
+  });
+}
+
+// Operation registry — each takes current text, returns result string
+const OPS = {
+  morse:    () => pad.to_morse(val()),
+  demorse:  () => { const r = pad.from_morse(val()); $('input').value = r; return r; },
+  base64:   () => pad.to_base64(val()),
+  debase64: () => { const r = pad.from_base64(val()); $('input').value = r; return r; },
+  cid:      () => pad.cid(val()),
+  sha256:   () => pad.sha256(val()),
+  url:      () => pad.to_data_url(val(), 'text/plain'),
+  stego:    () => { doStegoEnc(); return $('stego-out').textContent; },
+  destego:  () => { doStegoDec(); return $('stego-dec')?.textContent || ''; },
+  tape:     () => { doTapeEnc(); return $('tape-out').textContent; },
+  numbers:  () => { doNumEnc(); return $('num-groups').textContent; },
+  ipfs:     () => { const cid = pad.ipfs_put(new TextEncoder().encode(val()), 'text/plain'); return cid; },
+  ntriples: () => triples.to_ntriples(),
+  rdfa:     () => triples.to_rdfa(),
+  cbor:     () => { const b = triples.to_cbor(); return btoa(String.fromCharCode(...b)); },
+  decbor:   () => { const b = Uint8Array.from(atob(val()), c => c.charCodeAt(0)); return triples.from_cbor(b) + ' triples imported'; },
+  fractran: () => { const h = triples.fractran_run(1000); return h; },
+  fload:    () => { const n = triples.fractran_load(val(), 2); return n + ' triples loaded'; },
+  split:    () => { const n = parseInt(val()) || 10; return triples.split(n); },
+  join:     () => { const n = triples.join(val()); return n + ' triples joined'; },
+};
+
+// Run a pipeline: comma-separated ops or RDFa triple graph
+async function runPipeline(ops, text, params) {
+  if (text) $('input').value = text;
+  const log = [];
+  const nodes = {}; // for triple-based pipeline
+  
+  // Check for triple-based pipeline (pipe[N][s/p/o])
+  if (params?.pipe) {
+    const steps = Array.isArray(params.pipe) ? params.pipe : Object.values(params.pipe);
+    // Build graph: s → {p, o}
+    const edges = steps.map(t => ({s: t.s, p: t.p, o: t.o}));
+    // Find source nodes (not targets of any edge)
+    const targets = new Set(edges.map(e => e.o));
+    const sources = edges.filter(e => !targets.has(e.s) || e.s === '_:input');
+    // Topological walk
+    nodes['_:input'] = val();
+    const visited = new Set();
+    const queue = sources.length ? sources : edges;
+    let safety = 100;
+    while (queue.length && --safety > 0) {
+      const edge = queue.shift();
+      if (visited.has(JSON.stringify(edge))) continue;
+      if (!(edge.s in nodes) && edge.s !== '_:input') { queue.push(edge); continue; }
+      $('input').value = nodes[edge.s] || val();
+      const op = OPS[edge.p];
+      if (op) {
+        const result = op();
+        nodes[edge.o] = result;
+        log.push(`${edge.s} →[${edge.p}]→ ${edge.o}: ${result.slice(0, 80)}`);
+        visited.add(JSON.stringify(edge));
+        // Enqueue edges from this output
+        edges.filter(e => e.s === edge.o && !visited.has(JSON.stringify(e))).forEach(e => queue.push(e));
+      }
+    }
+    // Final result is the last node with no outgoing edges
+    const outs = new Set(edges.map(e => e.s));
+    const terminals = edges.map(e => e.o).filter(o => !outs.has(o));
+    const result = nodes[terminals[0]] || nodes['_:output'] || Object.values(nodes).pop();
+    $('input').value = result;
+    set('pipe-out', log.join('\n'));
+    return result;
+  }
+  
+  // Simple comma-separated pipeline
+  const opList = (ops || '').split(',').map(s => s.trim()).filter(Boolean);
+  let result = val();
+  for (const opName of opList) {
+    const op = OPS[opName];
+    if (op) {
+      result = op();
+      $('input').value = result;
+      log.push(`${opName}: ${result.slice(0, 80)}`);
+    } else {
+      log.push(`⚠ unknown op: ${opName}`);
+    }
+  }
+  set('pipe-out', log.join('\n'));
+  return result;
+}
+
+// Render template: {{var}} replacement
+function renderTemplate(tpl, vars) {
+  return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
+}
+
+// Generate shareable URL from current state
+window.doShareUrl = () => {
+  const state = { text: val() };
+  const ops = $('pipe-ops').value.trim();
+  if (ops) state.op = ops;
+  const top = $('meme-top').value; if (top) state['meme-top'] = top;
+  const bot = $('meme-bot').value; if (bot) state['meme-bot'] = bot;
+  // Include triples if any
+  const nt = triples.to_ntriples();
+  if (nt) state.triples = nt;
+  const url = location.origin + location.pathname + '?' + toNQS(state);
+  set('pipe-out', url);
+  navigator.clipboard?.writeText(url);
+};
+
+// Manual pipeline run
+window.doRunPipeline = async () => {
+  const ops = $('pipe-ops').value.trim();
+  await runPipeline(ops, null, null);
+};
+
+// ── URL param auto-execute on load ──
+async function loadFromUrl() {
+  const qs = location.search.slice(1);
+  if (!qs) return;
+  const params = parseNQS(qs);
+  set('pipe-out', '⏳ Loading from URL...');
+  
+  // Fetch text (or use literal)
+  let text = params.text || '';
+  if (text.match(/^https?:\/\//)) {
+    try { text = await fetchText(text); } catch(e) { set('pipe-out', '❌ fetch text: ' + e); }
+  }
+  $('input').value = text;
+  
+  // Fetch carrier image
+  if (params.carrier) {
+    try {
+      const img = await fetchImage(params.carrier);
+      $('carrier-preview').src = img.src;
+    } catch(e) { set('pipe-out', '❌ fetch carrier: ' + e); }
+  }
+  
+  // Meme text
+  if (params['meme-top']) $('meme-top').value = params['meme-top'];
+  if (params['meme-bot']) $('meme-bot').value = params['meme-bot'];
+  
+  // Import triples
+  if (params.triples) {
+    if (params.triples.match(/^https?:\/\//)) {
+      try { params.triples = await fetchText(params.triples); } catch(e) {}
+    }
+    triples.from_ntriples(params.triples);
+  }
+  
+  // Import @graph (JSON-LD via nested query string → RDFa triples)
+  if (params['@graph']) {
+    const graph = Array.isArray(params['@graph']) ? params['@graph'] : [params['@graph']];
+    for (const node of graph) {
+      const id = node['@id'] || '_:b' + Math.random().toString(36).slice(2, 8);
+      for (const [pred, obj] of Object.entries(node)) {
+        if (pred === '@id' || pred === '@type') continue;
+        const oval = typeof obj === 'object' ? (obj['@id'] || JSON.stringify(obj)) : obj;
+        triples.add(id, pred, oval);
+      }
+      if (node['@type']) triples.add(id, 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', node['@type']);
+    }
+  }
+  
+  // Run pipeline
+  const ops = params.op || params.ops || '';
+  let result = text;
+  if (ops || params.pipe) {
+    result = await runPipeline(ops, text, params);
+  }
+  
+  // Render template
+  if (params.render) {
+    let tpl = params.render;
+    if (tpl.match(/^https?:\/\//)) {
+      try { tpl = await fetchText(tpl); } catch(e) {}
+    }
+    const vars = {
+      input: text, output: result, text, result,
+      cid: pad.cid(text), sha256: pad.sha256(text),
+      morse: pad.to_morse(text), base64: pad.to_base64(text),
+      triples: triples.to_ntriples(), rdfa: triples.to_rdfa(),
+    };
+    $('render-out').innerHTML = renderTemplate(tpl, vars);
+  }
+  
+  set('pipe-out', (ops || params.pipe) ? $('pipe-out').textContent : '✅ Loaded from URL');
+}
+
+// loadFromUrl() is called from setup() after WASM init
+
+// -- Stop all audio before playing anything new --
+let activeCtx = null;
+function stopAll() {
+  if (activeCtx) try { activeCtx.close(); } catch(e) {}
+  activeCtx = null;
+  document.querySelectorAll('audio').forEach(a => { a.pause(); a.currentTime = 0; });
+  window.speechSynthesis.cancel();
+}
+
+window.doCid = () => set('cid-out', pad.cid(val()));
+window.doSha = () => set('cid-out', pad.sha256(val()));
+
+window.doMorseEnc = () => set('morse-out', pad.to_morse(val()));
+window.doMorseDec = () => $('input').value = pad.from_morse($('morse-out').textContent);
+window.doMorsePlay = () => {
+  stopAll();
+  const wpm = parseFloat($('wpm').value) || 15;
+  const wav = pad.to_morse_wav(val(), wpm);
+  const cid = pad.ipfs_put_dasl(wav, 'audio/wav', 'morse', val());
+  const audio = new Audio(URL.createObjectURL(new Blob([wav], {type:'audio/wav'})));
+  audio.play();
+  set('morse-out', pad.to_morse(val()) + '\n→ IPFS: ' + cid);
+  window._lastMorseWav = wav;
+};
+window.doMorseDl = () => {
+  const wpm = parseFloat($('wpm').value) || 15;
+  const wav = pad.to_morse_wav(val(), wpm);
+  downloadWav(wav, 'morse-' + Date.now() + '.wav');
+};
+
+window.doBbsFreqs = () => set('bbs-out', pad.to_dtmf_freqs(val()));
+window.doBbsPlay = () => {
+  stopAll();
+  const ms = parseFloat($('tone-ms').value) || 80;
+  const wav = pad.to_bbs_wav(val(), ms);
+  const cid = pad.ipfs_put_dasl(wav, 'audio/wav', 'bbs-dtmf', val());
+  const audio = new Audio(URL.createObjectURL(new Blob([wav], {type:'audio/wav'})));
+  audio.play();
+  set('bbs-out', pad.to_dtmf_freqs(val()) + '\n→ IPFS: ' + cid);
+  window._lastBbsWav = wav;
+};
+window.doBbsDl = () => {
+  const ms = parseFloat($('tone-ms').value) || 80;
+  const wav = pad.to_bbs_wav(val(), ms);
+  downloadWav(wav, 'bbs-dtmf-' + Date.now() + '.wav');
+};
+
+window.doUrlEnc = () => set('url-out', pad.to_data_url(val(), 'text/plain'));
+window.doUrlDec = () => {
+  const d = pad.from_data_url($('url-out').textContent);
+  if (d) $('input').value = d;
+};
+
+window.doB64Enc = () => set('b64-out', pad.to_base64(val()));
+window.doB64Dec = () => {
+  const d = pad.from_base64($('b64-out').textContent);
+  if (d) $('input').value = d;
+};
+
+window.doStegoEnc = () => {
+  const canvas = $('stego-canvas');
+  const carrier = $('carrier-preview');
+  const w = carrier.naturalWidth || 256, h = carrier.naturalHeight || 256;
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(carrier, 0, 0, w, h);
+  // Meme text overlay
+  const top = ($('meme-top').value || '').toUpperCase();
+  const bot = ($('meme-bot').value || '').toUpperCase();
+  if (top || bot) {
+    const sz = Math.max(16, Math.floor(w / 12));
+    ctx.font = `bold ${sz}px Impact, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.lineWidth = Math.max(2, sz / 8);
+    ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
+    if (top) { ctx.strokeText(top, w/2, sz+8); ctx.fillText(top, w/2, sz+8); }
+    if (bot) { ctx.strokeText(bot, w/2, h-12); ctx.fillText(bot, w/2, h-12); }
+  }
+  const carrierData = new Uint8Array(ctx.getImageData(0, 0, w, h).data.buffer);
+  const pixels = pad.stego_encode(val(), carrierData, w, h);
+  const img = new ImageData(new Uint8ClampedArray(pixels), w, h);
+  ctx.putImageData(img, 0, 0);
+  const cap = Math.floor((Math.floor(w/8) * Math.floor(h/8) * 4) / 7 * 4 / 8) - 4;
+  set('stego-out', `Encoded ${val().length}/${cap} bytes into ${w}×${h} meme (DCT+Hamming(7,4)+CRC, survives JPEG)`);
+};
+
+window.doStegoDec = () => {
+  const canvas = $('stego-canvas');
+  const w = canvas.width, h = canvas.height;
+  if (w < 8 || h < 8) { set('stego-out', 'Load an image first'); return; }
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h);
+  const decoded = pad.stego_decode(new Uint8Array(img.data.buffer), w, h);
+  if (decoded) {
+    $('input').value = decoded;
+    set('stego-out', `✅ Decoded ${decoded.length} chars`);
+  } else {
+    set('stego-out', 'No hidden data — encode first or load a stego image');
+  }
+};
+
+window.doStegoDl = () => {
+  const canvas = $('stego-canvas');
+  if (!canvas.width) return;
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = 'stego-' + Date.now() + '.png';
+  a.click();
+};
+
+// Load image into canvas + preview, auto-decode
+function loadImageFile(file) {
+  const img = new Image();
+  img.onload = () => {
+    const canvas = $('stego-canvas');
+    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    canvas.getContext('2d').drawImage(img, 0, 0);
+    $('carrier-preview').src = img.src;
+    set('stego-out', `Loaded ${img.naturalWidth}×${img.naturalHeight}`);
+    doStegoDec();
+  };
+  img.src = URL.createObjectURL(file);
+}
+
+$('stego-file').onchange = e => {
+  const file = e.target.files[0]; if (!file) return;
+  loadImageFile(file);
+};
+
+// Paste image from clipboard
+document.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      loadImageFile(item.getAsFile());
+      return;
+    }
+  }
+});
+
+// Detect base64 image in input field
+$('input').addEventListener('input', e => {
+  const v = e.target.value.trim();
+  if (v.startsWith('data:image/')) {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = $('stego-canvas');
+      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      $('carrier-preview').src = v;
+      set('stego-out', `Loaded base64 image ${img.naturalWidth}×${img.naturalHeight}`);
+      doStegoDec();
+    };
+    img.src = v;
+  }
+});
+
+window.doStore = () => {
+  const cid = pad.store_paste(val());
+  set('cid-out', `Stored: ${cid}`);
+  doListStore();
+};
+
+window.doLoadStore = () => {
+  const cid = $('load-cid').value;
+  const data = pad.load_paste(cid);
+  if (data) { $('input').value = data; set('cid-out', cid); }
+  else set('cid-out', 'Not found');
+};
+
+window.doListStore = () => {
+  const cids = JSON.parse(pad.list_pastes());
+  $('store-list').innerHTML = cids.map(c =>
+    `<div onclick="document.getElementById('load-cid').value='${c}';doLoadStore()">${c}</div>`
+  ).join('');
+};
+
+// -- Tape --
+let lastTapeWav = null;
+let lastNumWav = null;
+
+function downloadWav(bytes, name) {
+  const blob = new Blob([bytes], {type: 'audio/wav'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function shareToPastebin(wavBytes, title) {
+  const b64 = btoa(String.fromCharCode(...wavBytes));
+  const url = '/pastebin/upload';
+  try {
+    const form = new FormData();
+    form.append('file', new Blob([wavBytes], {type:'audio/wav'}), title + '.wav');
+    const resp = await fetch(url, {method:'POST', body: form});
+    const json = await resp.json();
+    set('tape-out', `Shared: ${json.url || json.id || 'ok'}`);
+  } catch(e) {
+    // Fallback: store locally
+    const cid = pad.store_paste(b64);
+    set('tape-out', `Stored locally: ${cid} (pastebin unreachable)`);
+  }
+}
+
+window.doTapeEnc = () => {
+  lastTapeWav = pad.to_tape_wav(val());
+  const audio = $('tape-audio');
+  audio.src = URL.createObjectURL(new Blob([lastTapeWav], {type:'audio/wav'}));
+  audio.style.display = 'block';
+  set('tape-out', `Tape: ${val().length} bytes → ${lastTapeWav.length} bytes WAV`);
+};
+window.doTapePlay = () => { stopAll(); $('tape-audio').play(); };
+window.doTapeDl = () => {
+  if (lastTapeWav) downloadWav(lastTapeWav, 'tape-' + Date.now() + '.wav');
+};
+window.doTapeDec = () => { set('tape-out', 'Load a WAV file to decode'); };
+window.doTapePaste = () => {
+  if (lastTapeWav) shareToPastebin(lastTapeWav, 'tape-' + Date.now());
+};
+$('tape-file').onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const decoded = pad.from_tape_wav(buf);
+  if (decoded) {
+    $('input').value = decoded;
+    set('tape-out', `Decoded ${decoded.length} chars from tape`);
+  } else {
+    set('tape-out', 'Failed to decode tape');
+  }
+};
+
+// -- Numbers Station --
+window.doNumEnc = () => {
+  const groups = pad.to_number_groups(val());
+  set('num-groups', groups);
+};
+window.doNumPlay = () => {
+  stopAll();
+  doNumEnc();
+  lastNumWav = pad.to_numbers_wav(val());
+  const audio = $('num-audio');
+  audio.src = URL.createObjectURL(new Blob([lastNumWav], {type:'audio/wav'}));
+  audio.style.display = 'block';
+  audio.play();
+};
+window.doNumDl = () => {
+  if (lastNumWav) downloadWav(lastNumWav, 'numbers-' + Date.now() + '.wav');
+};
+window.doNumSpeak = () => {
+  stopAll();
+  const groups = pad.to_number_groups(val());
+  let text = 'Attention. Attention. Message follows. ';
+  for (const c of groups.split(' ')) {
+    text += c.split('').join('. ') + '. . ';
+  }
+  text += 'End of message. End of message.';
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.rate = 0.7;
+  utt.pitch = 0.8;
+  window.speechSynthesis.speak(utt);
+  set('speech-out', groups);
+};
+let lastSpeechWav = null;
+let digitsLoaded = false;
+async function ensureDigits() {
+  if (digitsLoaded) return;
+  set('speech-out', 'Loading voice samples…');
+  await Promise.all([...Array(10).keys()].map(async d => {
+    const r = await fetch('samples/d' + d + '.raw');
+    const buf = new Uint8Array(await r.arrayBuffer());
+    pad.load_digit_pcm(d, buf);
+  }));
+  digitsLoaded = true;
+}
+window.doSpeechPlay = async () => {
+  stopAll();
+  await ensureDigits();
+  lastSpeechWav = pad.to_numbers_speech_wav(val());
+  const audio = $('speech-audio');
+  audio.src = URL.createObjectURL(new Blob([lastSpeechWav], {type:'audio/wav'}));
+  audio.style.display = 'block';
+  audio.play();
+  const cid = pad.ipfs_put_dasl(lastSpeechWav, 'audio/wav', 'numbers-speech', val());
+  set('speech-out', pad.to_number_groups(val()) + ' → IPFS: ' + cid);
+};
+window.doSpeechDl = async () => {
+  await ensureDigits();
+  if (!lastSpeechWav) lastSpeechWav = pad.to_numbers_speech_wav(val());
+  downloadWav(lastSpeechWav, 'numbers-speech-' + Date.now() + '.wav');
+};
+window.doNumDec = () => {
+  set('num-groups', 'Load a numbers station WAV to decode');
+};
+window.doNumPaste = () => {
+  if (lastNumWav) shareToPastebin(lastNumWav, 'numbers-' + Date.now());
+};
+
+// -- Triples --
+function renderTriples(json) {
+  const list = JSON.parse(json);
+  $('triple-out').innerHTML = list.map(t =>
+    `<div style="border-bottom:1px solid #222;padding:2px">&lt;${t.s}&gt; &lt;${t.p}&gt; "${t.o}"</div>`
+  ).join('');
+}
+window.doAddTriple = () => {
+  const cid = triples.add($('t-s').value, $('t-p').value, $('t-o').value);
+  set('triple-export', 'Added: ' + cid);
+  renderTriples(triples.list());
+};
+window.doQueryTriples = () => {
+  renderTriples(triples.query($('t-s').value, $('t-p').value, $('t-o').value));
+};
+window.doExportRdfa = () => { set('triple-export', triples.to_rdfa()); };
+window.doExportNT = () => { set('triple-export', triples.to_ntriples()); };
+window.doImportNT = () => {
+  const n = triples.from_ntriples(val());
+  set('triple-export', `Imported ${n} triples`);
+  renderTriples(triples.list());
+};
+window.doClearTriples = () => {
+  triples.clear();
+  $('triple-out').innerHTML = '';
+  set('triple-export', 'Cleared');
+};
+
+// -- Local IPFS --
+window.doIpfsList = () => {
+  const cids = JSON.parse(pad.ipfs_list());
+  const icons = {morse:'📡', 'bbs-dtmf':'📞', 'numbers-station':'🔢', 'cassette-kcs':'📼', 'stego-lsb':'🖼', 'text/x-morse':'📡', raw:'📄'};
+  // Group by source
+  const groups = {};
+  const orphans = [];
+  cids.forEach(c => {
+    const raw = pad.ipfs_meta(c);
+    let m = null;
+    if (raw) { try { m = JSON.parse(raw); } catch(e) {} }
+    const entry = {cid: c, meta: m, raw};
+    if (m && m.source) {
+      const key = m.source;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(entry);
+    } else {
+      orphans.push(entry);
+    }
+  });
+  let html = '';
+  for (const [src, entries] of Object.entries(groups)) {
+    const srcCid = pad.cid(src);
+    const label = src.length > 50 ? src.slice(0,50)+'…' : src;
+    html += `<div style="margin:4px 0;padding:4px;border:1px solid #333;border-radius:4px">`;
+    html += `<div style="color:#ff0">📝 "${label}" <span style="color:#666">${srcCid.slice(0,16)}…</span></div>`;
+    entries.forEach(e => {
+      const m = e.meta;
+      const icon = icons[m.encoding] || '📦';
+      const date = m.created ? new Date(m.created).toLocaleTimeString() : '';
+      html += `<div style="padding-left:20px;color:#0f0">↳ ${icon} ${m.encoding} <span style="color:#888">${e.cid.slice(0,16)}…</span> <span style="color:#666">${(m.size/1024).toFixed(1)}KB ${m.mime}</span> <span style="color:#aa0">${date}</span></div>`;
+    });
+    html += `</div>`;
+  }
+  orphans.forEach(e => {
+    const mime = e.meta ? e.meta.mime || e.raw : (e.raw || '?');
+    html += `<div style="color:#888;padding:2px 0">📦 ${e.cid.slice(0,16)}… ${mime}</div>`;
+  });
+  $('ipfs-list').innerHTML = html;
+  set('ipfs-out', `${cids.length} blocks, ${Object.keys(groups).length} sources`);
+};
+window.doIpfsSize = () => {
+  set('ipfs-out', `${(pad.ipfs_size() / 1024).toFixed(1)} KB in local IPFS`);
+};
+window.doExportTar = () => {
+  const tar = pad.export_tar();
+  const blob = new Blob([tar], {type: 'application/x-tar'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'erdfa-ipfs-' + Date.now() + '.tar';
+  a.click();
+  set('ipfs-out', `Exported ${tar.length} bytes`);
+};
+window.doSyncPastebin = async () => {
+  const cids = JSON.parse(pad.ipfs_list());
+  let ok = 0;
+  for (const cid of cids) {
+    const data = pad.ipfs_get(cid);
+    if (!data) continue;
+    try {
+      const form = new FormData();
+      form.append('file', new Blob([data]), cid);
+      await fetch('/pastebin/upload', {method:'POST', body: form});
+      ok++;
+    } catch(e) {}
+  }
+  set('ipfs-out', `Synced ${ok}/${cids.length} blocks to pastebin`);
+};
+
+// -- FRACTRAN --
+window.doFractranLoad = () => {
+  const prog = $('fractran-prog').value.trim();
+  const state = parseInt($('fractran-state').value) || 2;
+  if (!prog) { set('fractran-out', '⚠ Enter fractions: 3/2, 1/3, ...'); return; }
+  triples.clear();
+  const n = triples.fractran_load(prog, state);
+  set('fractran-out', `Loaded ${n} triples (state=${state})`);
+};
+window.doFractranRun = () => {
+  const history = JSON.parse(triples.fractran_run(1000));
+  const powers = history.filter(s => s > 1 && (s & (s-1)) === 0).map(s => Math.log2(s));
+  let out = `${history.length} steps: ${history.slice(0,20).join(' → ')}`;
+  if (history.length > 20) out += ` … → ${history[history.length-1]}`;
+  if (powers.length) out += `\nPowers of 2 found: 2^${powers.join(', 2^')}`;
+  set('fractran-out', out);
+};
+window.doFractranStep = () => {
+  const state = parseInt($('fractran-state').value) || 2;
+  const next = triples.fractran_step(state);
+  if (next === 0) { set('fractran-out', `HALT at ${state}`); return; }
+  $('fractran-state').value = next;
+  set('fractran-out', `${state} → ${next}`);
+};
+
+// -- CBOR --
+window.doCborExport = () => {
+  const bytes = triples.to_cbor();
+  const b64 = btoa(String.fromCharCode(...bytes));
+  set('cbor-out', `${bytes.length} bytes CBOR → ${b64.length} chars base64`);
+  $('input').value = b64;
+};
+window.doCborImport = () => {
+  try {
+    const bytes = Uint8Array.from(atob(val()), c => c.charCodeAt(0));
+    const n = triples.from_cbor(bytes);
+    set('cbor-out', `Imported ${n} triples from ${bytes.length} bytes CBOR`);
+  } catch(e) { set('cbor-out', '❌ ' + e.message); }
+};
+
+window.doSplit = () => {
+  const n = parseInt(document.getElementById('chunk-size').value) || 10;
+  const json = triples.split(n);
+  const chunks = JSON.parse(json);
+  const manifest = chunks.find(c => c.manifest);
+  set('split-out', `✂️ ${manifest ? manifest.chunks : '?'} chunks → ${json.length} chars`);
+  $('input').value = json;
+};
+window.doJoin = () => {
+  try {
+    const n = triples.join(val());
+    set('split-out', `🔗 Joined ${n} triples`);
+  } catch(e) { set('split-out', '❌ ' + e.message); }
+};
+
+// -- Shard Loader --
+const shardState = { loaded: new Set(), expected: null, manifest: null };
+
+function updateShardProgress() {
+  const n = shardState.loaded.size;
+  const total = shardState.expected || '?';
+  const pct = shardState.expected ? Math.round(100 * n / shardState.expected) : 0;
+  document.getElementById('shard-bar').style.width = pct + '%';
+  document.getElementById('shard-label').textContent = `${n} / ${total} shards`;
+  if (shardState.expected && n >= shardState.expected) {
+    document.getElementById('shard-bar').style.background = '#4a4';
+    set('shard-out', `✅ Complete! All ${n} shards loaded. ${triples.list().length} triples in store.`);
+  }
+}
+
+function importCborB64(b64) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const n = triples.from_cbor(bytes);
+  // Compute CID for tracking
+  const cid = pad.cid(b64);
+  shardState.loaded.add(cid);
+  // Check if this is a manifest
+  const json = triples.list();
+  try {
+    const all = JSON.parse(json);
+    const exp = all.find(t => t.p === 'erdfa:expected');
+    if (exp) shardState.expected = parseInt(exp.o);
+    const name = all.find(t => t.p === 'erdfa:name');
+    if (name) shardState.manifest = name.o;
+  } catch(e) {}
+  updateShardProgress();
+  return n;
+}
+
+window.doLoadShardFile = (input) => {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const bytes = new Uint8Array(reader.result);
+    if (file.name.endsWith('.tar')) {
+      // Parse tar: extract .cbor files
+      let pos = 0, count = 0;
+      while (pos + 512 <= bytes.length) {
+        const name = new TextDecoder().decode(bytes.slice(pos, pos + 100)).replace(/\0/g, '');
+        if (!name) break;
+        const sizeStr = new TextDecoder().decode(bytes.slice(pos + 124, pos + 135)).replace(/\0/g, '');
+        const size = parseInt(sizeStr, 8) || 0;
+        pos += 512;
+        if (name.endsWith('.cbor') && size > 0) {
+          const cbor = bytes.slice(pos, pos + size);
+          const n = triples.from_cbor(cbor);
+          const cid = pad.cid(btoa(String.fromCharCode(...cbor)));
+          shardState.loaded.add(cid);
+          count += n;
+        }
+        pos += Math.ceil(size / 512) * 512;
+      }
+      updateShardProgress();
+      set('shard-out', `📦 Tar: ${shardState.loaded.size} shards, ${count} triples`);
+    } else if (file.name.endsWith('.json')) {
+      // Manifest JSON with b64 data
+      try {
+        const manifest = JSON.parse(new TextDecoder().decode(bytes));
+        shardState.expected = manifest.expected || manifest.shards?.length;
+        let count = 0;
+        for (const s of (manifest.shards || [])) {
+          if (s.b64) count += importCborB64(s.b64);
+        }
+        set('shard-out', `📋 Manifest: ${manifest.name}, ${count} triples`);
+      } catch(e) { set('shard-out', '❌ ' + e.message); }
+    } else {
+      // Raw CBOR
+      const n = triples.from_cbor(bytes);
+      const cid = pad.cid(btoa(String.fromCharCode(...bytes)));
+      shardState.loaded.add(cid);
+      updateShardProgress();
+      set('shard-out', `📜 Shard: ${n} triples`);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+};
+
+window.doLoadShardUrl = () => {
+  const url = val();
+  if (!url) return set('shard-out', 'Paste a shard URL or base64 CBOR');
+  if (url.startsWith('http')) {
+    // It's a composable eRDFa URL — just run it
+    const params = new URLSearchParams(url.split('?')[1] || '');
+    const text = params.get('text');
+    if (text) {
+      const n = importCborB64(text);
+      set('shard-out', `📥 URL shard: ${n} triples`);
+    }
+  } else {
+    // Assume base64 CBOR
+    try {
+      const n = importCborB64(url);
+      set('shard-out', `📥 Shard: ${n} triples`);
+    } catch(e) { set('shard-out', '❌ ' + e.message); }
+  }
+};
+
+window.doShardStatus = () => {
+  const n = shardState.loaded.size;
+  const total = shardState.expected || '?';
+  const name = shardState.manifest || 'unnamed';
+  set('shard-out', `📊 "${name}": ${n}/${total} shards loaded`);
+};
+
+// -- Auto-IPFS on encode --
+const origTapeEnc = window.doTapeEnc;
+window.doTapeEnc = () => {
+  origTapeEnc();
+  if (lastTapeWav) {
+    const cid = pad.ipfs_put_dasl(lastTapeWav, 'audio/wav', 'cassette-kcs', val());
+    set('tape-out', $('tape-out').textContent + ' → IPFS: ' + cid);
+  }
+};
+const origNumPlay = window.doNumPlay;
+window.doNumPlay = () => {
+  origNumPlay();
+  if (lastNumWav) {
+    const cid = pad.ipfs_put_dasl(lastNumWav, 'audio/wav', 'numbers-station', val());
+    set('num-groups', $('num-groups').textContent + ' → IPFS: ' + cid);
+  }
+};
+const origMorseEnc = window.doMorseEnc;
+window.doMorseEnc = () => {
+  origMorseEnc();
+  const morse = $('morse-out').textContent;
+  const cid = pad.ipfs_put_dasl(new TextEncoder().encode(morse), 'text/x-morse', 'morse', val());
+  set('morse-out', morse + '\n→ IPFS: ' + cid);
+};
+const origStegoEnc = window.doStegoEnc;
+window.doStegoEnc = () => {
+  origStegoEnc();
+  const canvas = $('stego-canvas');
+  canvas.toBlob(blob => {
+    if (!blob) return;
+    blob.arrayBuffer().then(buf => {
+      const cid = pad.ipfs_put_dasl(new Uint8Array(buf), 'image/png', 'stego-lsb', val());
+      set('stego-out', $('stego-out').textContent + ' → IPFS: ' + cid);
+    });
+  }, 'image/png');
+};
+
+// -- Pastebin integration --
+// Load content from pastebin via localStorage
+const _stegoInput = localStorage.getItem('stego-input');
+if (_stegoInput) { localStorage.removeItem('stego-input'); $('input').value = _stegoInput; }
+
+window.postToPastebin = () => {
+  const content = val();
+  if (!content) { set('paste-out', '⚠️ No input'); return; }
+  const pbUrl = (window._pastebin_base || '') + '/paste';
+  fetch(pbUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, keywords: 'stego,erdfa' }) })
+    .then(r => r.json())
+    .then(d => { $('paste-out').innerHTML = '✅ <a href="' + pbUrl + '/' + d.id + '" style="color:#0ff">' + d.id + '</a>'; })
+    .catch(e => { set('paste-out', '❌ ' + e); });
+};
+
+window.postStegoToPastebin = () => {
+  const c = $('stego-canvas');
+  if (!c) { set('paste-out', '⚠️ No stego image'); return; }
+  const pbBase = window._pastebin_base || '';
+  c.toBlob(blob => {
+    const fd = new FormData(); fd.append('file', blob, 'stego.png');
+    fd.append('title', 'stego-encoded'); fd.append('keywords', 'stego,erdfa,image');
+    fetch(pbBase + '/upload', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(d => { $('paste-out').innerHTML = '✅ <a href="' + pbBase + '/paste/' + d.id + '" style="color:#0ff">' + d.id + '</a>'; })
+      .catch(e => { set('paste-out', '❌ ' + e); });
+  }, 'image/png');
+};
+
+window.postAllToPastebin = () => {
+  const parts = [];
+  ['morse-out','bbs-out','num-groups','tape-out','stego-out','url-out','qr-out'].forEach(id => {
+    const el = $(id);
+    if (el && el.textContent.trim()) parts.push('## ' + id + '\n' + el.textContent);
+  });
+  if (!parts.length) { set('paste-out', '⚠️ No outputs'); return; }
+  const content = '# eRDFa Stego Export\n\nSource: ' + val().substring(0, 100) + '...\n\n' + parts.join('\n\n');
+  const pbUrl = (window._pastebin_base || '') + '/paste';
+  fetch(pbUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, keywords: 'stego,erdfa,export' }) })
+    .then(r => r.json())
+    .then(d => { $('paste-out').innerHTML = '✅ <a href="' + pbUrl + '/' + d.id + '" style="color:#0ff">' + d.id + '</a>'; })
+    .catch(e => { set('paste-out', '❌ ' + e); });
+};
+</script>
+</body>
+</html>
