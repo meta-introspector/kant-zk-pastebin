@@ -10,6 +10,8 @@ struct AccessCommands {
     ipfs: String,
     raw: String,
     reply: String,
+    cat: String,
+    data_url: String,
 }
 
 fn normalized_base_url(req: &actix_web::HttpRequest, base_path: &str) -> String {
@@ -42,11 +44,27 @@ fn normalized_base_url(req: &actix_web::HttpRequest, base_path: &str) -> String 
     }
 }
 
-fn access_commands(base_url: &str, id: &str, ipfs_cid: Option<&str>) -> AccessCommands {
+fn access_commands(base_url: &str, id: &str, ipfs_cid: Option<&str>, uucp_path: &str, content: &str) -> AccessCommands {
     let ipfs = if let Some(cid) = ipfs_cid {
         format!("curl {}/ipfs/{}", base_url, cid)
     } else {
         "# No IPFS CID available".to_string()
+    };
+
+    let cat = if !uucp_path.is_empty() {
+        format!("cat {}", uucp_path)
+    } else {
+        format!("cat /var/spool/uucp/pastebin/{}.txt", id)
+    };
+
+    // Compressed base64 data URL for inline copy
+    let data_url = {
+        use std::io::Write;
+        let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+        let _ = encoder.write_all(content.as_bytes());
+        let compressed = encoder.finish().unwrap_or_default();
+        let b64 = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &compressed);
+        format!("{}/paste/{}#z={}", base_url, id, b64)
     };
 
     AccessCommands {
@@ -56,6 +74,8 @@ fn access_commands(base_url: &str, id: &str, ipfs_cid: Option<&str>) -> AccessCo
             "curl -X POST {}/paste -H 'Content-Type: application/json' -d '{{\"content\":\"...\",\"reply_to\":\"{}\"}}'",
             base_url, id
         ),
+        cat,
+        data_url,
     }
 }
 
@@ -537,7 +557,8 @@ pub async fn get_paste(
                         .and_then(|e| e.ipfs_cid.as_deref())
                 });
             let body = &content[body_start..];
-            let commands = access_commands(&base_url, &id, ipfs_cid);
+            let uucp_path = format!("{}/{}.txt", uucp_dir, id);
+            let commands = access_commands(&base_url, &id, ipfs_cid, &uucp_path, body);
 
             // Find related posts by keywords
             let current_entry = entries.iter().find(|e| e.id == id);
@@ -610,6 +631,8 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 <div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
 <div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
 <div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
+<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
+<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'" title="Compressed inline URL">🔗 {}</div>
 
 <h3>Content:</h3>
 <pre>{}</pre>
@@ -693,6 +716,10 @@ function showPreview() {{
                 commands.raw,
                 commands.reply,
                 commands.reply,
+                commands.cat,
+                commands.cat,
+                commands.data_url,
+                commands.data_url,
                 body,
                 related_html,
                 title,

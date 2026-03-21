@@ -31,6 +31,8 @@ utoipa-swagger-ui = { version = "6", features = ["actix-web"] }
 erdfa-publish = { path = "erdfa-publish" }
 clap = { version = "4", features = ["derive"] }
 walkdir = "2"
+flate2 = "1"
+base64 = "0.22"
 
 [[bin]]
 name = "kant-pastebin"
