@@ -32,7 +32,17 @@ pub fn render_paste(paste: &PasteIndex, content: &str) -> String {
     <p>ID: {} | {}</p>
     {}
     <a class="reply-btn" href="/?reply_to={}">💬 Reply</a>
-    <pre>{}</pre>
+    <button class="reply-btn" onclick="copyRaw()">📋 Copy HTML</button>
+    <pre id="src">{}</pre>
+    <script>
+    function copyRaw(){{
+      var t=document.getElementById('src').textContent;
+      navigator.clipboard.writeText(t).then(function(){{
+        event.target.textContent='✅ Copied!';
+        setTimeout(function(){{event.target.textContent='📋 Copy HTML'}},1500);
+      }});
+    }}
+    </script>
     <script src="/static/a11y.js"></script>
 </body>
 </html>"#, 
