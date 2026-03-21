@@ -4,3 +4,6 @@
 [submodule "erdfa-publish"]
 	path = erdfa-publish
 	url = /home/mdupont/03-march/17/erdfa-publish
+[submodule "erdfa-clean"]
+	path = erdfa-clean
+	url = https://github.com/Escaped-RDFa/namespace.git

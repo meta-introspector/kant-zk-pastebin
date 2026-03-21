@@ -574,158 +574,71 @@ pub async fn get_paste(
 
             let prev_link = prev_id
                 .map(|pid| format!(r#"<a href="{}/paste/{}">← Prev</a>"#, base_path, pid))
-                .unwrap_or_else(|| "".to_string());
+                .unwrap_or_default();
             let next_link = next_id
                 .map(|nid| format!(r#"<a href="{}/paste/{}">Next →</a>"#, base_path, nid))
-                .unwrap_or_else(|| "".to_string());
+                .unwrap_or_default();
 
             let related_html = if !related.is_empty() {
-                let items: String = related
-                    .iter()
-                    .map(|e| {
-                        format!(
-                            r#"<div style="padding:5px"><a href="{}/paste/{}">{}</a></div>"#,
-                            base_path, e.id, e.title
-                        )
-                    })
-                    .collect();
-                format!(
-                    r#"<h3>Related Posts:</h3><div style="background:#111;padding:10px;margin:10px 0">{}</div>"#,
-                    items
-                )
+                let items: String = related.iter().map(|e| {
+                    format!(r#"<div style="padding:5px"><a href="{}/paste/{}">{}</a></div>"#, base_path, e.id, e.title)
+                }).collect();
+                format!(r#"<h3>Related Posts:</h3><div style="background:#111;padding:10px;margin:10px 0">{}</div>"#, items)
             } else {
-                "".to_string()
+                String::new()
             };
 
-            let html = format!(
-                r#"<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="UTF-8">
-<title>{}</title>
-<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
-<style>
-body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
-a{{color:#0ff;text-decoration:none}}
-.nav{{background:#111;padding:10px;margin:10px 0;border:1px solid #0f0}}
-pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height:600px;word-wrap:break-word;white-space:pre-wrap}}
-.reply-btn{{background:#0f0;color:#000;border:none;padding:5px 10px;cursor:pointer;margin:5px;display:inline-block}}
-.cmd{{background:#111;padding:10px;margin:5px 0;border-left:3px solid #ff0;cursor:pointer;font-size:12px}}
-.cmd:hover{{background:#222}}
-.qr-modal{{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:20px;border:3px solid #0f0;z-index:1000;display:none}}
-.qr-modal h3{{color:#000}}
-.preview-modal{{position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:2000;overflow:auto;display:none}}
-.preview-modal iframe{{width:100%;height:100%;border:none}}
-</style>
-</head><body>
-<div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/raw/{}">📄 Raw</a> | {} {}</div>
-<h1>{}</h1>
-<a class="reply-btn" href="{}/?reply_to={}">💬 Reply</a>
-<button class="reply-btn" onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent);this.textContent='✅ Copied'">📋 Copy</button>
-<button class="reply-btn" onclick="navigator.share({{title:'{}',text:document.querySelector('pre').textContent,url:window.location.href}})">🔗 Share</button>
-<button class="reply-btn" onclick="showQR()">📱 QR Code</button>
-<button class="reply-btn" onclick="shareRDFa()">🔗 RDFa URL</button>
-<button class="reply-btn" onclick="showPreview()">👁️ Preview</button>
-<button class="reply-btn" onclick="localStorage.setItem('splitter-text',document.querySelector('pre').textContent);window.open('/splitter/','_blank')">✂️ Split</button>
+            let mut p = view::Page::new(title);
+            p.script_src("https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js");
 
-<h3>Access Commands:</h3>
-<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
-<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
-<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
-<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
-<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'" title="Compressed inline URL">🔗 {}</div>
+            // Nav
+            p.nav(view::W::Raw(format!(
+                r#"<a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/raw/{}">📄 Raw</a> {} {}"#,
+                base_path, base_path, base_path, id, prev_link, next_link
+            )));
 
-<h3>Content:</h3>
-<pre>{}</pre>
-{}
-<div id="qrModal" class="qr-modal">
-  <h3>{}</h3>
-  <canvas id="qrcode"></canvas><br>
-  <button onclick="document.getElementById('qrModal').style.display='none'">Close</button>
-</div>
-<script>
-const ipfsCid = '{}';
-const pasteUrl = window.location.href;
-const title = '{}';
+            // Actions
+            p.action(view::W::Link { label: "💬 Reply".into(), href: format!("{}/?reply_to={}", base_path, id) });
+            p.action(view::W::Btn { label: "📋 Copy".into(), onclick: "navigator.clipboard.writeText(document.querySelector('pre').textContent);this.textContent='✅ Copied'".into() });
+            p.action(view::W::Btn { label: "📋 HTML".into(), onclick: "copyHtml()".into() });
+            p.action(view::W::Btn { label: "📤 Cross-post".into(), onclick: "crossPost()".into() });
+            p.action(view::W::Btn { label: "🔗 Share".into(), onclick: "navigator.share({title:title,text:document.querySelector('pre').textContent,url:window.location.href})".into() });
+            p.action(view::W::Btn { label: "📱 QR".into(), onclick: "showQR()".into() });
+            p.action(view::W::Btn { label: "📦 Data QR".into(), onclick: "showDataQR()".into() });
+            p.action(view::W::Btn { label: "RDFa".into(), onclick: "shareRDFa()".into() });
+            p.action(view::W::Btn { label: "eRDFa".into(), onclick: "shareErdfa()".into() });
+            p.action(view::W::Btn { label: "🔓 Decode".into(), onclick: "decodeDataUrl()".into() });
+            p.action(view::W::Btn { label: "👁️".into(), onclick: "showPreview()".into() });
+            p.action(view::W::Btn { label: "✂️".into(), onclick: "localStorage.setItem('splitter-text',document.querySelector('pre').textContent);window.open('/splitter/','_blank')".into() });
+            p.action(view::W::Btn { label: "🔐 Stego".into(), onclick: "localStorage.setItem('stego-input',document.querySelector('pre').textContent);window.open('/stego','_blank')".into() });
 
-function showQR() {{
-  const modal = document.getElementById('qrModal');
-  modal.style.display = 'block';
-  const qr = qrcode(0, 'M');
-  qr.addData(pasteUrl);
-  qr.make();
-  const canvas = document.getElementById('qrcode');
-  const ctx = canvas.getContext('2d');
-  const cells = qr.getModuleCount();
-  const cellSize = 256 / cells;
-  canvas.width = 256;
-  canvas.height = 256;
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, 256, 256);
-  ctx.fillStyle = '#000';
-  for (let row = 0; row < cells; row++) {{
-    for (let col = 0; col < cells; col++) {{
-      if (qr.isDark(row, col)) {{
-        ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
-      }}
-    }}
-  }}
-}}
+            // Commands
+            p.cmd(view::W::Cmd { text: commands.ipfs.clone() });
+            p.cmd(view::W::Cmd { text: commands.raw.clone() });
+            p.cmd(view::W::Cmd { text: commands.reply.clone() });
+            p.cmd(view::W::Cmd { text: commands.cat.clone() });
+            p.cmd(view::W::CmdHidden { label: "🔗 data URL (click to copy)".into(), text: commands.data_url.clone() });
 
-function shareRDFa() {{
-  const rdfaUrl = pasteUrl + '#typeof=schema:CreativeWork&property=schema:name=' + encodeURIComponent(title) + (ipfsCid ? '&property=schema:identifier=' + encodeURIComponent(ipfsCid) : '');
-  navigator.clipboard.writeText(rdfaUrl);
-  alert('✅ RDFa URL copied:\\n\\n' + rdfaUrl);
-}}
+            // Content
+            p.content(view::W::Raw("<h3>Content:</h3>".into()));
+            p.content(view::W::Pre(body.to_string()));
+            p.content(view::W::Raw(related_html));
 
-function showPreview() {{
-  const content = document.querySelector('pre').innerHTML;
-  const modal = document.createElement('div');
-  modal.className = 'preview-modal';
-  modal.style.display = 'block';
-  
-  // Decode HTML entities
-  const decoded = document.createElement('textarea');
-  decoded.innerHTML = content;
-  const actualContent = decoded.value;
-  
-  // Add base styles for non-HTML content
-  const styledContent = actualContent.includes('<html') || actualContent.includes('<!DOCTYPE') 
-    ? actualContent 
-    : '<html><head><style>body{{font-family:sans-serif;padding:20px;line-height:1.6}}</style></head><body><pre style=\"white-space:pre-wrap;word-wrap:break-word\">' + actualContent + '</pre></body></html>';
-  
-  modal.innerHTML = '<button onclick=\"this.parentElement.remove()\" style=\"position:fixed;top:10px;right:10px;z-index:3000;padding:10px 20px;background:#f00;color:#fff;border:none;cursor:pointer\">✕ Close</button><iframe srcdoc=\"' + styledContent.replace(/"/g, '&quot;') + '\"></iframe>';
-  document.body.appendChild(modal);
-}}
-</script>
-<script src="/static/a11y.js"></script>
-</body></html>"#,
-                title,
-                base_path,
-                base_path,
-                base_path,
-                id,
-                prev_link,
-                next_link,
-                title,
-                base_path,
-                id,
-                title,
-                commands.ipfs,
-                commands.ipfs,
-                commands.raw,
-                commands.raw,
-                commands.reply,
-                commands.reply,
-                commands.cat,
-                commands.cat,
-                commands.data_url,
-                commands.data_url,
-                body,
-                related_html,
-                title,
-                ipfs_cid.unwrap_or(""),
-                title
-            );
+            // Modal
+            p.modal(view::W::Raw(view::QR_MODAL.to_string()));
+
+            // JS
+            p.js_var("ipfsCid", ipfs_cid.unwrap_or(""));
+            p.js_var("pasteUrl", &format!("{}/paste/{}", base_url, id));
+            p.js_var("dataUrl", &commands.data_url);
+            p.js_var("title", title);
+            p.js(view::JS_QR);
+            p.js(view::JS_SHARE);
+            p.js(view::JS_PREVIEW);
+            p.js(view::JS_COPY_HTML);
+            p.js(view::JS_CROSSPOST);
+
+            let html = p.render();
 
             Ok(HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
@@ -1253,6 +1166,21 @@ pub async fn list_plugins(
         .map(|(n, v, d)| serde_json::json!({"name": n, "version": v, "description": d}))
         .collect();
     Ok(HttpResponse::Ok().json(serde_json::json!({"plugins": plugins})))
+}
+
+/// GET /stego - eRDFa stego dashboard
+pub async fn stego_dashboard() -> Result<HttpResponse> {
+    let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
+    let base_path = env::var("BASE_PATH").unwrap_or_default();
+    let pb_base = format!("{}{}", base_url, base_path);
+    let html = fs::read_to_string("erdfa-clean/wasm/index.html")
+        .unwrap_or_else(|_| "<h1>Stego dashboard not found</h1>".to_string())
+        .replace("'./pkg/erdfa_wasm.js'", "'/stego/pkg/erdfa_wasm.js'")
+        .replace("'./samples/", "'/stego/samples/")
+        .replace("window._pastebin_base || ''", &format!("'{}'", pb_base));
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// POST /plugin/{name}/{id} - Run plugin on a paste

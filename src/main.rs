@@ -69,6 +69,9 @@ async fn main() -> std::io::Result<()> {
             .route("/gallery/img/{qid}", web::get().to(handlers::gallery_image))
             .route("/plugin/{name}/{id}", web::post().to(handlers::run_plugin))
             .route("/plugins", web::get().to(handlers::list_plugins))
+            .route("/stego", web::get().to(handlers::stego_dashboard))
+            .service(actix_files::Files::new("/stego/pkg", "erdfa-clean/wasm/pkg"))
+            .service(actix_files::Files::new("/stego/samples", "erdfa-clean/wasm/samples"))
     })
     .bind(&bind)?
     .run()
