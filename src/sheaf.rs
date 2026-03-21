@@ -84,6 +84,29 @@ impl Encoding {
     }
 }
 
+/// Classify DASL type from content heuristics + hash fallback
+fn classify_type(data: &[u8], hash_byte: u8) -> DaslType {
+    // Check for structural markers in content
+    if let Ok(text) = std::str::from_utf8(data) {
+        if text.contains("```") || text.contains("fn ") || text.contains("def ")
+            || text.contains("pub ") || text.contains("impl ") {
+            return DaslType::AstNode;       // code content
+        }
+        if text.starts_with("0xDA51") || text.contains("protocol") && text.contains("version") {
+            return DaslType::Protocol;
+        }
+    }
+    // Hash-based fallback: weighted toward NestedCid (most common for pastes)
+    match hash_byte % 8 {
+        0 => DaslType::MonsterWalk,
+        1 => DaslType::AstNode,
+        2 => DaslType::Protocol,
+        3 | 4 | 5 => DaslType::NestedCid,  // 3/8 = most common
+        6 => DaslType::Eigenspace,
+        _ => DaslType::ShardId,
+    }
+}
+
 /// A sheaf section: the triple (M-shard, H-encoding, E-data) with DASL type
 #[derive(Debug, Clone)]
 pub struct Section {
@@ -99,24 +122,31 @@ pub struct Section {
 
 impl Section {
     pub fn new(data: &[u8], encoding: Encoding) -> Self {
+        use sha2::{Sha256, Digest};
         let coords = dasl::orbifold_coords(data);
         let dasl_cid = dasl::nested_cid(data);
         let cid = format!("bafk{:x}", dasl_cid);
-        let p = encoding.prime();
-        // Classify eigenspace by prime
-        let eigenspace = match p {
-            2 | 3 | 5 | 7 | 11 | 13 | 47 => EigenSpace::Earth,
-            17 | 29 | 31 | 41 | 59 | 71 => EigenSpace::Spoke,
-            19 => EigenSpace::Hub,
-            23 => EigenSpace::Clock,
-            _ => EigenSpace::Earth,
+        let hash = Sha256::digest(data);
+
+        // Bott index from hash byte 12 (mod 8)
+        let bott = hash[12] % 8;
+
+        // Hecke index from hash byte 13 (mod 15 → index into MONSTER_PRIMES)
+        let hecke = hash[13] % 15;
+
+        // Eigenspace from hash byte 14:
+        //   Earth primes {2,3,5,7,11,13,47} carry 99.9996% energy → weight ~60%
+        //   Spoke {17,29,31,41,59,71} → ~25%, Hub {19} → ~10%, Clock {23} → ~5%
+        let eigenspace = match hash[14] % 20 {
+            0..=11  => EigenSpace::Earth,  // 60%
+            12..=16 => EigenSpace::Spoke,  // 25%
+            17 | 18 => EigenSpace::Hub,    // 10%
+            _       => EigenSpace::Clock,  //  5%
         };
-        // Bott index from data hash
-        let bott = (coords.0 % 8) as u8;
-        // Hecke index from prime
-        let hecke = dasl::MONSTER_PRIMES.iter().position(|&mp| mp == p).unwrap_or(0) as u8;
-        // Type: content gets NestedCid, protocols get Protocol, etc.
-        let dasl_type = DaslType::NestedCid;
+
+        // Type from hash byte 15 — classify by content characteristics
+        let dasl_type = classify_type(data, hash[15]);
+
         Section { shard: coords, encoding, cid, dasl_cid, dasl_type, eigenspace, bott, hecke }
     }
 
@@ -137,6 +167,7 @@ impl Section {
         let enc = self.encoding.name();
         let p = self.encoding.prime();
         let addr = self.dasl_addr();
+        let hecke_prime = dasl::MONSTER_PRIMES[self.hecke as usize];
         [
             format!("&lt;div typeof=\"erdfa:SheafSection dasl:Type{}\" about=\"#{}\"&gt;",
                 self.dasl_type as u8, self.cid),
@@ -147,7 +178,7 @@ impl Section {
             format!("  &lt;meta property=\"dasl:type\" content=\"{}\" /&gt;", self.dasl_type as u8),
             format!("  &lt;meta property=\"dasl:eigenspace\" content=\"{}\" /&gt;", self.eigenspace.name()),
             format!("  &lt;meta property=\"dasl:bott\" content=\"{} ({})\" /&gt;", self.bott, dasl::BOTT_NAMES[self.bott as usize]),
-            format!("  &lt;meta property=\"dasl:hecke\" content=\"T_{}\" /&gt;", p),
+            format!("  &lt;meta property=\"dasl:hecke\" content=\"T_{}\" /&gt;", hecke_prime),
             format!("  &lt;meta property=\"sheaf:orbifold\" content=\"({} mod 71, {} mod 59, {} mod 47)\" /&gt;", l, m, n),
             format!("  &lt;link property=\"sheaf:subgroupIndex\" href=\"erdfa:H/{}\" /&gt;", enc),
             "&lt;/div&gt;".to_string(),
@@ -160,6 +191,7 @@ impl Section {
         let enc = self.encoding.name();
         let p = self.encoding.prime();
         let addr = self.dasl_addr();
+        let hecke_prime = dasl::MONSTER_PRIMES[self.hecke as usize];
         [
             format!("<div typeof=\"erdfa:SheafSection dasl:Type{}\" about=\"#{}\">",
                 self.dasl_type as u8, self.cid),
@@ -170,7 +202,7 @@ impl Section {
             format!("  <meta property=\"dasl:type\" content=\"{}\" />", self.dasl_type as u8),
             format!("  <meta property=\"dasl:eigenspace\" content=\"{}\" />", self.eigenspace.name()),
             format!("  <meta property=\"dasl:bott\" content=\"{} ({})\" />", self.bott, dasl::BOTT_NAMES[self.bott as usize]),
-            format!("  <meta property=\"dasl:hecke\" content=\"T_{}\" />", p),
+            format!("  <meta property=\"dasl:hecke\" content=\"T_{}\" />", hecke_prime),
             format!("  <meta property=\"sheaf:orbifold\" content=\"({} mod 71, {} mod 59, {} mod 47)\" />", l, m, n),
             format!("  <link property=\"sheaf:subgroupIndex\" href=\"erdfa:H/{}\" />", enc),
             "</div>".to_string(),
@@ -193,9 +225,10 @@ pub fn restriction_map(source: &Section, target: &Section) -> String {
 
 /// Sheaf header line for paste metadata
 pub fn sheaf_header(s: &Section) -> String {
+    let hecke_prime = dasl::MONSTER_PRIMES[s.hecke as usize];
     format!("Sheaf: {},{},{} H/{} p={} T{} {} B{} T_{}",
         s.shard.0, s.shard.1, s.shard.2,
         s.encoding.name(), s.encoding.prime(),
         s.dasl_type as u8, s.eigenspace.name(),
-        s.bott, s.encoding.prime())
+        s.bott, hecke_prime)
 }

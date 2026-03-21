@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "erdfa-publish-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1774013365,
+        "narHash": "sha256-yJ1UvrC99NXmmjGlGBZuILlRL9KWqyPD2UqvfWtE2wM=",
+        "owner": "meta-introspector",
+        "repo": "erdfa-publish",
+        "rev": "793e9c0d367a1f0ce4babff4e1c7adde7c01749c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "meta-introspector",
+        "repo": "erdfa-publish",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -36,6 +52,7 @@
     },
     "root": {
       "inputs": {
+        "erdfa-publish-src": "erdfa-publish-src",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "rust-ipfs": "rust-ipfs"
