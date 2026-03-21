@@ -112,7 +112,9 @@ r#"&lt;div xmlns=&quot;http://www.w3.org/1999/xhtml&quot;
     }
     
     pub fn to_qr_url(&self) -> String {
-        format!("https://solana.solfunmeme.com/pastebin/paste/{}", self.id)
+        let base = std::env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
+        let path = std::env::var("BASE_PATH").unwrap_or_default();
+        format!("{}{}/paste/{}", base, path, self.id)
     }
     
     pub fn to_monster_coords(&self) -> [u64; 6] {

@@ -99,7 +99,7 @@
               Environment="BIND_ADDR=127.0.0.1:8090"
               Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
               Environment="RUST_LOG=info"
-              Environment="BASE_URL=https://solana.solfunmeme.com"
+              Environment="BASE_URL=\${KANT_BASE_URL:-https://solana.solfunmeme.com}"
               Environment="BASE_PATH=/pastebin"
               Environment="PATH=${kubo}/bin"
 
