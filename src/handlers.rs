@@ -4,7 +4,17 @@ use crate::{ipfs, plugin, storage, tagging, view};
 use actix_web::{web, HttpResponse, Result};
 use chrono::Utc;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::{env, fs};
+
+static BROWSE_CACHE: Mutex<Option<BrowseCache>> = Mutex::new(None);
+
+struct BrowseCache {
+    pages: HashMap<usize, String>,
+    total: usize,
+    index_mtime: std::time::SystemTime,
+}
 
 struct AccessCommands {
     ipfs: String,
@@ -789,6 +799,25 @@ pub async fn browse(
     let index_file = format!("{}/index.jsonl", uucp_dir);
 
     let search = query.get("q").map(|s| s.to_lowercase());
+    let page: usize = query.get("page").and_then(|p| p.parse().ok()).unwrap_or(1).max(1);
+    const PAGE_SIZE: usize = 50;
+
+    // If no search, try cache
+    if search.is_none() {
+        let mtime = fs::metadata(&index_file).ok().and_then(|m| m.modified().ok());
+        let mut cache = BROWSE_CACHE.lock().unwrap();
+        if let (Some(ref c), Some(mt)) = (&*cache, mtime) {
+            if c.index_mtime == mt {
+                if let Some(html) = c.pages.get(&page) {
+                    return Ok(HttpResponse::Ok()
+                        .content_type("text/html; charset=utf-8")
+                        .body(html.clone()));
+                }
+            } else {
+                *cache = None; // invalidate
+            }
+        }
+    }
 
     let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
         .unwrap_or_default()
@@ -804,33 +833,58 @@ pub async fn browse(
         })
         .collect();
 
+    let total = entries.len();
+    let total_pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
     let search_val = search.as_deref().unwrap_or("");
+    let q_param = if search_val.is_empty() { String::new() } else { format!("&q={}", search_val) };
 
-    let items: String = entries.iter().rev().take(50).map(|e| {
-        let display_title = if e.title == "untitled" || e.title.is_empty() {
-            e.description.as_deref().unwrap_or("untitled")
-        } else {
-            &e.title
-        };
-        let tags = if !e.keywords.is_empty() {
-            format!(" <span style=\"color:#666;font-size:11px\">[{}]</span>", e.keywords.join(", "))
-        } else {
-            String::new()
-        };
-        format!(r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}">{}</a>{} <span style="color:#666">{}</span></div>"#,
-            view::url(bp, &format!("/paste/{}", e.id)), display_title, tags, e.timestamp)
-    }).collect();
+    let items: String = entries.iter().rev()
+        .skip((page - 1) * PAGE_SIZE)
+        .take(PAGE_SIZE)
+        .map(|e| {
+            let display_title = if e.title == "untitled" || e.title.is_empty() {
+                e.description.as_deref().unwrap_or("untitled")
+            } else {
+                &e.title
+            };
+            let tags = if !e.keywords.is_empty() {
+                format!(" <span style=\"color:#666;font-size:11px\">[{}]</span>", e.keywords.join(", "))
+            } else {
+                String::new()
+            };
+            format!(r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}">{}</a>{} <span style="color:#666">{}</span></div>"#,
+                view::url(bp, &format!("/paste/{}", e.id)), display_title, tags, e.timestamp)
+        }).collect();
+
+    let prev = if page > 1 { format!(r#"<a href="{}?page={}{}">&laquo; Prev</a>"#, view::url(bp, "/browse"), page - 1, q_param) } else { String::new() };
+    let next = if page < total_pages { format!(r#"<a href="{}?page={}{}">&raquo; Next</a>"#, view::url(bp, "/browse"), page + 1, q_param) } else { String::new() };
 
     let mut p = view::Page::new("Browse Pastes");
     for w in view::nav_bar(bp) { p.nav(w); }
     p.content(view::W::Raw(format!(
-        r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form><div style="margin-top:20px">{}</div>"#,
-        view::html_escape(search_val), items
+        r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>
+<p style="color:#666">{} pastes — page {} of {}</p>
+<div style="margin-top:10px">{}</div>
+<div style="margin-top:15px;display:flex;gap:20px">{} {}</div>"#,
+        view::html_escape(search_val), total, page, total_pages, items, prev, next
     )));
+
+    let html = p.render();
+
+    // Cache non-search pages
+    if search.is_none() {
+        if let Some(mtime) = fs::metadata(&index_file).ok().and_then(|m| m.modified().ok()) {
+            let mut cache = BROWSE_CACHE.lock().unwrap();
+            let c = cache.get_or_insert_with(|| BrowseCache {
+                pages: HashMap::new(), total, index_mtime: mtime,
+            });
+            c.pages.insert(page, html.clone());
+        }
+    }
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(p.render()))
+        .body(html))
 }
 
 /// GET /ipfs/{cid} - Proxy IPFS content
@@ -874,8 +928,56 @@ pub async fn gallery() -> Result<HttpResponse> {
     let bp = &base_path;
     let nft_dir = env::var("NFT_DIR")
         .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
 
     let mut items = Vec::new();
+
+    // 1. Scan spool for uploaded images and HTML
+    if let Ok(entries) = fs::read_dir(&uucp_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.ends_with(".meta") { continue; }
+            let meta_str = match fs::read_to_string(entry.path()) { Ok(s) => s, Err(_) => continue };
+            let mut meta = HashMap::new();
+            for line in meta_str.lines() {
+                if let Some((k, v)) = line.split_once(':') {
+                    meta.insert(k.trim().to_string(), v.trim().to_string());
+                }
+            }
+            let mime = meta.get("Mime").map(|s| s.as_str()).unwrap_or("");
+            if !mime.starts_with("image/") && mime != "text/html" { continue; }
+
+            let title = meta.get("Title").cloned().unwrap_or_else(|| name.clone());
+            let id = name.trim_end_matches(".meta");
+            // strip the outer extension to get the paste id
+            let paste_id = id.rsplit_once('.').map(|(s, _)| s).unwrap_or(id);
+            let ipfs = meta.get("IPFS").cloned().unwrap_or_default();
+
+            let thumb = if mime.starts_with("image/") {
+                format!(r#"<img src="{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
+                    view::url(bp, &format!("/file/{}", paste_id)), title)
+            } else {
+                r#"<div style="width:200px;height:150px;background:#222;display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:48px">📄</div>"#.to_string()
+            };
+
+            let ipfs_link = if ipfs.is_empty() { String::new() } else {
+                format!(r#" | <a href="{}">IPFS</a>"#, view::url(bp, &format!("/ipfs/{}", ipfs)))
+            };
+
+            items.push(format!(
+                r#"<div style="background:#1a1a1a;padding:15px;border-radius:8px;display:flex;gap:15px;align-items:start">
+{thumb}
+<div>
+<h3 style="color:#0ff;margin:0"><a href="{href}">{title}</a></h3>
+<p style="color:#999;margin:5px 0;font-size:12px">{mime}{ipfs_link}</p>
+</div></div>"#,
+                href = view::url(bp, &format!("/paste/{}", paste_id)),
+            ));
+        }
+    }
+
+    // 2. Existing NFT enriched entities
     if let Ok(entries) = fs::read_dir(&nft_dir) {
         for entry in entries.flatten() {
             if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
@@ -883,7 +985,7 @@ pub async fn gallery() -> Result<HttpResponse> {
             }
             let qid = entry.file_name().to_string_lossy().to_string();
             let meta_path = entry.path().join("metadata.rdfa");
-            let mut meta = std::collections::HashMap::new();
+            let mut meta = HashMap::new();
             if let Ok(content) = fs::read_to_string(&meta_path) {
                 for line in content.lines() {
                     if let Some((k, v)) = line.split_once('=') {
@@ -932,10 +1034,10 @@ pub async fn gallery() -> Result<HttpResponse> {
         }
     }
 
-    let mut p = view::Page::new("🖼️ NFT Gallery");
+    let mut p = view::Page::new("🖼️ Gallery");
     for w in view::nav_bar(bp) { p.nav(w); }
     p.content(view::W::Raw(format!(
-        r#"<p style="color:#999">{} enriched entities</p><div style="display:flex;flex-direction:column;gap:10px">{}</div>"#,
+        r#"<p style="color:#999">{} items</p><div style="display:flex;flex-direction:column;gap:10px">{}</div>"#,
         items.len(), items.join("\n")
     )));
 
