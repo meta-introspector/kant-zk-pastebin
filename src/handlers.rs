@@ -84,119 +84,31 @@ pub async fn index(
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponse> {
     let reply_to = query.get("reply_to").map(|s| s.as_str()).unwrap_or("");
-    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let base_path = env::var("BASE_PATH").unwrap_or_default();
+    let bp = &base_path;
 
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Kant Pastebin</title>
-<style>
-body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
-a{{color:#0ff;text-decoration:none}}
-textarea{{width:100%;height:300px;background:#111;color:#0f0;border:1px solid #0f0;padding:10px;font-family:monospace}}
-input{{background:#111;color:#0f0;border:1px solid #0f0;padding:5px;width:100%}}
-button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;font-weight:bold;margin-right:10px}}
-.nav{{background:#111;padding:10px;margin-bottom:20px;border:1px solid #0f0}}
-.nav a{{margin-right:15px}}
-</style>
-</head><body>
-<div class="nav">
-<a href="{}/">🏠 Home</a>
-<a href="{}/browse">📚 Browse</a>
-<a href="{}/gallery">🖼️ Gallery</a>
-<a href="/splitter/">✂️ Splitter</a>
-<a href="{}/openapi.json">📖 API</a>
-</div>
-<h1>📋 Kant Pastebin</h1>
-<p>UUCP + zkTLS + IPFS</p>
-<form id="form">
-<input type="text" id="title" placeholder="Title" value=""><br><br>
-<textarea id="content" placeholder="Paste content here..."></textarea><br><br>
+    let mut p = view::Page::new("📋 Kant Pastebin");
+    for w in view::nav_bar(bp) { p.nav(w); }
+    p.content(view::W::Raw("<p>UUCP + zkTLS + IPFS</p>".into()));
+    p.content(view::W::Raw(format!(
+        r#"<form id="form">
+<input type="text" id="title" placeholder="Title"><br><br>
+<textarea id="content" placeholder="Paste content here..." style="width:100%;height:300px"></textarea><br><br>
 <input type="file" id="file" accept="image/*,.html,.json,.svg"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
-<input type="hidden" id="reply_to" value="{}">
+<input type="hidden" id="reply_to" value="{reply_to}">
 <button type="submit">📤 Share</button>
 <button type="button" onclick="preview()">👁️ Preview</button>
 <button type="button" onclick="sendToSplitter()">✂️ Split</button>
 </form>
-<div id="result"></div>
-<br><a href="{}/browse">📚 Browse</a> | <a href="{}/openapi.json">📖 API</a> | <a href="{}/swagger-ui/">🔧 Swagger</a>
-<script>
-const basePath = '{}';
-const form = document.getElementById('form');
-const content = document.getElementById('content');
-
-content.addEventListener('keydown', (e) => {{
-  if (e.ctrlKey && e.key === 'Enter') {{
-    form.dispatchEvent(new Event('submit'));
-  }}
-}});
-
-function preview() {{
-  const div = document.createElement('div');
-  div.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a0a;z-index:1000;overflow:auto;padding:20px;box-sizing:border-box';
-  div.innerHTML = '<button onclick=\"this.parentElement.remove()\" style=\"position:sticky;top:10px;float:right\">✕ Close</button><pre style=\"white-space:pre-wrap;word-wrap:break-word\">' + content.value + '</pre>';
-  document.body.appendChild(div);
-}}
-
-function sendToSplitter() {{
-  localStorage.setItem('splitter-text', content.value);
-  window.open('/splitter/', '_blank');
-}}
-
-form.onsubmit = async (e) => {{
-  e.preventDefault();
-  const btn = form.querySelector('button');
-  btn.disabled = true;
-  btn.textContent = '⏳ Posting...';
-  
-  try {{
-    const fileInput = document.getElementById('file');
-    let res;
-    
-    if (fileInput.files.length > 0) {{
-      const fd = new FormData();
-      fd.append('file', fileInput.files[0]);
-      fd.append('title', document.getElementById('title').value || fileInput.files[0].name);
-      res = await fetch(basePath + '/upload', {{ method: 'POST', body: fd }});
-    }} else {{
-      const data = {{
-        content: content.value,
-        title: document.getElementById('title').value || undefined,
-        keywords: document.getElementById('keywords').value.split(',').map(s=>s.trim()).filter(s=>s),
-        reply_to: document.getElementById('reply_to').value || undefined
-      }};
-      res = await fetch(basePath + '/paste', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify(data)
-      }});
-    }}
-    
-    if (!res.ok) throw new Error('Failed: ' + res.status);
-    const json = await res.json();
-    window.location = basePath + json.url;
-  }} catch(err) {{
-    alert('Error: ' + err.message);
-    btn.disabled = false;
-    btn.textContent = '📤 Share';
-  }}
-}};
-</script>
-</body></html>"#,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        reply_to,
-        base_path,
-        base_path,
-        base_path,
-        base_path
-    );
+<div id="result"></div>"#
+    )));
+    p.js_var("basePath", bp);
+    p.js(INDEX_JS);
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(html))
+        .body(p.render()))
 }
 
 /// POST /paste - Create paste
@@ -572,16 +484,9 @@ pub async fn get_paste(
                 vec![]
             };
 
-            let prev_link = prev_id
-                .map(|pid| format!(r#"<a href="{}/paste/{}">← Prev</a>"#, base_path, pid))
-                .unwrap_or_default();
-            let next_link = next_id
-                .map(|nid| format!(r#"<a href="{}/paste/{}">Next →</a>"#, base_path, nid))
-                .unwrap_or_default();
-
             let related_html = if !related.is_empty() {
                 let items: String = related.iter().map(|e| {
-                    format!(r#"<div style="padding:5px"><a href="{}/paste/{}">{}</a></div>"#, base_path, e.id, e.title)
+                    format!(r#"<div style="padding:5px"><a href="{}">{}</a></div>"#, view::url(&base_path, &format!("/paste/{}", e.id)), e.title)
                 }).collect();
                 format!(r#"<h3>Related Posts:</h3><div style="background:#111;padding:10px;margin:10px 0">{}</div>"#, items)
             } else {
@@ -592,10 +497,14 @@ pub async fn get_paste(
             p.script_src("https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js");
 
             // Nav
-            p.nav(view::W::Raw(format!(
-                r#"<a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/raw/{}">📄 Raw</a> {} {}"#,
-                base_path, base_path, base_path, id, prev_link, next_link
-            )));
+            for w in view::nav_bar(&base_path) { p.nav(w); }
+            p.nav(view::W::Link { label: "📄 Raw".into(), href: view::url(&base_path, &format!("/raw/{}", id)) });
+            if let Some(pid) = prev_id {
+                p.nav(view::W::Link { label: "← Prev".into(), href: view::url(&base_path, &format!("/paste/{}", pid)) });
+            }
+            if let Some(nid) = next_id {
+                p.nav(view::W::Link { label: "Next →".into(), href: view::url(&base_path, &format!("/paste/{}", nid)) });
+            }
 
             // Actions
             p.action(view::W::Link { label: "💬 Reply".into(), href: format!("{}/?reply_to={}", base_path, id) });
@@ -609,8 +518,8 @@ pub async fn get_paste(
             p.action(view::W::Btn { label: "eRDFa".into(), onclick: "shareErdfa()".into() });
             p.action(view::W::Btn { label: "🔓 Decode".into(), onclick: "decodeDataUrl()".into() });
             p.action(view::W::Btn { label: "👁️".into(), onclick: "showPreview()".into() });
-            p.action(view::W::Btn { label: "✂️".into(), onclick: "localStorage.setItem('splitter-text',document.querySelector('pre').textContent);window.open('/splitter/','_blank')".into() });
-            p.action(view::W::Btn { label: "🔐 Stego".into(), onclick: "localStorage.setItem('stego-input',document.querySelector('pre').textContent);window.open('/stego','_blank')".into() });
+            p.action(view::W::Btn { label: "✂️".into(), onclick: "localStorage.setItem('splitter-text',document.querySelector('pre').textContent);window.open(basePath+'/splitter/','_blank')".into() });
+            p.action(view::W::Btn { label: "🔐 Stego".into(), onclick: "localStorage.setItem('stego-input',document.querySelector('pre').textContent);window.open(basePath+'/stego','_blank')".into() });
 
             // Commands
             p.cmd(view::W::Cmd { text: commands.ipfs.clone() });
@@ -628,6 +537,7 @@ pub async fn get_paste(
             p.modal(view::W::Raw(view::QR_MODAL.to_string()));
 
             // JS
+            p.js_var("basePath", &base_path);
             p.js_var("ipfsCid", ipfs_cid.unwrap_or(""));
             p.js_var("pasteUrl", &format!("{}/paste/{}", base_url, id));
             p.js_var("dataUrl", &commands.data_url);
@@ -664,28 +574,22 @@ pub async fn get_paste(
 
             let content_html = if mime.starts_with("image/") {
                 format!(
-                    r#"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#,
-                    base_path, id, title
+                    r#"<img src="{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#,
+                    view::url(&base_path, &format!("/file/{}", id)), title
                 )
             } else {
                 format!(
-                    r#"<p>📎 <a href="{}/file/{}">{}</a> ({}, {} bytes)</p>"#,
-                    base_path, id, title, mime, size
+                    r#"<p>📎 <a href="{}">{}</a> ({}, {} bytes)</p>"#,
+                    view::url(&base_path, &format!("/file/{}", id)), title, mime, size
                 )
             };
 
-            let html = format!(
-                r#"<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>{}</title>
-<style>body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}a{{color:#0ff}}</style>
-</head><body>
-<div><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/file/{}">📄 Raw</a></div>
-<h1>{}</h1>
-<p>CID: {} | IPFS: {}</p>
-{}
-</body></html>"#,
-                title, base_path, base_path, base_path, id, title, cid, ipfs_cid, content_html
-            );
+            let mut p = view::Page::new(&title);
+            for w in view::nav_bar(&base_path) { p.nav(w); }
+            p.nav(view::W::Link { label: "📄 Raw".into(), href: view::url(&base_path, &format!("/file/{}", id)) });
+            p.content(view::W::Raw(format!("<p>CID: {} | IPFS: {}</p>", cid, ipfs_cid)));
+            p.content(view::W::Raw(content_html));
+            let html = p.render();
 
             Ok(HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
@@ -880,7 +784,8 @@ pub async fn browse(
 ) -> Result<HttpResponse> {
     let uucp_dir =
         env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
-    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let base_path = env::var("BASE_PATH").unwrap_or_default();
+    let bp = &base_path;
     let index_file = format!("{}/index.jsonl", uucp_dir);
 
     let search = query.get("q").map(|s| s.to_lowercase());
@@ -899,14 +804,7 @@ pub async fn browse(
         })
         .collect();
 
-    let search_box = if let Some(q) = search {
-        format!(
-            r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#,
-            q
-        )
-    } else {
-        r#"<form method="get"><input type="text" name="q" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#.to_string()
-    };
+    let search_val = search.as_deref().unwrap_or("");
 
     let items: String = entries.iter().rev().take(50).map(|e| {
         let display_title = if e.title == "untitled" || e.title.is_empty() {
@@ -919,27 +817,20 @@ pub async fn browse(
         } else {
             String::new()
         };
-        format!(r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a>{} <span style="color:#666">{}</span></div>"#, 
-            base_path, e.id, display_title, tags, e.timestamp)
+        format!(r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}">{}</a>{} <span style="color:#666">{}</span></div>"#,
+            view::url(bp, &format!("/paste/{}", e.id)), display_title, tags, e.timestamp)
     }).collect();
 
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Browse Pastes</title>
-<style>body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
-a{{color:#0ff;text-decoration:none}}</style>
-</head><body>
-<div><a href="{}/">🏠 Home</a></div>
-<h1>Browse Pastes</h1>
-{}
-<div style="margin-top:20px">{}</div>
-</body></html>"#,
-        base_path, search_box, items
-    );
+    let mut p = view::Page::new("Browse Pastes");
+    for w in view::nav_bar(bp) { p.nav(w); }
+    p.content(view::W::Raw(format!(
+        r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form><div style="margin-top:20px">{}</div>"#,
+        view::html_escape(search_val), items
+    )));
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(html))
+        .body(p.render()))
 }
 
 /// GET /ipfs/{cid} - Proxy IPFS content
@@ -980,6 +871,7 @@ pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
 /// GET /gallery - NFT gallery from enriched directory
 pub async fn gallery() -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_default();
+    let bp = &base_path;
     let nft_dir = env::var("NFT_DIR")
         .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
 
@@ -1008,71 +900,48 @@ pub async fn gallery() -> Result<HttpResponse> {
             let has_image = entry.path().join("source.jpg").exists();
 
             let img_html = if has_image && !nft_cid.is_empty() {
-                format!(
-                    r#"<img src="{}/ipfs/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
-                    base_path, nft_cid, name
-                )
+                format!(r#"<img src="{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
+                    view::url(bp, &format!("/ipfs/{}", nft_cid)), name)
             } else if has_image {
-                format!(
-                    r#"<img src="{}/gallery/img/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
-                    base_path, qid, name
-                )
+                format!(r#"<img src="{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
+                    view::url(bp, &format!("/gallery/img/{}", qid)), name)
             } else {
-                r#"<div style="width:200px;height:150px;background:#222;display:flex;align-items:center;justify-content:center;border-radius:4px">🖼️ No image</div>"#.to_string()
+                r#"<div style="width:200px;height:150px;background:#222;display:flex;align-items:center;justify-content:center;border-radius:4px">🖼️</div>"#.to_string()
+            };
+
+            let nft_link = if nft_cid.is_empty() { String::new() } else {
+                format!(r#"| <a href="{}">NFT</a>"#, view::url(bp, &format!("/ipfs/{}", nft_cid)))
+            };
+            let dir_link = if dir_cid.is_empty() { String::new() } else {
+                format!(r#"| <a href="{}">IPFS Dir</a>"#, view::url(bp, &format!("/ipfs/{}", dir_cid)))
             };
 
             items.push(format!(
                 r#"<div style="background:#1a1a1a;padding:15px;border-radius:8px;display:flex;gap:15px;align-items:start">
 {img_html}
 <div>
-<h3 style="color:#0ff;margin:0"><a href="{bp}/ipfs/{hcid}">{name}</a></h3>
+<h3 style="color:#0ff;margin:0"><a href="{href}">{name}</a></h3>
 <p style="color:#999;margin:5px 0">{desc}</p>
-<p style="font-size:12px;color:#666">
-<a href="https://www.wikidata.org/wiki/{qid}">{qid}</a>
-{nft_link}
-{dir_link}
-</p>
-<code style="font-size:10px;color:#555">{witness}</code>
+<p style="font-size:12px;color:#666"><a href="https://www.wikidata.org/wiki/{qid}">{qid}</a> {nft_link} {dir_link}</p>
+<code style="font-size:10px;color:#555">{wit}</code>
 </div></div>"#,
-                bp = base_path,
-                hcid = html_cid,
-                name = name,
-                desc = desc,
-                qid = qid,
-                nft_link = if nft_cid.is_empty() { String::new() } else { format!(r#"| <a href="{}/ipfs/{}">NFT</a>"#, base_path, nft_cid) },
-                dir_link = if dir_cid.is_empty() { String::new() } else { format!(r#"| <a href="{}/ipfs/{}">IPFS Dir</a>"#, base_path, dir_cid) },
-                witness = &witness[..witness.len().min(16)],
+                href = view::url(bp, &format!("/ipfs/{}", html_cid)),
+                name = name, desc = desc, qid = qid,
+                wit = &witness[..witness.len().min(16)],
             ));
         }
     }
 
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>NFT Gallery</title>
-<style>
-body{{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#111;color:#eee}}
-a{{color:#0ff;text-decoration:none}}
-.nav{{background:#1a1a1a;padding:10px;margin-bottom:20px;border-radius:8px}}
-.nav a{{margin-right:15px}}
-h1{{color:#0ff}}
-</style></head><body>
-<div class="nav">
-<a href="{bp}/">🏠 Home</a>
-<a href="{bp}/browse">📚 Browse</a>
-<a href="{bp}/gallery">🖼️ Gallery</a>
-</div>
-<h1>🖼️ NFT Gallery</h1>
-<p style="color:#999">{count} enriched entities</p>
-<div style="display:flex;flex-direction:column;gap:10px">{items}</div>
-</body></html>"#,
-        bp = base_path,
-        count = items.len(),
-        items = items.join("\n"),
-    );
+    let mut p = view::Page::new("🖼️ NFT Gallery");
+    for w in view::nav_bar(bp) { p.nav(w); }
+    p.content(view::W::Raw(format!(
+        r#"<p style="color:#999">{} enriched entities</p><div style="display:flex;flex-direction:column;gap:10px">{}</div>"#,
+        items.len(), items.join("\n")
+    )));
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(html))
+        .body(p.render()))
 }
 
 /// GET /gallery/img/{qid} - Serve source image from enriched dir
@@ -1212,6 +1081,14 @@ pub async fn run_plugin(
         Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e}))),
     }
 }
+
+const INDEX_JS: &str = r#"
+var form=document.getElementById('form'),content=document.getElementById('content');
+content.addEventListener('keydown',function(e){if(e.ctrlKey&&e.key==='Enter')form.dispatchEvent(new Event('submit'))});
+function preview(){var d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a0a;z-index:1000;overflow:auto;padding:20px;box-sizing:border-box';d.innerHTML='<button onclick="this.parentElement.remove()" style="position:sticky;top:10px;float:right">✕ Close</button><pre style="white-space:pre-wrap;word-wrap:break-word">'+content.value+'</pre>';document.body.appendChild(d)}
+function sendToSplitter(){localStorage.setItem('splitter-text',content.value);window.open(basePath+'/splitter','_blank')}
+form.onsubmit=async function(e){e.preventDefault();var btn=form.querySelector('button');btn.disabled=true;btn.textContent='⏳ Posting...';try{var fi=document.getElementById('file'),res;if(fi.files.length>0){var fd=new FormData();fd.append('file',fi.files[0]);fd.append('title',document.getElementById('title').value||fi.files[0].name);res=await fetch(basePath+'/upload',{method:'POST',body:fd})}else{res=await fetch(basePath+'/paste',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content.value,title:document.getElementById('title').value||undefined,keywords:document.getElementById('keywords').value.split(',').map(function(s){return s.trim()}).filter(Boolean),reply_to:document.getElementById('reply_to').value||undefined})})}if(!res.ok)throw new Error('Failed: '+res.status);var j=await res.json();window.location=basePath+j.url}catch(err){alert('Error: '+err.message);btn.disabled=false;btn.textContent='📤 Share'}};
+"#;
 
 #[cfg(test)]
 mod tests {

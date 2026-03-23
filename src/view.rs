@@ -295,6 +295,23 @@ function crossPost(){
 }
 "#;
 
+/// Join base_path + relative path, avoiding double slashes
+pub fn url(base: &str, path: &str) -> String {
+    let b = base.trim_end_matches('/');
+    if path.is_empty() || path == "/" { format!("{}/", b) }
+    else if path.starts_with('/') { format!("{}{}", b, path) }
+    else { format!("{}/{}", b, path) }
+}
+
+/// Consistent nav bar for every page
+pub fn nav_bar(base: &str) -> Vec<W> {
+    vec![W::Raw(format!(
+        r#"<a href="{}">🏠 Home</a> <a href="{}">📚 Browse</a> <a href="{}">🖼️ Gallery</a> <a href="{}">✂️ Splitter</a> <a href="{}">🔐 Stego</a> <a href="{}">📖 API</a>"#,
+        url(base, "/"), url(base, "/browse"), url(base, "/gallery"),
+        url(base, "/splitter"), url(base, "/stego"), url(base, "/openapi.json"),
+    ))]
+}
+
 /// Render preview page
 pub fn render_preview(id: &str, content: &str) -> String {
     let mut p = Page::new(&format!("Preview: {}", id));
