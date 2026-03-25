@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // Kant Pastebin Microservice Tests
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 
 const PORT = process.env.TEST_PORT || 9191;
 const BASE_URL = `http://localhost:${PORT}`;
+const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME || 'chromium';
 
 (async () => {
   console.log('=== Kant Pastebin Tests ===');
   console.log(`URL: ${BASE_URL}`);
   
   const browser = await puppeteer.launch({ 
+    executablePath: CHROME,
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });

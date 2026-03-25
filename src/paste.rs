@@ -131,9 +131,12 @@ r#"&lt;div xmlns=&quot;http://www.w3.org/1999/xhtml&quot;
             u64::from_be_bytes(hash[8..16].try_into().unwrap()) % 47,
         ]
     }
-}
 
-#[cfg(test)]
+    /// Split paste content into 71 Gandalf shards with Merkle commitment
+    pub fn to_gandalf_shards(&self) -> (Vec<Vec<u8>>, String) {
+        erdfa_publish::distribute::gandalf_shard(self.content.as_bytes())
+    }
+}#[cfg(test)]
 mod tests {
     use super::*;
 

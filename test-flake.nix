@@ -34,5 +34,14 @@
         cd ${./.}
         ${pkgs.nodejs}/bin/node test-pastebin.js
       '';
+
+      packages.${system}.test-extended = pkgs.writeShellScriptBin "test-extended" ''
+        export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
+        export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
+        export TEST_PORT=''${TEST_PORT:-8090}
+
+        cd ${./.}
+        ${pkgs.nodejs}/bin/node test-extended.js
+      '';
     };
 }

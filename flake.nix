@@ -141,6 +141,7 @@
               WantedBy=timers.target
             '';
           };
+
         };
 
         apps = {
@@ -160,7 +161,13 @@
             clippy
             pkg-config
             openssl
+            nodejs
+            chromium
           ];
+          shellHook = ''
+            export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
+            export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
+          '';
         };
       }
     );
