@@ -104,7 +104,7 @@ pub async fn index(
         r#"<form id="form">
 <input type="text" id="title" placeholder="Title"><br><br>
 <textarea id="content" placeholder="Paste content here..." style="width:100%;height:300px"></textarea><br><br>
-<input type="file" id="file" accept="image/*,.html,.json,.svg"><br><br>
+<input type="file" id="file" accept="image/*,audio/*,.html,.json,.svg,.midi,.mid,.wav,.ly"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
 <input type="hidden" id="reply_to" value="{reply_to}">
 <button type="submit">📤 Share</button>
@@ -178,7 +178,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
             ipfs_cid: None,
             witness,
             url: format!("/paste/{}", existing_id),
-            permalink: format!("/paste/{}", local_cid),
+            permalink: format!("/paste/{}", existing_id),
             uucp_path: "".to_string(),
             reply_to: paste.reply_to.clone(),
         }));
@@ -332,6 +332,32 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     // CID dedup file
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
     fs::write(&cid_file, &id).ok();
+
+    // Append to index.jsonl
+    let index_entry = PasteIndex {
+        id: id.clone(),
+        title: title.clone(),
+        description: None,
+        keywords: vec![],
+        cid: local_cid.clone(),
+        witness: witness.clone(),
+        timestamp: ts.clone(),
+        filename: filename.clone(),
+        ngrams: vec![],
+        ipfs_cid: ipfs_cid.clone(),
+        reply_to: None,
+        size: file_data.len(),
+        uucp_path: uucp.clone(),
+    };
+    let index_file = format!("{}/index.jsonl", uucp_dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&index_file)
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "{}", serde_json::to_string(&index_entry).unwrap_or_default());
+    }
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "id": id,
@@ -582,10 +608,40 @@ pub async fn get_paste(
             let cid = headers.get("CID").cloned().unwrap_or_default();
             let size = headers.get("Size").cloned().unwrap_or_default();
 
+            let file_url = view::url(&base_path, &format!("/file/{}", id));
             let content_html = if mime.starts_with("image/") {
                 format!(
                     r#"<img src="{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#,
-                    view::url(&base_path, &format!("/file/{}", id)), title
+                    file_url, title
+                )
+            } else if mime == "audio/mid" || mime == "audio/midi" || mime == "audio/x-midi" {
+                format!(
+                    r#"<script src="https://cdn.jsdelivr.net/combine/npm/tone@14.7.77,npm/@tonejs/midi@2.0.28"></script>
+<div id="midi-player">
+<button onclick="playMidi()" style="font-size:24px;padding:12px 24px;cursor:pointer">▶ Play MIDI</button>
+<span id="midi-status"></span>
+</div>
+<p>📎 <a href="{}">{}</a> ({}, {} bytes)</p>
+<script>
+async function playMidi(){{
+  document.getElementById('midi-status').textContent='Loading...';
+  const r=await fetch('{}');
+  const b=await r.arrayBuffer();
+  const m=new Midi(b);
+  const s=new Tone.Synth().toDestination();
+  await Tone.start();
+  const n=Tone.now();
+  m.tracks.forEach(t=>t.notes.forEach(e=>s.triggerAttackRelease(e.name,e.duration,n+e.time,e.velocity)));
+  document.getElementById('midi-status').textContent='Playing '+m.tracks.reduce((a,t)=>a+t.notes.length,0)+' notes...';
+}}
+</script>"#,
+                    file_url, title, mime, size, file_url
+                )
+            } else if mime.starts_with("audio/") {
+                format!(
+                    r#"<audio controls src="{}" style="width:100%"></audio>
+<p>📎 <a href="{}">{}</a> ({}, {} bytes)</p>"#,
+                    file_url, file_url, title, mime, size
                 )
             } else {
                 format!(
@@ -901,6 +957,8 @@ pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
             let ct = match &data[..4.min(data.len())] {
                 [0x89, 0x50, 0x4E, 0x47] => "image/png",
                 [0xFF, 0xD8, ..] => "image/jpeg",
+                [0x4D, 0x54, 0x68, 0x64] => "audio/midi",
+                [0x52, 0x49, 0x46, 0x46] => "audio/wav",
                 [0x3C, ..] => "text/html; charset=utf-8",
                 [0x7B, ..] => "application/json",
                 _ if data.starts_with(b"<!") || data.starts_with(b"<html") => {
@@ -946,7 +1004,7 @@ pub async fn gallery() -> Result<HttpResponse> {
                 }
             }
             let mime = meta.get("Mime").map(|s| s.as_str()).unwrap_or("");
-            if !mime.starts_with("image/") && mime != "text/html" { continue; }
+            if !mime.starts_with("image/") && !mime.starts_with("audio/") && mime != "text/html" { continue; }
 
             let title = meta.get("Title").cloned().unwrap_or_else(|| name.clone());
             let id = name.trim_end_matches(".meta");
@@ -957,6 +1015,9 @@ pub async fn gallery() -> Result<HttpResponse> {
             let thumb = if mime.starts_with("image/") {
                 format!(r#"<img src="{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
                     view::url(bp, &format!("/file/{}", paste_id)), title)
+            } else if mime.starts_with("audio/") {
+                format!(r#"<div style="width:200px;display:flex;flex-direction:column;align-items:center;gap:8px"><div style="font-size:48px">🎵</div><a href="{}" style="color:#0f0">▶ Play</a></div>"#,
+                    view::url(bp, &format!("/paste/{}", paste_id)))
             } else {
                 r#"<div style="width:200px;height:150px;background:#222;display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:48px">📄</div>"#.to_string()
             };
@@ -1146,8 +1207,8 @@ pub async fn stego_dashboard() -> Result<HttpResponse> {
     let pb_base = format!("{}{}", base_url, base_path);
     let html = fs::read_to_string("erdfa-clean/wasm/index.html")
         .unwrap_or_else(|_| "<h1>Stego dashboard not found</h1>".to_string())
-        .replace("'./pkg/erdfa_wasm.js'", "'/stego/pkg/erdfa_wasm.js'")
-        .replace("'./samples/", "'/stego/samples/")
+        .replace("'./pkg/erdfa_wasm.js'", &format!("'{}/stego/pkg/erdfa_wasm.js'", base_path))
+        .replace("'./samples/", &format!("'{}/stego/samples/", base_path))
         .replace("window._pastebin_base || ''", &format!("'{}'", pb_base));
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
