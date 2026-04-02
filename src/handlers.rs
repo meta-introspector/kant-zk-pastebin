@@ -94,6 +94,7 @@ pub async fn index(
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponse> {
     let reply_to = query.get("reply_to").map(|s| s.as_str()).unwrap_or("");
+    let body = query.get("body").map(|s| s.as_str()).unwrap_or("");
     let base_path = env::var("BASE_PATH").unwrap_or_default();
     let bp = &base_path;
 
@@ -103,7 +104,7 @@ pub async fn index(
     p.content(view::W::Raw(format!(
         r#"<form id="form">
 <input type="text" id="title" placeholder="Title"><br><br>
-<textarea id="content" placeholder="Paste content here..." style="width:100%;height:300px"></textarea><br><br>
+<textarea id="content" placeholder="Paste content here..." style="width:100%;height:300px">{body}</textarea><br><br>
 <input type="file" id="file" accept="image/*,audio/*,.html,.json,.svg,.midi,.mid,.wav,.ly"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
 <input type="hidden" id="reply_to" value="{reply_to}">

@@ -324,8 +324,9 @@ function quoteSelection(){
   var sel=window.getSelection().toString();
   if(!sel)sel=document.querySelector('pre').textContent.substring(0,280);
   var quoted='> '+sel.split('\n').join('\n> ')+'\n\n';
-  var url=basePath+'/?reply_to='+encodeURIComponent(title)+'&body='+encodeURIComponent(quoted);
-  window.open(url,'_blank');
+  var replyTo=title;
+  var url=basePath+'/?reply_to='+encodeURIComponent(replyTo)+'&body='+encodeURIComponent(quoted);
+  window.location.href=url;
 }
 "#;
 
