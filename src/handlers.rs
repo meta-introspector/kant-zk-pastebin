@@ -158,7 +158,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
             }
         })
     });
-    let title = title_owned.as_str();
+    let title = if title_owned.len() > 80 { &title_owned[..80] } else { title_owned.as_str() };
     let keywords = paste.keywords.clone().unwrap_or_else(|| auto_tags);
 
     let mut hasher = Sha256::new();
@@ -191,9 +191,10 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         .collect::<Vec<_>>()
         .join("_");
     let filename = if slug_keywords.is_empty() {
-        format!("{}_{}.txt", ts, slug_title)
+        format!("{}_{}.txt", ts, &slug_title[..slug_title.len().min(40)])
     } else {
-        format!("{}_{}_{}.txt", ts, slug_title, slug_keywords)
+        let combined = format!("{}_{}", slug_title, slug_keywords);
+        format!("{}_{}.txt", ts, &combined[..combined.len().min(40)])
     };
 
     let id = filename.trim_end_matches(".txt").to_string();
@@ -556,6 +557,8 @@ pub async fn get_paste(
             p.action(view::W::Btn { label: "👁️".into(), onclick: "showPreview()".into() });
             p.action(view::W::Btn { label: "✂️".into(), onclick: "localStorage.setItem('splitter-text',document.querySelector('pre').textContent);window.open(basePath+'/splitter/','_blank')".into() });
             p.action(view::W::Btn { label: "🔐 Stego".into(), onclick: "localStorage.setItem('stego-input',document.querySelector('pre').textContent);window.open(basePath+'/stego','_blank')".into() });
+            p.action(view::W::Btn { label: "💬 Quote".into(), onclick: "quoteSelection()".into() });
+            p.action(view::W::Btn { label: "🎲 DA51".into(), onclick: "showDA51()".into() });
 
             // Commands
             p.cmd(view::W::Cmd { text: commands.ipfs.clone() });
@@ -583,6 +586,8 @@ pub async fn get_paste(
             p.js(view::JS_PREVIEW);
             p.js(view::JS_COPY_HTML);
             p.js(view::JS_CROSSPOST);
+            p.js(view::JS_QUOTE);
+            p.js(view::JS_DA51_EMOJI);
 
             let html = p.render();
 

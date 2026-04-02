@@ -318,3 +318,43 @@ pub fn render_preview(id: &str, content: &str) -> String {
     p.content(W::Pre(content.to_string()));
     p.render()
 }
+
+pub const JS_QUOTE: &str = r#"
+function quoteSelection(){
+  var sel=window.getSelection().toString();
+  if(!sel)sel=document.querySelector('pre').textContent.substring(0,280);
+  var quoted='> '+sel.split('\n').join('\n> ')+'\n\n';
+  var url=basePath+'/?reply_to='+encodeURIComponent(title)+'&body='+encodeURIComponent(quoted);
+  window.open(url,'_blank');
+}
+"#;
+
+pub const JS_DA51_EMOJI: &str = r#"
+function showDA51(){
+  var pre=document.querySelector('pre');
+  if(!pre)return;
+  var text=pre.textContent;
+  // Extract DASL from content
+  var m=text.match(/DASL:\s*(0x[0-9a-f]+)/i);
+  var orb=text.match(/Orbifold:\s*\((\d+),(\d+),(\d+)\)/);
+  if(!m&&!orb){alert('No DA51 address found');return}
+  var dasl=m?m[1]:'?';
+  var o0=orb?parseInt(orb[1]):0,o1=orb?parseInt(orb[2]):0,o2=orb?parseInt(orb[3]):0;
+  var emojiMap=['🌀','🔮','🔒','⚒️','🛡️','🔄','🌟'];
+  var e0=emojiMap[Math.floor(o0/10.15)]||'❓';
+  var e1=emojiMap[Math.floor(o1/8.43)]||'❓';
+  var e2=emojiMap[Math.floor(o2/6.72)]||'❓';
+  var bott=o2%8;
+  var bottNames=['ℤ','ℂ','ℍ','ℍ⊕ℍ','ℍ(2)','ℂ(4)','ℝ(8)','ℝ(8)⊕ℝ(8)'];
+  var html='<div style="font-size:2em;text-align:center;padding:20px;background:#111;border:2px solid #0f0;border-radius:8px">';
+  html+='<div style="font-size:3em">'+e0+e1+e2+'</div>';
+  html+='<div style="font-size:0.5em;color:#0f0">'+dasl+'</div>';
+  html+='<div style="font-size:0.5em;color:#0f0">Orbifold: ('+o0+','+o1+','+o2+') Bott: '+bott+' ('+bottNames[bott]+')</div>';
+  html+='</div>';
+  var modal=document.getElementById('qrModal');
+  document.getElementById('qrLabel').innerHTML=html;
+  document.getElementById('qrcode').style.display='none';
+  modal.style.display='block';
+}
+"#;
+
