@@ -1,17 +1,5 @@
 {
   "nodes": {
-    "erdfa-publish-src": {
-      "flake": false,
-      "locked": {
-        "narHash": "sha256-odbv1X/3J1yS8ElPP3A3M8zfYlFMEPVad4NCPO6sLPg=",
-        "type": "file",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-publish.git"
-      },
-      "original": {
-        "type": "file",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-publish.git"
-      }
-    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -48,7 +36,6 @@
     },
     "root": {
       "inputs": {
-        "erdfa-publish-src": "erdfa-publish-src",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "rust-ipfs": "rust-ipfs"

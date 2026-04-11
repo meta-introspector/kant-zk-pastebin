@@ -1,3 +1,9 @@
+[workspace]
+members = [
+    ".",
+    "pastebin-wasm",
+]
+
 [package]
 name = "kant-pastebin"
 version = "0.1.0"
@@ -20,7 +26,7 @@ data-encoding = "2"
 ciborium = "0.2"
 serde_bytes = "0.11"
 dirs-next = "2"
-rust-unixfs = { path = "vendor/rust-ipfs/unixfs" }
+rust-unixfs = { path = "erdfa-canonical/bindings/rust/vendor/rust-ipfs/unixfs" }
 ipld-core = "0.4.1"
 multibase = "0.9"
 actix-multipart = "0.7"
@@ -28,7 +34,7 @@ mime_guess = "2"
 futures-util = "0.3"
 utoipa = { version = "4", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "6", features = ["actix-web"] }
-erdfa-publish = { path = "erdfa-publish" }
+erdfa-publish = { path = "erdfa-canonical/bindings/rust" }
 clap = { version = "4", features = ["derive"] }
 walkdir = "2"
 flate2 = "1"

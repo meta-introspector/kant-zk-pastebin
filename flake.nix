@@ -9,6 +9,7 @@
       flake = false;
     };
 
+
   };
 
   outputs = { self, nixpkgs, flake-utils, rust-ipfs }:
@@ -22,12 +23,7 @@
           kant-pastebin = pkgs.rustPlatform.buildRustPackage {
             pname = "kant-pastebin";
             version = "0.1.0";
-            src = pkgs.runCommand "source-with-submodules" {} ''
-              cp -r ${self} $out
-              chmod -R u+w $out
-              mkdir -p $out/vendor
-              cp -r ${rust-ipfs} $out/vendor/rust-ipfs
-            '';
+            src = self;
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config pkgs.wasm-pack ];
             buildInputs = [ pkgs.openssl ];
