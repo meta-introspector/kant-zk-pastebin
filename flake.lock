@@ -3,17 +3,13 @@
     "erdfa-publish-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1774013365,
-        "narHash": "sha256-yJ1UvrC99NXmmjGlGBZuILlRL9KWqyPD2UqvfWtE2wM=",
-        "owner": "meta-introspector",
-        "repo": "erdfa-publish",
-        "rev": "793e9c0d367a1f0ce4babff4e1c7adde7c01749c",
-        "type": "github"
+        "narHash": "sha256-odbv1X/3J1yS8ElPP3A3M8zfYlFMEPVad4NCPO6sLPg=",
+        "type": "file",
+        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-publish.git"
       },
       "original": {
-        "owner": "meta-introspector",
-        "repo": "erdfa-publish",
-        "type": "github"
+        "type": "file",
+        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-publish.git"
       }
     },
     "flake-utils": {

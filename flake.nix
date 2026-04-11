@@ -8,13 +8,10 @@
       url = "github:dariusc93/rust-ipfs";
       flake = false;
     };
-    erdfa-publish-src = {
-      url = "github:meta-introspector/erdfa-publish";
-      flake = false;
-    };
+
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src }:
+  outputs = { self, nixpkgs, flake-utils, rust-ipfs }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -28,8 +25,6 @@
             src = pkgs.runCommand "source-with-submodules" {} ''
               cp -r ${self} $out
               chmod -R u+w $out
-              rm -f $out/erdfa-publish
-              cp -r ${erdfa-publish-src} $out/erdfa-publish
               mkdir -p $out/vendor
               cp -r ${rust-ipfs} $out/vendor/rust-ipfs
             '';
