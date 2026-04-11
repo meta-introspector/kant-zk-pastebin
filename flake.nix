@@ -38,7 +38,6 @@
             buildInputs = [ pkgs.openssl ];
 
             postPatch = ''
-              ls -la
               (cd pastebin-wasm && wasm-pack build --target web --out-dir ./static/pkg)
             '';
           };
