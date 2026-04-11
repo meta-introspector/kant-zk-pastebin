@@ -72,6 +72,9 @@ async fn main() -> std::io::Result<()> {
             .route("/stego", web::get().to(handlers::stego_dashboard))
             .service(actix_files::Files::new("/stego/pkg", "erdfa-clean/wasm/pkg"))
             .service(actix_files::Files::new("/stego/samples", "erdfa-clean/wasm/samples"))
+            .route("/wasm", web::get().to(handlers::wasm_frontend))
+            .service(actix_files::Files::new("/wasm/pkg", "pastebin-wasm/static/pkg"))
+            .service(actix_files::Files::new("/wasm", "pastebin-wasm/static"))
     })
     .bind(&bind)?
     .run()

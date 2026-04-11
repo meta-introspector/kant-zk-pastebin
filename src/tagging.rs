@@ -2,13 +2,20 @@
 use std::collections::HashMap;
 
 pub fn slugify(s: &str) -> String {
-    s.chars()
+    // Strip URLs before slugifying
+    let cleaned: String = s.split_whitespace()
+        .filter(|w| !w.starts_with("http://") && !w.starts_with("https://"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let slug: String = cleaned.chars()
         .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
         .collect::<String>()
         .split('_')
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
-        .join("_")
+        .join("_");
+    // Hard cap: timestamp is 15 chars + _ = 16, total filename max ~80
+    if slug.len() > 50 { slug[..50].to_string() } else { slug }
 }
 
 pub fn extract_ngrams(text: &str, n: usize, top: usize) -> Vec<(String, usize)> {
@@ -108,6 +115,11 @@ fn extract_repo_name(line: &str) -> Option<String> {
 
 pub fn auto_describe(content: &str) -> String {
     let lines: Vec<&str> = content.lines().take(3).collect();
-    let preview = lines.join(" ").chars().take(100).collect::<String>();
+    let preview: String = lines.join(" ")
+        .split_whitespace()
+        .filter(|w| !w.starts_with("http://") && !w.starts_with("https://"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars().take(80).collect();
     if preview.len() < content.len() { format!("{}...", preview) } else { preview }
 }

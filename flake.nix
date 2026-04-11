@@ -34,8 +34,13 @@
               cp -r ${rust-ipfs} $out/vendor/rust-ipfs
             '';
             cargoLock.lockFile = ./Cargo.lock;
-            nativeBuildInputs = [ pkgs.pkg-config ];
+            nativeBuildInputs = [ pkgs.pkg-config pkgs.wasm-pack ];
             buildInputs = [ pkgs.openssl ];
+
+            postPatch = ''
+              ls -la
+              (cd pastebin-wasm && wasm-pack build --target web --out-dir ./static/pkg)
+            '';
           };
 
           index-docs = pkgs.writeShellScriptBin "kant-index-docs" ''
@@ -163,6 +168,7 @@
             openssl
             nodejs
             chromium
+            wasm-pack
           ];
           shellHook = ''
             export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1

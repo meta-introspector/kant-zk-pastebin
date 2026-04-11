@@ -1,0 +1,11 @@
+[plugin]
+name = "kant-pastebin"
+version = "0.1.0"
+type = "data"
+origin = "/mnt/data1/kant/pastebin"
+[permissions]
+filesystem = true
+process = false
+network = false
+[security]
+risk_level = "Low"

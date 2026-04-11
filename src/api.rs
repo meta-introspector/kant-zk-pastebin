@@ -5,19 +5,21 @@ use chrono::Utc;
 use sha2::{Sha256, Digest};
 
 fn slugify(s: &str) -> String {
-    s.chars()
+    let slug: String = s.chars()
         .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
         .collect::<String>()
         .split('_')
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
-        .join("_")
+        .join("_");
+    if slug.len() > 60 { slug[..60].to_string() } else { slug }
 }
 
 /// POST /api/paste - Create new paste
 pub async fn create_paste(data: web::Json<Paste>) -> HttpResponse {
     let content = data.content.as_ref().map(|s| s.as_str()).unwrap_or("");
     let title = data.title.as_ref().map(|s| s.as_str()).unwrap_or("untitled");
+    let title = if title.len() > 80 { &title[..80] } else { title };
     
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     

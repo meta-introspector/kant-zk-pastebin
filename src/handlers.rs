@@ -1221,6 +1221,17 @@ pub async fn stego_dashboard() -> Result<HttpResponse> {
         .body(html))
 }
 
+/// GET /wasm - The new WASM frontend
+pub async fn wasm_frontend() -> Result<HttpResponse> {
+    let base_path = env::var("BASE_PATH").unwrap_or_default();
+    let html = fs::read_to_string("pastebin-wasm/static/index.html")
+        .unwrap_or_else(|_| "<h1>WASM frontend not found</h1>".to_string())
+        .replace("'/pkg/pastebin_wasm.js'", &format!("'{}/wasm/pkg/pastebin_wasm.js'", base_path));
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
+}
+
 /// POST /plugin/{name}/{id} - Run plugin on a paste
 pub async fn run_plugin(
     path: web::Path<(String, String)>,
