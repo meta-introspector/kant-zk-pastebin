@@ -7,3 +7,6 @@
 [submodule "erdfa-canonical"]
 	path = erdfa-canonical
 	url = /home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git
+[submodule "Custom-File-Crawler"]
+	path = Custom-File-Crawler
+	url = /home/mdupont/git/solana.solfunmeme.com/Custom-File-Crawler.git

@@ -17,18 +17,24 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         kubo = pkgs.kubo;
+        srcWithGit = builtins.fetchGit {
+          url = ./.;
+          rev = "ebe021eacc461224d3cf29b57d14095c1c02e1b8";
+          sha256 = "sha256-j+eI+U6FsVdyC2CcZZyKUKTuYlZlTUF8PwuftXbLhPg=";
+        };
       in
       {
         packages = {
           kant-pastebin = pkgs.rustPlatform.buildRustPackage {
             pname = "kant-pastebin";
             version = "0.1.0";
-            src = self;
+            src = srcWithGit;
             cargoLock.lockFile = ./Cargo.lock;
-            nativeBuildInputs = [ pkgs.pkg-config pkgs.wasm-pack ];
+            nativeBuildInputs = [ pkgs.pkg-config pkgs.wasm-pack pkgs.git ];
             buildInputs = [ pkgs.openssl ];
 
             postPatch = ''
+              git submodule update --init --recursive
               (cd pastebin-wasm && wasm-pack build --target web --out-dir ./static/pkg)
             '';
           };
