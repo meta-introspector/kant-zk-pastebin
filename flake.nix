@@ -8,11 +8,22 @@
       url = "github:dariusc93/rust-ipfs";
       flake = false;
     };
-
+    erdfa-publish-src = {
+      url = "git+file:///home/mdupont/03-march/17/erdfa-publish";
+      flake = false;
+    };
+    erdfa-clean-src = {
+      url = "https://github.com/Escaped-RDFa/namespace.git";
+      flake = false;
+    };
+    erdfa-canonical-src = {
+      url = "git+file:///home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git";
+      flake = false;
+    };
 
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs }:
+  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
