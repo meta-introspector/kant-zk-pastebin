@@ -7,3 +7,6 @@
 [submodule "erdfa-canonical"]
 	path = erdfa-canonical
 	url = /home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git
+[submodule "zkperf"]
+	path = zkperf
+	url = /home/mdupont/git/github.com/meta-introspector/zkperf.git
