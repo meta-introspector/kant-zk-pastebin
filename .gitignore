@@ -12,3 +12,7 @@ chats/
 docs/
 shards/
 shards/
+
+# Temporary files
+.gemini/
+category/kant/tmp-*.nix
