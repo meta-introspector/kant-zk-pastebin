@@ -13,12 +13,14 @@
 
         pastebin-main-src = builtins.fetchGit {
           url = "file:///mnt/data1/git/github.com/meta-introspector/kant-zk-pastebin";
-          rev = "b2f5cd8d5ae23398d6c5d08c10451fcfb914cc0c"; # UPDATED REV
+          rev = "a214500387ff5f0465bc7eb7a6910293a50247ec";
+          ref = "feature/kant-kategorie";
         };
 
         erdfa-publish-src = builtins.fetchGit {
           url = "/mnt/data1/git/solana.solfunmeme.com/erdfa-publish.git";
-          rev = "360a043ac9bbb12c947587af07929d695926eed6";
+          rev = "95b0617f773acc02c1f6fa8b7be01658bb3224ca";
+          ref = "feature/kant-kategorie";
         };
 
         erdfa-canonical-src = builtins.fetchGit {
@@ -28,10 +30,9 @@
 
         rust-ipfs-src = builtins.fetchGit {
           url = "file:///home/mdupont/git/github/dariusc93/rust-ipfs.git";
-          rev = "4eeb9403889941c4453d81ad66ace7a595c1e152";
-        };
-
-        # Build a patched source tree with all components injected
+          rev = "83e606e6b0443889c21870048f95c3a7445987fb";
+          ref = "feature/kant-kategorie";
+        };        # Build a patched source tree with all components injected
         patchedSrc = pkgs.runCommand "kant-pastebin-src" {} ''
           cp -r --no-preserve=mode ${pastebin-main-src}/. $out
           chmod -R u+w $out

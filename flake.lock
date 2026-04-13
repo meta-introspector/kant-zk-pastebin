@@ -1,5 +1,49 @@
 {
   "nodes": {
+    "erdfa-canonical-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775581985,
+        "narHash": "sha256-vrnxHhF/fIhLkDM95S3gABFpvzUAScKHqmLsGExhFuw=",
+        "ref": "refs/heads/main",
+        "rev": "6f8b33d527081a7d780b9a177cb49997a4e12bec",
+        "revCount": 9,
+        "type": "git",
+        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git"
+      }
+    },
+    "erdfa-clean-src": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-AaTIIvnlqKtCIXbs8S01B1aDcyQYaAmu5QMofU8PNIA=",
+        "type": "file",
+        "url": "https://github.com/Escaped-RDFa/namespace.git"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://github.com/Escaped-RDFa/namespace.git"
+      }
+    },
+    "erdfa-publish-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775989429,
+        "narHash": "sha256-ZnA1+4fkhnh8C5+7sdTnVwduh989ouwTBuj74ECs4Xw=",
+        "ref": "refs/heads/feature/kant-kategorie",
+        "rev": "63ad9edfc1f9360788932f1091efad3e7408173d",
+        "revCount": 81,
+        "type": "git",
+        "url": "file:///home/mdupont/03-march/17/erdfa-publish"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///home/mdupont/03-march/17/erdfa-publish"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -36,6 +80,9 @@
     },
     "root": {
       "inputs": {
+        "erdfa-canonical-src": "erdfa-canonical-src",
+        "erdfa-clean-src": "erdfa-clean-src",
+        "erdfa-publish-src": "erdfa-publish-src",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "rust-ipfs": "rust-ipfs"
