@@ -19,7 +19,7 @@
     "erdfa-clean-src": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-46AueWDzxsEILb9q1cO0v4BJTbry+rL6hRknsDA5MG0=",
+        "narHash": "sha256-SA2eVEeQ3vrGwW1FlQYpS7G3BYYJZFC77M6BgPTK/No=",
         "type": "file",
         "url": "https://github.com/Escaped-RDFa/namespace.git"
       },
