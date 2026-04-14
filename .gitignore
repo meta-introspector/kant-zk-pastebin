@@ -16,3 +16,8 @@ shards/
 # Temporary files
 .gemini/
 category/kant/tmp-*.nix
+
+# Debugging temporary files
+README_WORKSPACE.md
+example-zkperf-nix.nix
+
