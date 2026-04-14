@@ -21,7 +21,8 @@
       flake = false;
     };
     zkperf = {
-      url = "git+file://${self}/zkperf";
+      url = "git+file:///mnt/data1/kant/pastebin/zkperf?ref=353f0b1bb8f78ac37ccd66dfface6a7de25b78cc";
+      flake = false;
     };
 
   };
@@ -31,26 +32,25 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         kubo = pkgs.kubo;
-        srcWithGit = builtins.fetchGit {
-          url = ./.;
-          rev = "ebe021eacc461224d3cf29b57d14095c1c02e1b8";
-          sha256 = "sha256-j+eI+U6FsVdyC2CcZZyKUKTuYlZlTUF8PwuftXbLhPg=";
-        };
+
+        # Build a patched source tree with all submodules injected
+        patchedSrc = pkgs.runCommand "kant-pastebin-src" {} ''
+          cp -r --no-preserve=mode ${self}/. $out
+          chmod -R u+w $out
+          # Explicitly copy zkperf submodule content
+          mkdir -p $out/zkperf
+          cp -r --no-preserve=mode ${zkperf}/. $out/zkperf
+        '';
       in
       {
         packages = {
           kant-pastebin = pkgs.rustPlatform.buildRustPackage {
             pname = "kant-pastebin";
             version = "0.1.0";
-            src = srcWithGit;
+            src = patchedSrc;
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config pkgs.wasm-pack pkgs.git ];
             buildInputs = [ pkgs.openssl ];
-
-            postPatch = ''
-              git submodule update --init --recursive
-              (cd pastebin-wasm && wasm-pack build --target web --out-dir ./static/pkg)
-            '';
           };
 
           index-docs = pkgs.writeShellScriptBin "kant-index-docs" ''
