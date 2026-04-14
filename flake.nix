@@ -20,10 +20,13 @@
       url = "git+file:///home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git";
       flake = false;
     };
+    zkperf = {
+      url = "git+file://${self}/zkperf";
+    };
 
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src }:
+  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src, zkperf }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
