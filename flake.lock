@@ -140,7 +140,8 @@
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "rust-ipfs": "rust-ipfs",
-        "zkperf": "zkperf"
+        "zkperf": "zkperf",
+        "zos-plugin-interface": "zos-plugin-interface"
       }
     },
     "rust-ipfs": {
@@ -190,6 +191,23 @@
         "ref": "353f0b1bb8f78ac37ccd66dfface6a7de25b78cc",
         "type": "git",
         "url": "file:///mnt/data1/kant/pastebin/zkperf"
+      }
+    },
+    "zos-plugin-interface": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775491202,
+        "narHash": "sha256-Qd+JTvNgLU0enGQZjBIIfq5eENsr9VPUkq0RFWjMnfE=",
+        "ref": "main",
+        "rev": "0d7e1a412811ced55f5b9bfe3565cb651908acda",
+        "revCount": 181,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/zos-plugin-interface.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/zos-plugin-interface.git"
       }
     }
   },

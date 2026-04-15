@@ -36,9 +36,13 @@
       url = "git+file:///mnt/data1/git/solana.solfunmeme/erdfa-core.git?ref=main";
       flake = false;
     };
+    zos-plugin-interface = {
+      url = "git+file:///mnt/data1/git/solana.solfunmeme/zos-plugin-interface.git?ref=main";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src, zkperf, erdfa-plugin-ipfs, erdfa-plugin-sheaf, erdfa-core }:
+  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src, zkperf, erdfa-plugin-ipfs, erdfa-plugin-sheaf, erdfa-core, zos-plugin-interface }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -61,6 +65,8 @@
           cp -r --no-preserve=mode ${erdfa-plugin-sheaf}/. $out/plugins/erdfa-plugin-sheaf
           mkdir -p $out/plugins/erdfa-core
           cp -r --no-preserve=mode ${erdfa-core}/. $out/plugins/erdfa-core
+          mkdir -p $out/plugins/zos-plugin-interface
+          cp -r --no-preserve=mode ${zos-plugin-interface}/. $out/plugins/zos-plugin-interface
         '';
       in
       {
