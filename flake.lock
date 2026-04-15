@@ -28,6 +28,57 @@
         "url": "https://github.com/Escaped-RDFa/namespace.git"
       }
     },
+    "erdfa-core": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775357080,
+        "narHash": "sha256-TH+RMy1LK0NaH9AYNGaPpnQtHKmor9TcGcxXrMSenQg=",
+        "ref": "main",
+        "rev": "1da5e823e5b6c9d0572f5dbcd8834bbbd50fb00e",
+        "revCount": 1,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-core.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-core.git"
+      }
+    },
+    "erdfa-plugin-ipfs": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775352782,
+        "narHash": "sha256-bOx+bwZbOVuTXaLFcDi/v2136Su3jqtf7I8a/GswqE4=",
+        "ref": "main",
+        "rev": "20af1623f0f499382476f19531b8b241fc53e136",
+        "revCount": 1,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-ipfs.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-ipfs.git"
+      }
+    },
+    "erdfa-plugin-sheaf": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775352786,
+        "narHash": "sha256-K+sBQtVI/2j5t871n5T/s9Ex2b2Klo4FfWRfZUhUhy0=",
+        "ref": "main",
+        "rev": "a58cd82340dc51da1cb6f99b2bde369b1ea8ea13",
+        "revCount": 1,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-sheaf.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-sheaf.git"
+      }
+    },
     "erdfa-publish-src": {
       "flake": false,
       "locked": {
@@ -82,6 +133,9 @@
       "inputs": {
         "erdfa-canonical-src": "erdfa-canonical-src",
         "erdfa-clean-src": "erdfa-clean-src",
+        "erdfa-core": "erdfa-core",
+        "erdfa-plugin-ipfs": "erdfa-plugin-ipfs",
+        "erdfa-plugin-sheaf": "erdfa-plugin-sheaf",
         "erdfa-publish-src": "erdfa-publish-src",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",

@@ -24,10 +24,21 @@
       url = "git+file:///mnt/data1/kant/pastebin/zkperf?ref=353f0b1bb8f78ac37ccd66dfface6a7de25b78cc";
       flake = false;
     };
-
+    erdfa-plugin-ipfs = {
+      url = "git+file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-ipfs.git?ref=main";
+      flake = false;
+    };
+    erdfa-plugin-sheaf = {
+      url = "git+file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-sheaf.git?ref=main";
+      flake = false;
+    };
+    erdfa-core = {
+      url = "git+file:///mnt/data1/git/solana.solfunmeme/erdfa-core.git?ref=main";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src, zkperf }:
+  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src, zkperf, erdfa-plugin-ipfs, erdfa-plugin-sheaf, erdfa-core }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -44,6 +55,12 @@
           cp -r --no-preserve=mode ${erdfa-publish-src}/. $out/erdfa-canonical/bindings/rust
           mkdir -p $out/erdfa-canonical/bindings/rust/vendor/rust-ipfs
           cp -r --no-preserve=mode ${rust-ipfs}/. $out/erdfa-canonical/bindings/rust/vendor/rust-ipfs
+          mkdir -p $out/plugins/erdfa-plugin-ipfs
+          cp -r --no-preserve=mode ${erdfa-plugin-ipfs}/. $out/plugins/erdfa-plugin-ipfs
+          mkdir -p $out/plugins/erdfa-plugin-sheaf
+          cp -r --no-preserve=mode ${erdfa-plugin-sheaf}/. $out/plugins/erdfa-plugin-sheaf
+          mkdir -p $out/plugins/erdfa-core
+          cp -r --no-preserve=mode ${erdfa-core}/. $out/plugins/erdfa-core
         '';
       in
       {
