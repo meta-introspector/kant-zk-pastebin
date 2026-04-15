@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     rust-ipfs = {
-      url = "github:meta-introspector/rust-ipfs";
+      url = "git+file:///home/mdupont/git/github/dariusc93/rust-ipfs.git?ref=fix/multihash-codetable-yanked";
       flake = false;
     };
     erdfa-publish-src = {

@@ -19,7 +19,7 @@
     "erdfa-clean-src": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-SA2eVEeQ3vrGwW1FlQYpS7G3BYYJZFC77M6BgPTK/No=",
+        "narHash": "sha256-bxf+1tgFMEAOwLHwOY7EfPCREsdLP7gWC/y92ulQHKM=",
         "type": "file",
         "url": "https://github.com/Escaped-RDFa/namespace.git"
       },
@@ -92,17 +92,18 @@
     "rust-ipfs": {
       "flake": false,
       "locked": {
-        "lastModified": 1773232132,
-        "narHash": "sha256-MCVf2kme5QZlfRaNZTCAVRKD3UQVTglbbdK0GWiRzS0=",
-        "owner": "dariusc93",
-        "repo": "rust-ipfs",
-        "rev": "928037957a257f6b81d38aa87c74dda99123c2be",
-        "type": "github"
+        "lastModified": 1776254656,
+        "narHash": "sha256-976gsWBUV8szXEKC2oYpO7Q7zK0eXIj+/XlPbdmwhTI=",
+        "ref": "fix/multihash-codetable-yanked",
+        "rev": "ad0b88c70e78a208baa7e40fdb3274c5a44c9dc9",
+        "revCount": 2824,
+        "type": "git",
+        "url": "file:///home/mdupont/git/github/dariusc93/rust-ipfs.git"
       },
       "original": {
-        "owner": "dariusc93",
-        "repo": "rust-ipfs",
-        "type": "github"
+        "ref": "fix/multihash-codetable-yanked",
+        "type": "git",
+        "url": "file:///home/mdupont/git/github/dariusc93/rust-ipfs.git"
       }
     },
     "systems": {
