@@ -1336,6 +1336,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "erdfa-dasl"
+version = "0.1.0"
+dependencies = [
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "erdfa-publish"
 version = "0.1.0"
 dependencies = [
@@ -1363,6 +1370,14 @@ dependencies = [
  "sha2 0.10.9",
  "toml",
  "ureq",
+]
+
+[[package]]
+name = "erdfa-sheaf"
+version = "0.1.0"
+dependencies = [
+ "erdfa-dasl",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -4873,6 +4888,16 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[package]]
+name = "zos-pastebin"
+version = "0.1.0"
+dependencies = [
+ "erdfa-dasl",
+ "erdfa-sheaf",
+ "log",
+ "reqwest",
+]
 
 [[package]]
 name = "zstd"
