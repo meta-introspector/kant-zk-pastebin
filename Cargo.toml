@@ -26,7 +26,7 @@ data-encoding = "2"
 ciborium = "0.2"
 serde_bytes = "0.11"
 dirs-next = "2"
-ipfs-unixfs = { path = "erdfa-canonical/bindings/rust/vendor/rust-ipfs/unixfs" }
+rust-unixfs = { path = "erdfa-canonical/bindings/rust/vendor/rust-ipfs/unixfs" }
 ipld-core = "0.4.1"
 multibase = "0.9"
 actix-multipart = "0.7"

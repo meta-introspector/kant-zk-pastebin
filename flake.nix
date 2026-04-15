@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     rust-ipfs = {
-      url = "github:dariusc93/rust-ipfs";
+      url = "github:meta-introspector/rust-ipfs";
       flake = false;
     };
     erdfa-publish-src = {
@@ -37,9 +37,13 @@
         patchedSrc = pkgs.runCommand "kant-pastebin-src" {} ''
           cp -r --no-preserve=mode ${self}/. $out
           chmod -R u+w $out
-          # Explicitly copy zkperf submodule content
+          # Explicitly copy submodule content
           mkdir -p $out/zkperf
           cp -r --no-preserve=mode ${zkperf}/. $out/zkperf
+          mkdir -p $out/erdfa-canonical/bindings/rust
+          cp -r --no-preserve=mode ${erdfa-publish-src}/. $out/erdfa-canonical/bindings/rust
+          mkdir -p $out/erdfa-canonical/bindings/rust/vendor/rust-ipfs
+          cp -r --no-preserve=mode ${rust-ipfs}/. $out/erdfa-canonical/bindings/rust/vendor/rust-ipfs
         '';
       in
       {

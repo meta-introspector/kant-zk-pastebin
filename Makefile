@@ -1,7 +1,10 @@
-.PHONY: build deploy check test test-extended test-all deps
+.PHONY: build deploy check test test-extended test-all deps update-lock
 
 build:
 	nix build
+
+update-lock:
+	nix develop -c cargo update
 
 deploy: build
 	bash deploy.sh
