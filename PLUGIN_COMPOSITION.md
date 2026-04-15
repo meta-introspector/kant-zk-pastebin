@@ -37,9 +37,19 @@
 | `src/bin/freeze_chats.rs` | erdfa-freeze-chats | 🔲 todo |
 | `src/bin/reindex.rs` | zos-reindex | 🔲 todo |
 
-## Next Plugins to Create
+## Existing erdfa-plugin Bare Repos (/mnt/data1/git/solana.solfunmeme/)
 
-1. `erdfa-tagging` — tagging.rs (RDF annotation)
-2. `zos-ipfs` — ipfs.rs (content addressing, proxy)
-3. `zos-plugin-host` — plugin.rs trait + registry
-4. `erdfa-freeze-chats` — freeze_chats.rs
+| Bare Repo | Maps To |
+|-----------|---------|
+| `erdfa-plugins.git` | workspace with all erdfa plugins (main) |
+| `erdfa-plugin-ipfs.git` | `src/ipfs.rs` |
+| `erdfa-plugin-sheaf.git` | `src/sheaf.rs` |
+| `erdfa-plugin-ingest.git` | `src/bin/reindex.rs` |
+| `erdfa-plugin-distribute.git` | distribution/federation |
+| `erdfa-plugin-federation.git` | federation |
+| `erdfa-plugin-mixer.git` | mixer |
+| `erdfa-plugin-render.git` | view/render |
+| `erdfa-core.git` | core types |
+
+Individual plugins in `erdfa-plugins.git/main`:
+`dasl`, `sheaf`, `stego`, `zkperf`, `hecke`, `maass`, `monster`, `cft`, `langlands`, `virasoro`, `privacy`, `morse`, `bott`, `clifford`, `fourier`, `fractran`, `galois`, `golay`, `leech`, `paxos`, `ramanujan`, `time-reversal`, `umbral`, `voronoi`, `zkp`
