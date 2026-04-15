@@ -47,3 +47,7 @@ path = "src/main.rs"
 [[bin]]
 name = "freeze-chats"
 path = "src/bin/freeze_chats.rs"
+
+[[bin]]
+name = "kantpaste"
+path = "src/bin/kantpaste.rs"

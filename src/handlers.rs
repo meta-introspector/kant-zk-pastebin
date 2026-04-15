@@ -763,82 +763,49 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
     })))
 }
 
-/// GET /thread/{id} - Get paste and all replies
+/// GET /thread/{id} - Get thread as conformal arrows in the orbifold
 pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
-    let parent_id = path.into_inner();
+    use crate::model::{ConformalArrow, Thread};
+    use crate::dasl::orbifold_coords;
+
+    let root_id = path.into_inner();
+
+    // Load all pastes in the thread from index
     let uucp_dir =
         env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let index_file = format!("{}/index.jsonl", uucp_dir);
 
-    let mut thread = Vec::new();
+    let all: Vec<crate::model::PasteIndex> = fs::read_to_string(&index_file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
 
-    if let Ok(entries) = fs::read_dir(&uucp_dir) {
-        for entry in entries.flatten() {
-            let fname = entry.file_name().to_string_lossy().to_string();
-            if !fname.ends_with(".txt") {
-                continue;
-            }
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                let lines: Vec<&str> = content.lines().collect();
-                if lines.is_empty() {
-                    continue;
-                }
+    let mut pastes: Vec<crate::model::PasteIndex> = all.into_iter()
+        .filter(|p| p.id == root_id || p.reply_to.as_deref() == Some(&root_id))
+        .collect();
 
-                // Parse header
-                let file_id = fname.trim_end_matches(".txt");
-                let mut title = String::new();
-                let mut reply_to = String::new();
-                let mut body_start = 0;
+    pastes.sort_by(|a, b| a.id.cmp(&b.id));
 
-                for (i, line) in lines.iter().enumerate() {
-                    if line.is_empty() && i > 0 {
-                        body_start = i + 1;
-                        break;
-                    }
-                    if let Some(t) = line.strip_prefix("Title: ") {
-                        title = t.to_string();
-                    }
-                    if let Some(r) = line.strip_prefix("Reply-To: ") {
-                        reply_to = r.to_string();
-                    }
-                }
+    // Build conformal arrows: each reply → arrow from parent
+    let root = pastes.iter().find(|p| p.id == root_id);
+    let root_coords = root.map(|r| orbifold_coords(r.cid.as_bytes())).unwrap_or((0,0,0));
 
-                // Include if this IS the parent or replies TO the parent
-                if file_id == parent_id || reply_to == parent_id {
-                    let body = if body_start < lines.len() {
-                        lines[body_start..].join("\n")
-                    } else {
-                        String::new()
-                    };
-                    thread.push(serde_json::json!({
-                        "id": file_id,
-                        "title": title,
-                        "reply_to": reply_to,
-                        "content": body,
-                    }));
-                }
-            }
-        }
-    }
+    let arrows: Vec<ConformalArrow> = pastes.iter()
+        .filter(|p| p.reply_to.as_deref() == Some(&root_id))
+        .filter_map(|reply| {
+            root.map(|r| ConformalArrow::new(r, reply))
+        })
+        .collect();
 
-    // Sort: parent first, then replies by id (chronological)
-    thread.sort_by(|a, b| {
-        let a_id = a["id"].as_str().unwrap_or("");
-        let b_id = b["id"].as_str().unwrap_or("");
-        if a_id == parent_id {
-            std::cmp::Ordering::Less
-        } else if b_id == parent_id {
-            std::cmp::Ordering::Greater
-        } else {
-            a_id.cmp(b_id)
-        }
-    });
-
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "thread_id": parent_id,
-        "count": thread.len(),
-        "posts": thread,
-    })))
+    Ok(HttpResponse::Ok().json(Thread {
+        root_id,
+        root_coords,
+        arrows,
+        pastes,
+    }))
 }
+
 
 /// GET /browse - List pastes
 #[utoipa::path(
