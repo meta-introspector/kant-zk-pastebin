@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/mdupont/pastebin
-ExecStart=/home/mdupont/kant-pastebin/target/release/kant-pastebin
+WorkingDirectory=/home/mdupont/kant-pastebin
+ExecStart=/nix/store/xy8i10832q9g8gc4fj2ymrin1x8py0ws-kant-pastebin-0.1.0/bin/kant-pastebin
 Restart=always
 RestartSec=10
 Environment="BIND_ADDR=127.0.0.1:8090"
@@ -15,7 +15,7 @@ Environment="BASE_URL=https://solana.solfunmeme.com"
 Environment="NFT_DIR=/mnt/data1/time-2026/03-march/13/nft_enriched"
 Environment="ENRICH_PIPELINE=/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh"
 Environment="RUST_LOG=info"
-Environment="PATH=/home/mdupont/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=/usr/bin:/usr/local/bin:/usr/bin:/bin"
 
 [Install]
 WantedBy=default.target
