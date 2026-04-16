@@ -132,8 +132,14 @@ pub async fn index(
     )
 )]
 pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
+    use crate::model::{ChannelMeasurement, WorkflowStep, Workflow, ConformalArrow};
+    use crate::dasl::orbifold_coords;
+    use std::time::Instant;
+
     let paste = data.into_inner();
     let content = paste.content.as_deref().unwrap_or("");
+    let t0 = Instant::now();
+    let coords_in = orbifold_coords(content.as_bytes());
 
     // Detect Wikidata QID — trigger enrichment pipeline
     let trimmed = content.trim();
@@ -244,6 +250,41 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         .open(&index_file)
         .and_then(|mut f| std::io::Write::write_all(&mut f, index_line.as_bytes()))
         .ok();
+
+    let coords_out = orbifold_coords(id.as_bytes());
+    let elapsed_ns = t0.elapsed().as_nanos() as u64;
+    let arrow = ConformalArrow {
+        source: "input".to_string(),
+        target: id.clone(),
+        source_coords: coords_in,
+        target_coords: coords_out,
+        delta: (
+            (coords_out.0 + 71 - coords_in.0) % 71,
+            (coords_out.1 + 59 - coords_in.1) % 59,
+            (coords_out.2 + 47 - coords_in.2) % 47,
+        ),
+        coboundary: format!("δ: raw→cid"),
+    };
+    let workflow = Workflow {
+        id: id.clone(),
+        steps: vec![WorkflowStep {
+            name: "create_paste".to_string(),
+            input_coords: coords_in,
+            output_coords: coords_out,
+            channel: ChannelMeasurement {
+                timing_ns: elapsed_ns,
+                memory_bytes: content.len() as u64,
+                entropy_bits: content.len() as f64 * 8.0,
+                cid_before: format!("{:?}", coords_in),
+                cid_after: id.clone(),
+            },
+            arrow: arrow.clone(),
+            witness: witness.clone(),
+        }],
+        total_arrow: arrow,
+        conformal: true,
+    };
+    log::debug!("workflow: {:?} ns, delta={:?}", elapsed_ns, workflow.total_arrow.delta);
 
     Ok(HttpResponse::Ok().json(Response {
         id: id.clone(),

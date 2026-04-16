@@ -79,6 +79,23 @@
         "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-sheaf.git"
       }
     },
+    "erdfa-plugins": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1774998736,
+        "narHash": "sha256-oVpvSq3J6/clMZyWuBIxElwt3ZZ+w1j71nB4qlQQoSc=",
+        "ref": "main",
+        "rev": "36373ae46f47fbe672636835cbab1c2a58feac59",
+        "revCount": 1,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugins.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugins.git"
+      }
+    },
     "erdfa-publish-src": {
       "flake": false,
       "locked": {
@@ -136,6 +153,7 @@
         "erdfa-core": "erdfa-core",
         "erdfa-plugin-ipfs": "erdfa-plugin-ipfs",
         "erdfa-plugin-sheaf": "erdfa-plugin-sheaf",
+        "erdfa-plugins": "erdfa-plugins",
         "erdfa-publish-src": "erdfa-publish-src",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
