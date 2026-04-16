@@ -13,3 +13,9 @@
 [submodule "plugins/zos-circuit-optimizer"]
 	path = plugins/zos-circuit-optimizer
 	url = /mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git
+[submodule "plugins/oxc"]
+	path = plugins/oxc
+	url = /mnt/data1/nix/time/2024/09/01/oxc/
+[submodule "plugins/html5ever"]
+	path = plugins/html5ever
+	url = https://github.com/servo/html5ever.git

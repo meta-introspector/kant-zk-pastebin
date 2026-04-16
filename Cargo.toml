@@ -10,6 +10,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+erdfa-dasl = { path = "plugins/erdfa-dasl" }
+oxc_allocator = { path = "plugins/oxc/crates/oxc_allocator" }
+oxc_parser = { path = "plugins/oxc/crates/oxc_parser" }
+oxc_span = { path = "plugins/oxc/crates/oxc_span" }
+oxc_ast = { path = "plugins/oxc/crates/oxc_ast" }
+html5ever = { path = "plugins/html5ever/html5ever" }
+markup5ever_rcdom = { path = "plugins/html5ever/markup5ever/rcdom" }
+cssparser = { path = "plugins/html5ever/cssparser" }
+serde_cbor = "0.11"
 actix-web = "4"
 actix-cors = "0.7"
 actix-files = "0.6"
