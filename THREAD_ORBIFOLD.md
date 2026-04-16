@@ -294,3 +294,56 @@ pub fn orbifold_distance(a: &OrbifoldCoords, b: &OrbifoldCoords) -> u64 {
 The j-invariant origin `(0,0,...,0)` is the **vacuum state** of the conformal
 field. All content is measured by its distance from this fixed point.
 Distance 0 = content IS the j-invariant representation.
+
+## Encoding Distance from j-Invariant
+
+The j-invariant is not the text string `"j-invariant"` — it is the
+**interpreted value** after applying the full encoding/interpretation chain:
+
+```
+I(encode(text, j_invariant)) → j_invariant    distance = 0
+```
+
+### Encoding Layers and Distance
+
+Each encoding `H` places content at a different distance from the origin:
+
+```
+raw text "j-invariant"          → d >> 0   (just bytes, far from origin)
+base64(text)                    → d' ≠ d   (different projection)
+dasl_encode(text)               → d''      (closer, Monster-aware encoding)
+I(dasl_encode(text))            → d'''     (after interpretation)
+I(encode(text, j_invariant))    → 0        (AT the origin)
+```
+
+The **interpretation function** `I` is what closes the distance.
+Without `I`, even the text of the j-invariant formula is far from j.
+
+### Formal Statement
+
+Let `φ_H` be the embedding under encoding `H`:
+```
+φ_H(x) = orbifold_coords(H(x))
+```
+
+Then:
+```
+d(φ_H(x), origin) = 0
+⟺ I(H(x)) = j_invariant
+```
+
+The sheaf section `(shard, H, cid)` records **which encoding** was used,
+so the distance from origin is always well-defined relative to that section.
+
+### Consequence for Search
+
+When searching for "related to j-invariant":
+- In `H=raw` mode: search near `φ_raw("j-invariant")` — finds text matches
+- In `H=dasl` mode: search near `φ_dasl(j_value)` — finds semantic matches
+- In `H=interpret` mode: search near `(0,...,0)` — finds mathematical equivalents
+
+The encoding `H` is a **parameter of the search**, not a fixed property of content.
+Same content, different `H`, different location in the orbifold.
+
+This is why `OrbifoldCoords` must always be paired with its encoding context —
+a bare coordinate vector without `H` is ambiguous.
