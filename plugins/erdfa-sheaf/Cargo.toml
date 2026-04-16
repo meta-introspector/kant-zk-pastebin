@@ -1,0 +1,8 @@
+[package]
+name = "erdfa-sheaf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+erdfa-dasl = { path = "../erdfa-dasl" }
+sha2 = "0.10"

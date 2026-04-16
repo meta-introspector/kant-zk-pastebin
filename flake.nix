@@ -44,9 +44,13 @@
       url = "git+file:///mnt/data1/git/solana.solfunmeme/erdfa-plugins.git?ref=main";
       flake = false;
     };
+    zos-circuit-optimizer = {
+      url = "git+file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git?ref=main";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src, zkperf, erdfa-plugin-ipfs, erdfa-plugin-sheaf, erdfa-core, zos-plugin-interface, erdfa-plugins }:
+  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src, zkperf, erdfa-plugin-ipfs, erdfa-plugin-sheaf, erdfa-core, zos-plugin-interface, erdfa-plugins, zos-circuit-optimizer }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -73,6 +77,8 @@
           cp -r --no-preserve=mode ${zos-plugin-interface}/. $out/plugins/zos-plugin-interface
           mkdir -p $out/plugins/erdfa-plugins
           cp -r --no-preserve=mode ${erdfa-plugins}/. $out/plugins/erdfa-plugins
+          mkdir -p $out/plugins/zos-circuit-optimizer
+          cp -r --no-preserve=mode ${zos-circuit-optimizer}/. $out/plugins/zos-circuit-optimizer
         '';
       in
       {

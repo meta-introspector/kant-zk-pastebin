@@ -159,6 +159,7 @@
         "nixpkgs": "nixpkgs",
         "rust-ipfs": "rust-ipfs",
         "zkperf": "zkperf",
+        "zos-circuit-optimizer": "zos-circuit-optimizer",
         "zos-plugin-interface": "zos-plugin-interface"
       }
     },
@@ -209,6 +210,23 @@
         "ref": "353f0b1bb8f78ac37ccd66dfface6a7de25b78cc",
         "type": "git",
         "url": "file:///mnt/data1/kant/pastebin/zkperf"
+      }
+    },
+    "zos-circuit-optimizer": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776338140,
+        "narHash": "sha256-C4CCWx1DrobISi7X3ICRyWSVsE5yyjSYY9skxmahLsg=",
+        "ref": "main",
+        "rev": "b7f1343e3221ffb47c84863263e1eac571012ff0",
+        "revCount": 3,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git"
       }
     },
     "zos-plugin-interface": {

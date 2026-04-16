@@ -3,6 +3,7 @@ use crate::model::{Paste, PasteIndex, Response};
 use crate::{ipfs, plugin, storage, tagging, view};
 use actix_web::{web, HttpResponse, Result};
 use chrono::Utc;
+use zos_circuit_optimizer as circuit;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -120,6 +121,19 @@ pub async fn index(
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(p.render()))
+}
+
+/// Extract 8 u64 register values from content bytes (for cache line mapping)
+fn coords_in_regs(data: &[u8]) -> [u64; 8] {
+    let mut regs = [0u64; 8];
+    for i in 0..8 {
+        let offset = (i * 8) % data.len().max(1);
+        let end = (offset + 8).min(data.len());
+        let mut buf = [0u8; 8];
+        buf[..end-offset].copy_from_slice(&data[offset..end]);
+        regs[i] = u64::from_le_bytes(buf);
+    }
+    regs
 }
 
 /// POST /paste - Create paste
@@ -253,6 +267,19 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
 
     let coords_out = orbifold_coords(id.as_bytes());
     let elapsed_ns = t0.elapsed().as_nanos() as u64;
+
+    // Build circuit steps and optimize for cache locality
+    use zos_circuit_optimizer::{CacheLine, CircuitStep, optimize, circuit_cost};
+    let cl_in  = CacheLine::from_regs(&coords_in_regs(content.as_bytes()));
+    let cl_out = CacheLine::from_regs(&coords_in_regs(id.as_bytes()));
+    let steps = vec![
+        CircuitStep::new("hash",    cl_in.clone(),  cl_out.clone()),
+        CircuitStep::new("tag",     cl_out.clone(), cl_out.clone()),
+        CircuitStep::new("store",   cl_out.clone(), cl_out.clone()),
+    ];
+    let optimized = optimize(steps);
+    let cost = circuit_cost(&optimized);
+    log::debug!("circuit cost={} steps={}", cost, optimized.len());
     let arrow = ConformalArrow {
         source: "input".to_string(),
         target: id.clone(),
