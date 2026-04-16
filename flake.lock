@@ -198,18 +198,18 @@
     "zkperf": {
       "flake": false,
       "locked": {
-        "lastModified": 1776196001,
-        "narHash": "sha256-P6OW/YIhzFe23ixV78+kvAy7bxBt8xHWTgcpUYpkg14=",
-        "ref": "353f0b1bb8f78ac37ccd66dfface6a7de25b78cc",
-        "rev": "353f0b1bb8f78ac37ccd66dfface6a7de25b78cc",
-        "revCount": 108,
+        "lastModified": 1776088226,
+        "narHash": "sha256-noNMWes1F35BQbmr8eInp645RedlOiVyGJS5Y+3nDVM=",
+        "ref": "feat/rebase-all",
+        "rev": "1f8e8a2a0dd3b2d568c8ee03be871ce1c44b0deb",
+        "revCount": 92,
         "type": "git",
-        "url": "file:///mnt/data1/kant/pastebin/zkperf"
+        "url": "file:///mnt/data1/git/github.com/meta-introspector/zkperf.git"
       },
       "original": {
-        "ref": "353f0b1bb8f78ac37ccd66dfface6a7de25b78cc",
+        "ref": "feat/rebase-all",
         "type": "git",
-        "url": "file:///mnt/data1/kant/pastebin/zkperf"
+        "url": "file:///mnt/data1/git/github.com/meta-introspector/zkperf.git"
       }
     },
     "zos-circuit-optimizer": {

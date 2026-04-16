@@ -21,7 +21,7 @@
       flake = false;
     };
     zkperf = {
-      url = "git+file:///mnt/data1/kant/pastebin/zkperf?ref=353f0b1bb8f78ac37ccd66dfface6a7de25b78cc";
+      url = "git+file:///mnt/data1/git/github.com/meta-introspector/zkperf.git?ref=feat/rebase-all&rev=353f0b1bb8f78ac37ccd66dfface6a7de25b78cc";
       flake = false;
     };
     erdfa-plugin-ipfs = {
