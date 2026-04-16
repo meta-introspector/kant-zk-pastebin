@@ -80,7 +80,38 @@ impl ConformalArrow {
     }
 }
 
-/// A thread as a sequence of conformal arrows (path in the orbifold)
+/// Side channel measurements for a workflow step
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ChannelMeasurement {
+    pub timing_ns: u64,
+    pub memory_bytes: u64,
+    pub entropy_bits: f64,
+    pub cid_before: String,
+    pub cid_after: String,
+}
+
+/// One step in a workflow — a conformal arrow with channel measurements
+#[derive(Serialize, Deserialize, Clone)]
+pub struct WorkflowStep {
+    pub name: String,
+    pub input_coords: (u64, u64, u64),
+    pub output_coords: (u64, u64, u64),
+    pub channel: ChannelMeasurement,
+    pub arrow: ConformalArrow,
+    /// zkperf witness: proof arrow is preserved
+    pub witness: String,
+}
+
+/// A workflow = sequence of conformal arrows, self-certifying via zkperf
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Workflow {
+    pub id: String,
+    pub steps: Vec<WorkflowStep>,
+    pub total_arrow: ConformalArrow,
+    /// true iff all arrows preserved and composition holds
+    pub conformal: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Thread {
     pub root_id: String,
