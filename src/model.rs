@@ -2,6 +2,24 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+/// The encoding H — how a paste is expressed.
+/// Same sheaf section, different projections.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Encoding {
+    Raw,       // UTF-8 text
+    Message,   // UUCP/email with headers
+    Decl,      // AST node (GCC/Rust/Lean4)
+    Sheaf,     // (shard, H, cid) triple
+    Document,  // HTML/RDFa
+    Packet,    // TCP/IP bytes
+    Fractran,  // prime fraction program
+    Erdfa,     // escaped RDF triples
+    Cbor,      // DA51-tagged binary
+}
+
+impl Default for Encoding { fn default() -> Self { Self::Raw } }
+
 #[derive(Deserialize, ToSchema)]
 pub struct Paste {
     pub content: Option<String>,
@@ -9,6 +27,9 @@ pub struct Paste {
     pub title: Option<String>,
     pub keywords: Option<Vec<String>>,
     pub reply_to: Option<String>,
+    /// Encoding H — which projection of the sheaf section this is
+    #[serde(default)]
+    pub encoding: Encoding,
 }
 
 #[derive(Serialize, ToSchema)]
