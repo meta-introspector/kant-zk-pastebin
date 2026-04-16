@@ -10,3 +10,6 @@
 [submodule "zkperf"]
 	path = zkperf
 	url = /home/mdupont/git/github.com/meta-introspector/zkperf.git
+[submodule "plugins/zos-circuit-optimizer"]
+	path = plugins/zos-circuit-optimizer
+	url = /mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git
