@@ -38,3 +38,16 @@ done
 echo "=== generating zkperf report ==="
 nix develop --command "$ANNOTATE" report src > zkperf-report.json
 echo "  → zkperf-report.json"
+
+# 5. Feed witness data back as perf feedback for next annotate pass
+echo "=== ingesting witnesses into perf-data/audit/report.json ==="
+mkdir -p perf-data/audit
+nix develop --command bash -c "
+  cd zkperf && cargo run -p zkperf --bin workload -- ingest \
+    ../perf-data/witnesses \
+    --output ../perf-data/audit/report.json 2>/dev/null || true
+" 2>&1 | grep -v "^warning\|ignoring\|evaluation\|🎵\|perf:\|rust:\|clang:\|bpftool\|libbpf\|features" | tail -5
+[ -f perf-data/audit/report.json ] && echo "  → perf-data/audit/report.json ($(wc -l < perf-data/audit/report.json) lines)"
+
+echo ""
+echo "✅ Next run of ./zkperf-record-all.sh will use real perf data to tighten contracts"
