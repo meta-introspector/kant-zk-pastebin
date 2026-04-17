@@ -46,6 +46,7 @@ fn main() {
     std::process::exit(if report.errors.is_empty() { 0 } else { 1 });
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 200)]
 fn test_model_functions(report: &mut TestReport) {
     println!("📦 Testing model functions...");
     
@@ -68,6 +69,7 @@ fn test_model_functions(report: &mut TestReport) {
     println!("  ✅ Model functions: 2/2");
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 290)]
 fn test_view_functions(report: &mut TestReport) {
     println!("🎨 Testing view functions...");
     
@@ -105,6 +107,7 @@ fn test_view_functions(report: &mut TestReport) {
     println!("  ✅ View functions: {}/{}", passed, count);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn test_handler_paths(report: &mut TestReport) {
     println!("🔧 Testing handler paths...");
     
@@ -125,6 +128,7 @@ fn test_handler_paths(report: &mut TestReport) {
     println!("  ✅ Handler paths: {}/6", paths_len);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 360)]
 fn test_plugin_system(report: &mut TestReport) {
     println!("🔌 Testing plugin system...");
     
@@ -171,6 +175,7 @@ fn test_plugin_system(report: &mut TestReport) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn fuzz_all_paths(report: &mut TestReport) {
     println!("\n🎲 Fuzzing all paths...");
     
@@ -184,6 +189,7 @@ fn fuzz_all_paths(report: &mut TestReport) {
     fuzz_plugin_inputs(report);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn fuzz_view_rendering(report: &mut TestReport) {
     let iterations = 1000;
     let mut crashes = 0;
@@ -212,6 +218,7 @@ fn fuzz_view_rendering(report: &mut TestReport) {
     println!("  View rendering: {}/{} passed", iterations - crashes, iterations);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn fuzz_model_parsing(report: &mut TestReport) {
     let iterations = 1000;
     let mut crashes = 0;
@@ -242,6 +249,7 @@ fn fuzz_model_parsing(report: &mut TestReport) {
     println!("  Model parsing: {}/{} passed", iterations - crashes, iterations);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn fuzz_plugin_inputs(report: &mut TestReport) {
     let iterations = 1000;
     let mut crashes = 0;
@@ -287,6 +295,7 @@ fn fuzz_plugin_inputs(report: &mut TestReport) {
     println!("  Plugin inputs: {}/{} passed", iterations - crashes, iterations);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn benchmark_all(report: &mut TestReport) {
     println!("\n⚡ Performance benchmarks...");
     
@@ -295,6 +304,7 @@ fn benchmark_all(report: &mut TestReport) {
     benchmark_plugin_execution(report);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn benchmark_view_rendering(report: &mut TestReport) {
     let iterations = 10000;
     let mut times = Vec::new();
@@ -322,6 +332,7 @@ fn benchmark_view_rendering(report: &mut TestReport) {
     println!("  View rendering: avg={:.3}ms, p99={:.3}ms", avg, p99);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn benchmark_model_operations(report: &mut TestReport) {
     let iterations = 10000;
     let mut times = Vec::new();
@@ -354,6 +365,7 @@ fn benchmark_model_operations(report: &mut TestReport) {
     println!("  Model serialize: avg={:.3}ms, p99={:.3}ms", avg, p99);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn benchmark_plugin_execution(report: &mut TestReport) {
     struct BenchPlugin;
     impl plugin::Plugin for BenchPlugin {
@@ -399,6 +411,7 @@ fn benchmark_plugin_execution(report: &mut TestReport) {
     println!("  Plugin execute: avg={:.3}ms, p99={:.3}ms", avg, p99);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 130)]
 fn generate_fuzz_string(seed: usize, variant: usize) -> String {
     let long_str = "x".repeat(1000);
     let patterns: Vec<&str> = vec![
@@ -415,6 +428,7 @@ fn generate_fuzz_string(seed: usize, variant: usize) -> String {
     patterns[(seed + variant) % patterns.len()].to_string()
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 120)]
 fn generate_fuzz_bytes(seed: usize) -> Vec<u8> {
     let patterns: Vec<Vec<u8>> = vec![
         vec![],

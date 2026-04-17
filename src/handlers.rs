@@ -25,6 +25,7 @@ struct AccessCommands {
     data_url: String,
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 220)]
 fn normalized_base_url(req: &actix_web::HttpRequest, base_path: &str) -> String {
     let normalized_base_path = if base_path.is_empty() {
         String::new()
@@ -55,6 +56,7 @@ fn normalized_base_url(req: &actix_web::HttpRequest, base_path: &str) -> String 
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 200)]
 fn access_commands(base_url: &str, id: &str, ipfs_cid: Option<&str>, uucp_path: &str, content: &str) -> AccessCommands {
     let ipfs = if let Some(cid) = ipfs_cid {
         format!("curl {}/ipfs/{}", base_url, cid)
@@ -91,6 +93,7 @@ fn access_commands(base_url: &str, id: &str, ipfs_cid: Option<&str>, uucp_path: 
 }
 
 /// GET / - Home page
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1110)]
 pub async fn index(
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponse> {
@@ -124,6 +127,7 @@ pub async fn index(
 }
 
 /// Extract 8 u64 register values from content bytes (for cache line mapping)
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn coords_in_regs(data: &[u8]) -> [u64; 8] {
     let mut regs = [0u64; 8];
     for i in 0..8 {
@@ -326,6 +330,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
 }
 
 /// POST /upload - Upload file (multipart)
+#[zkperf_macros::witness_boundary(complexity = "K2:matrix", max_n = 1000, max_ms = 5020)]
 pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
     use futures_util::StreamExt as _;
 
@@ -442,6 +447,7 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
 }
 
 /// GET /file/{id} - Serve raw file
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 480)]
 pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
@@ -483,6 +489,7 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
         (status = 200, description = "Paste HTML")
     )
 )]
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1200)]
 pub async fn get_paste(
     path: web::Path<String>,
     req: actix_web::HttpRequest,
@@ -740,6 +747,7 @@ async function playMidi(){{
 }
 
 /// GET /preview/{id} - Preview paste with rendering
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 190)]
 pub async fn preview_paste(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
     let content = storage::load_content(&id).unwrap_or_else(|| "Paste not found".to_string());
@@ -749,6 +757,7 @@ pub async fn preview_paste(path: web::Path<String>) -> Result<HttpResponse> {
 }
 
 /// GET /raw/{id} - Raw text
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 180)]
 pub async fn get_raw(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
     let content = storage::load_content(&id).unwrap_or_else(|| "Paste not found".to_string());
@@ -756,6 +765,7 @@ pub async fn get_raw(path: web::Path<String>) -> Result<HttpResponse> {
 }
 
 /// POST /upgrade - Upgrade all pastes with auto-tags
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 pub async fn upgrade_pastes() -> Result<HttpResponse> {
     let uucp_dir =
         env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
@@ -832,6 +842,7 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
 }
 
 /// GET /thread/{id} - Get thread as conformal arrows in the orbifold
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 450)]
 pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
     use crate::model::{ConformalArrow, Thread};
     use crate::dasl::orbifold_coords;
@@ -886,6 +897,7 @@ pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
         (status = 200, description = "Browse HTML")
     )
 )]
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1040)]
 pub async fn browse(
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponse> {
@@ -985,6 +997,7 @@ pub async fn browse(
 }
 
 /// GET /ipfs/{cid} - Proxy IPFS content
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 320)]
 pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
     let cid = path.into_inner();
 
@@ -1022,6 +1035,7 @@ pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
 }
 
 /// GET /gallery - NFT gallery from enriched directory
+#[zkperf_macros::witness_boundary(complexity = "K2:matrix", max_n = 1000, max_ms = 5260)]
 pub async fn gallery() -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_default();
     let bp = &base_path;
@@ -1149,6 +1163,7 @@ pub async fn gallery() -> Result<HttpResponse> {
 }
 
 /// GET /gallery/img/{qid} - Serve source image from enriched dir
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 230)]
 pub async fn gallery_image(path: web::Path<String>) -> Result<HttpResponse> {
     let qid = path.into_inner();
     let nft_dir = env::var("NFT_DIR")
@@ -1168,6 +1183,7 @@ pub async fn gallery_image(path: web::Path<String>) -> Result<HttpResponse> {
 }
 
 /// Enrich a Wikidata QID via the enrich-qid.sh pipeline
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 async fn enrich_qid(qid: &str) -> Result<HttpResponse> {
     let pipeline = env::var("ENRICH_PIPELINE").unwrap_or_else(|_| {
         "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh".to_string()
@@ -1229,6 +1245,7 @@ async fn enrich_qid(qid: &str) -> Result<HttpResponse> {
 }
 
 /// GET /plugins - List available plugins
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 190)]
 pub async fn list_plugins(
     registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>,
 ) -> Result<HttpResponse> {
@@ -1242,6 +1259,7 @@ pub async fn list_plugins(
 }
 
 /// GET /stego - eRDFa stego dashboard
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 250)]
 pub async fn stego_dashboard() -> Result<HttpResponse> {
     let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
     let base_path = env::var("BASE_PATH").unwrap_or_default();
@@ -1257,6 +1275,7 @@ pub async fn stego_dashboard() -> Result<HttpResponse> {
 }
 
 /// GET /wasm - The new WASM frontend
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 200)]
 pub async fn wasm_frontend() -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_default();
     let html = fs::read_to_string("pastebin-wasm/static/index.html")
@@ -1268,6 +1287,7 @@ pub async fn wasm_frontend() -> Result<HttpResponse> {
 }
 
 /// POST /plugin/{name}/{id} - Run plugin on a paste
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 290)]
 pub async fn run_plugin(
     path: web::Path<(String, String)>,
     req: actix_web::HttpRequest,

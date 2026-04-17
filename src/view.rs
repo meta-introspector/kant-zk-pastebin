@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 150)]
 pub fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -147,6 +148,7 @@ impl Page {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 190)]
 fn render_widget(w: &W, h: &mut String) {
     match w {
         W::Raw(s) => h.push_str(s),
@@ -296,6 +298,7 @@ function crossPost(){
 "#;
 
 /// Join base_path + relative path, avoiding double slashes
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 130)]
 pub fn url(base: &str, path: &str) -> String {
     let b = base.trim_end_matches('/');
     if path.is_empty() || path == "/" { format!("{}/", b) }
@@ -304,6 +307,7 @@ pub fn url(base: &str, path: &str) -> String {
 }
 
 /// Consistent nav bar for every page
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn nav_bar(base: &str) -> Vec<W> {
     vec![W::Raw(format!(
         r#"<a href="{}">🏠 Home</a> <a href="{}">📚 Browse</a> <a href="{}">🖼️ Gallery</a> <a href="{}">✂️ Splitter</a> <a href="{}">🔐 Stego</a> <a href="{}">📖 API</a>"#,
@@ -313,6 +317,7 @@ pub fn nav_bar(base: &str) -> Vec<W> {
 }
 
 /// Render preview page
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 150)]
 pub fn render_preview(id: &str, content: &str) -> String {
     let mut p = Page::new(&format!("Preview: {}", id));
     p.content(W::Pre(content.to_string()));

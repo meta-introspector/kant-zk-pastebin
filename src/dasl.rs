@@ -50,6 +50,7 @@ pub const HECKE_PRIMES: [u64; 15] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 41,
 // === DASL CID Types ===
 
 /// Type 0: Monster Walk Block
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn monster_walk_cid(group: u8, position: u8, sequence: u16, factors: u8) -> u64 {
     (DA51_PREFIX << 48)
         | (0u64 << 44)
@@ -60,6 +61,7 @@ pub fn monster_walk_cid(group: u8, position: u8, sequence: u16, factors: u8) -> 
 }
 
 /// Type 1: AST Node with triple view (bott × tenfold × hecke)
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 110)]
 pub fn ast_node_cid(bott: u8, tenfold: u8, hecke: u8, data: &[u8]) -> u64 {
     let hash = Sha256::digest(data);
     let hash20 = ((hash[3] as u64) << 12) | ((hash[4] as u64) << 4) | ((hash[5] as u64) >> 4);
@@ -73,6 +75,7 @@ pub fn ast_node_cid(bott: u8, tenfold: u8, hecke: u8, data: &[u8]) -> u64 {
 }
 
 /// Type 3: Nested CID for content addressing
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 110)]
 pub fn nested_cid(data: &[u8]) -> u64 {
     let hash = Sha256::digest(data);
     let shard = hash[0] as u64 % 71;
@@ -88,6 +91,7 @@ pub fn nested_cid(data: &[u8]) -> u64 {
 }
 
 /// Type 4: Harmonic Path (10-fold ↔ 8-fold bridge)
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn harmonic_path_cid(source: u8, dest: u8, harmonic: u8) -> u64 {
     (DA51_PREFIX << 48)
         | (4u64 << 44)
@@ -97,6 +101,7 @@ pub fn harmonic_path_cid(source: u8, dest: u8, harmonic: u8) -> u64 {
 }
 
 /// Type 5: Shard ID for distributed storage
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn shard_cid(prime_idx: u8, replica: u8, zone: u8, node: u32) -> u64 {
     (DA51_PREFIX << 48)
         | (5u64 << 44)
@@ -110,6 +115,7 @@ pub fn shard_cid(prime_idx: u8, replica: u8, zone: u8, node: u32) -> u64 {
 
 /// Compute orbifold coordinates (l, m, n) for content
 /// Maps data into Monster base space: Z/71 × Z/59 × Z/47
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 140)]
 pub fn orbifold_coords(data: &[u8]) -> (u64, u64, u64) {
     let hash = Sha256::digest(data);
     let l = u64::from_le_bytes([hash[0], hash[1], hash[2], hash[3], 0, 0, 0, 0]) % 71;
@@ -119,22 +125,26 @@ pub fn orbifold_coords(data: &[u8]) -> (u64, u64, u64) {
 }
 
 /// 71-fold orbifold rotation
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn rotate_71(coords: (u64, u64, u64), steps: u64) -> (u64, u64, u64) {
     ((coords.0 + steps) % 71, coords.1, coords.2)
 }
 
 /// 59-fold orbifold reflection
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn reflect_59(coords: (u64, u64, u64), steps: u64) -> (u64, u64, u64) {
     (coords.0, (coords.1 + steps) % 59, coords.2)
 }
 
 /// 47-fold orbifold duality
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn dual_47(coords: (u64, u64, u64), steps: u64) -> (u64, u64, u64) {
     (coords.0, coords.1, (coords.2 + steps) % 47)
 }
 
 /// Harmonic bridge: slide between 10-fold and 8-fold CID spaces
 /// LCM(10, 8) = 40, GCD(10, 8) = 2
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn harmonic_slide(tenfold_idx: usize, bott_idx: usize) -> (u64, u64, u64) {
     let t = if tenfold_idx < 11 { TENFOLD_COORDS[tenfold_idx] } else { (0, 0, 0) };
     let b = if bott_idx < 8 { BOTT_COORDS[bott_idx] } else { (0, 0, 0) };
@@ -142,6 +152,7 @@ pub fn harmonic_slide(tenfold_idx: usize, bott_idx: usize) -> (u64, u64, u64) {
 }
 
 /// XOR merge two DASL CIDs (preserves prefix)
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn merge_cids(cid1: u64, cid2: u64) -> u64 {
     let prefix = DA51_PREFIX << 48;
     prefix | ((cid1 & 0xFFFFFFFFFFFF) ^ (cid2 & 0xFFFFFFFFFFFF))
@@ -149,11 +160,13 @@ pub fn merge_cids(cid1: u64, cid2: u64) -> u64 {
 
 // === Formatting ===
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn dasl_hex(cid: u64) -> String {
     format!("0x{:016x}", cid)
 }
 
 /// Decode any DASL CID into (type, raw_data_48bits)
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 110)]
 pub fn decode(cid: u64) -> Option<(u8, u64)> {
     if (cid >> 48) != DA51_PREFIX { return None; }
     let typ = ((cid >> 44) & 0xF) as u8;
@@ -162,11 +175,13 @@ pub fn decode(cid: u64) -> Option<(u8, u64)> {
 }
 
 /// Full DASL CID for content: nested CID + orbifold coords as hex
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 120)]
 pub fn dasl_cid(data: &[u8]) -> String {
     dasl_hex(nested_cid(data))
 }
 
 /// Compute all CID representations for content
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 150)]
 pub fn all_cids(data: &[u8]) -> Vec<(String, String)> {
     let (l, m, n) = orbifold_coords(data);
     let ncid = nested_cid(data);
@@ -185,6 +200,7 @@ pub fn all_cids(data: &[u8]) -> Vec<(String, String)> {
 }
 
 /// Distance between two orbifold coordinate vectors (modular, per Monster prime).
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 190)]
 pub fn orbifold_distance(a: &[u64], b: &[u64]) -> u64 {
     a.iter().zip(b.iter())
         .zip(MONSTER_PRIMES.iter())
@@ -193,12 +209,14 @@ pub fn orbifold_distance(a: &[u64], b: &[u64]) -> u64 {
 }
 
 /// Distance from j-invariant origin (0,...,0).
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 120)]
 pub fn distance_from_origin(coords: &[u64]) -> u64 {
     coords.iter().sum()
 }
 
 /// Full orbifold coordinates for a usize value (e.g. span offset, depth, length).
 /// Returns one coordinate per Monster prime (15 values).
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 130)]
 pub fn orbifold_coords_full(n: usize) -> Vec<u64> {
     MONSTER_PRIMES.iter().map(|&p| (n as u64) % p).collect()
 }

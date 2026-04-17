@@ -39,6 +39,7 @@ struct FuzzInput {
     reply_to: Option<String>,
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 220)]
 fn gen_inputs(n: usize) -> Vec<FuzzInput> {
     let mut inputs: Vec<FuzzInput> = (0..n).map(|i| {
         let coords: Vec<u64> = MONSTER_PRIMES.iter().map(|&p| (i as u64 * 13) % p).collect();
@@ -57,6 +58,7 @@ fn gen_inputs(n: usize) -> Vec<FuzzInput> {
 
 // ── HTML assertion helpers ────────────────────────────────────────────────────
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 170)]
 fn parse(html: &str) -> RcDom {
     parse_document(RcDom::default(), Default::default())
         .from_utf8()
@@ -64,6 +66,7 @@ fn parse(html: &str) -> RcDom {
         .unwrap()
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 140)]
 fn count_tags(handle: &Handle, tag: &str) -> usize {
     let mut n = 0;
     if let NodeData::Element { ref name, .. } = handle.data {
@@ -75,6 +78,7 @@ fn count_tags(handle: &Handle, tag: &str) -> usize {
     n
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 160)]
 fn has_text(handle: &Handle, needle: &str) -> bool {
     if let NodeData::Text { ref contents } = handle.data {
         if contents.borrow().contains(needle) { return true; }
@@ -84,6 +88,7 @@ fn has_text(handle: &Handle, needle: &str) -> bool {
 
 // ── Render paths under test ───────────────────────────────────────────────────
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1070)]
 fn render_index(input: &FuzzInput, base: &str) -> String {
     let mut p = view::Page::new("📋 Kant Pastebin");
     for w in view::nav_bar(base) { p.nav(w); }
@@ -105,6 +110,7 @@ fn render_index(input: &FuzzInput, base: &str) -> String {
     p.render()
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn render_browse(pastes: &[FuzzInput], base: &str) -> String {
     let mut p = view::Page::new("📋 Browse — Kant Pastebin");
     for w in view::nav_bar(base) { p.nav(w); }
@@ -118,6 +124,7 @@ fn render_browse(pastes: &[FuzzInput], base: &str) -> String {
     p.render()
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn render_paste_view(input: &FuzzInput, base: &str) -> String {
     let mut p = view::Page::new(&format!("{} — Kant Pastebin", input.title));
     for w in view::nav_bar(base) { p.nav(w); }

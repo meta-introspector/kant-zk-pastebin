@@ -29,6 +29,7 @@ fn extract_ngrams(text: &str, n: usize, top: usize) -> Vec<(String, usize)> {
     ngrams
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 160)]
 fn extract_github_repo(url: &str) -> Option<String> {
     // Extract github.com/owner/repo from URL
     if let Some(start) = url.find("github.com/") {
@@ -41,6 +42,7 @@ fn extract_github_repo(url: &str) -> Option<String> {
     None
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 170)]
 fn fetch_url_content(url: &str) -> Option<String> {
     Command::new("curl")
         .args(&["-sL", url])
@@ -87,6 +89,7 @@ fn ipfs_cat(cid: &str) -> Option<String> {
     String::from_utf8(output.stdout).ok()
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 async fn paste(data: web::Json<Paste>) -> HttpResponse {
     let paste = data.into_inner();
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
@@ -211,6 +214,7 @@ async fn paste(data: web::Json<Paste>) -> HttpResponse {
     HttpResponse::Ok().json(Response { id, cid: local_cid, ipfs_cid, witness, url, permalink, uucp_path: uucp, reply_to: paste.reply_to })
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 130)]
 async fn old_index() -> HttpResponse {
     HttpResponse::Ok().content_type("text/html; charset=utf-8").body(r#"<!DOCTYPE html>
 <html lang="en"><head>
@@ -451,6 +455,7 @@ document.querySelectorAll('.filter-btn').forEach(b=>b.onclick=()=>live.textConte
 </script></body></html>"#)
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 190)]
 async fn get_index() -> HttpResponse {
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let index_file = format!("{}/index.jsonl", uucp_dir);
@@ -665,6 +670,7 @@ const live=document.createElement('div');live.id='a11y-live';live.setAttribute('
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 690)]
 async fn share_external(path: web::Path<String>) -> HttpResponse {
     let id = path.into_inner();
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
@@ -782,6 +788,7 @@ async fn get_raw(path: web::Path<String>) -> HttpResponse {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 280)]
 async fn get_cat(path: web::Path<String>) -> HttpResponse {
     let id = path.into_inner();
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
@@ -827,6 +834,7 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 300)]
 fn find_similar_pastes(id: &str, uucp_dir: &str) -> Vec<(String, f64)> {
     let index_file = format!("{}/index.jsonl", uucp_dir);
     let index_content = match fs::read_to_string(&index_file) {
@@ -858,6 +866,7 @@ fn find_similar_pastes(id: &str, uucp_dir: &str) -> Vec<(String, f64)> {
     similarities
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 320)]
 fn calculate_similarity(a: &PasteIndex, b: &PasteIndex) -> f64 {
     let mut score = 0.0;
     

@@ -18,6 +18,7 @@ pub fn slugify(s: &str) -> String {
     if slug.len() > 50 { slug[..50].to_string() } else { slug }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 pub fn extract_ngrams(text: &str, n: usize, top: usize) -> Vec<(String, usize)> {
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut counts: HashMap<String, usize> = HashMap::new();
@@ -31,6 +32,7 @@ pub fn extract_ngrams(text: &str, n: usize, top: usize) -> Vec<(String, usize)> 
     ngrams
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 pub fn auto_tag(content: &str) -> Vec<String> {
     let mut tags = Vec::new();
     let lower = content.to_lowercase();
@@ -67,12 +69,14 @@ pub fn auto_tag(content: &str) -> Vec<String> {
     tags
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 150)]
 pub fn extract_html_title(html: &str) -> Option<String> {
     let start = html.find("<title>")?;
     let end = html[start..].find("</title>")?;
     Some(html[start + 7..start + end].trim().to_string())
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 pub fn extract_html_meta(html: &str) -> Vec<String> {
     let mut metas = Vec::new();
     for line in html.lines() {
@@ -87,6 +91,7 @@ pub fn extract_html_meta(html: &str) -> Vec<String> {
     metas
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 150)]
 fn extract_attr(line: &str, attr: &str) -> Option<String> {
     let pattern = format!("{}=\"", attr);
     let start = line.find(&pattern)? + pattern.len();
@@ -94,6 +99,7 @@ fn extract_attr(line: &str, attr: &str) -> Option<String> {
     Some(line[start..start + end].to_string())
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 240)]
 fn extract_repo_name(line: &str) -> Option<String> {
     if let Some(start) = line.find("github.com/").or_else(|| line.find("gitlab.com/")) {
         let after = &line[start..];
@@ -113,6 +119,7 @@ fn extract_repo_name(line: &str) -> Option<String> {
     None
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 250)]
 pub fn auto_describe(content: &str) -> String {
     let lines: Vec<&str> = content.lines().take(3).collect();
     let preview: String = lines.join(" ")

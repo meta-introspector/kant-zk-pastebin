@@ -4,6 +4,7 @@ use crate::model::{Paste, Response, PasteIndex};
 use chrono::Utc;
 use sha2::{Sha256, Digest};
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 220)]
 fn slugify(s: &str) -> String {
     let slug: String = s.chars()
         .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
@@ -16,6 +17,7 @@ fn slugify(s: &str) -> String {
 }
 
 /// POST /api/paste - Create new paste
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 pub async fn create_paste(data: web::Json<Paste>) -> HttpResponse {
     let content = data.content.as_ref().map(|s| s.as_str()).unwrap_or("");
     let title = data.title.as_ref().map(|s| s.as_str()).unwrap_or("untitled");
@@ -46,6 +48,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> HttpResponse {
 }
 
 /// GET /api/paste/{id} - Get paste as JSON
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 200)]
 pub async fn get_paste_json(path: web::Path<String>) -> HttpResponse {
     HttpResponse::Ok().json(PasteIndex {
         id: path.to_string(),

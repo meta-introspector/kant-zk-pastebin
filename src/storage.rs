@@ -2,6 +2,7 @@
 use std::fs;
 use std::env;
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 180)]
 pub fn load_content(id: &str) -> Option<String> {
     if let Some(content) = load_from_api(id) {
         return Some(content);
@@ -17,6 +18,7 @@ pub fn load_content(id: &str) -> Option<String> {
     load_from_ipfs(id)
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 170)]
 pub fn save_content(id: &str, content: &str) -> Result<(), std::io::Error> {
     save_to_api(id, content);
     
@@ -28,12 +30,14 @@ pub fn save_content(id: &str, content: &str) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 160)]
 fn load_from_api(id: &str) -> Option<String> {
     let api_url = env::var("KAFKA_API_URL").ok()?;
     let url = format!("{}/get/{}", api_url, id);
     reqwest::blocking::get(&url).ok()?.text().ok()
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 160)]
 fn save_to_api(id: &str, content: &str) {
     if let Ok(api_url) = env::var("KAFKA_API_URL") {
         let url = format!("{}/put/{}", api_url, id);
@@ -44,10 +48,12 @@ fn save_to_api(id: &str, content: &str) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 fn load_from_ipfs(id: &str) -> Option<String> {
     None
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 fn save_to_ipfs(content: &str) -> Option<String> {
     None
 }

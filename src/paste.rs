@@ -4,6 +4,7 @@ use hex;
 use chrono;
 
 // Escaped RDFa utilities (from escaped-rdfa crate)
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 140)]
 pub fn escape_html(input: &str) -> String {
     input
         .replace('&', "&amp;")
@@ -12,6 +13,7 @@ pub fn escape_html(input: &str) -> String {
         .replace('"', "&quot;")
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 140)]
 pub fn unescape_html(input: &str) -> String {
     input
         .replace("&lt;", "<")

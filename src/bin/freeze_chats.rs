@@ -15,6 +15,7 @@ struct Cli {
     out: PathBuf,
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn extract_turns(history: &[Value]) -> Vec<(String, String)> {
     let mut turns = Vec::new();
     for h in history {
@@ -53,6 +54,7 @@ fn extract_turns(history: &[Value]) -> Vec<(String, String)> {
     turns
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn process_chat(path: &PathBuf, out: &PathBuf) -> Option<()> {
     let data: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
     let cid = data.get("conversation_id").and_then(|v| v.as_str()).unwrap_or("unknown");

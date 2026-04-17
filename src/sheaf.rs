@@ -85,6 +85,7 @@ impl Encoding {
 }
 
 /// Classify DASL type from content heuristics + hash fallback
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 190)]
 fn classify_type(data: &[u8], hash_byte: u8) -> DaslType {
     // Check for structural markers in content
     if let Ok(text) = std::str::from_utf8(data) {
@@ -211,6 +212,7 @@ impl Section {
 }
 
 /// Restriction map: how data flows between two sections
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 130)]
 pub fn restriction_map(source: &Section, target: &Section) -> String {
     [
         "&lt;div typeof=\"sheaf:RestrictionMap\"&gt;".to_string(),
@@ -224,6 +226,7 @@ pub fn restriction_map(source: &Section, target: &Section) -> String {
 }
 
 /// Sheaf header line for paste metadata
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn sheaf_header(s: &Section) -> String {
     let hecke_prime = dasl::MONSTER_PRIMES[s.hecke as usize];
     format!("Sheaf: {},{},{} H/{} p={} T{} {} B{} T_{}",

@@ -4,6 +4,7 @@ use markup5ever_rcdom::{RcDom, Handle, NodeData};
 use std::env;
 use std::fs;
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 190)]
 fn walk_dom(handle: &Handle, depth: usize) {
     let node = handle;
     match node.data {

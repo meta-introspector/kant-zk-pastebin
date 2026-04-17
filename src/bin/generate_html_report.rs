@@ -16,6 +16,7 @@ fn main() {
     println!("✅ HTML report generated: test-report.html");
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 3110)]
 fn generate_html(report: &serde_json::Value) -> String {
     let coverage = &report["coverage"];
     let fuzz = &report["fuzz"];

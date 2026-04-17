@@ -2,6 +2,7 @@
 use std::process::Command;
 use std::fs;
 
+#[zkperf_macros::witness_boundary(complexity = "K2:matrix", max_n = 1000, max_ms = 5020)]
 fn main() {
     println!("=== zkPerf Test Runner ===\n");
     
@@ -18,6 +19,7 @@ fn main() {
     generate_report(&coverage, &plugin_results);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 160)]
 fn run_with_zkperf_coverage() {
     println!("📊 Running tests with zkperf coverage...");
     
@@ -32,6 +34,7 @@ fn run_with_zkperf_coverage() {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn parse_coverage_data() -> CoverageData {
     println!("📖 Parsing actual coverage data...");
     
@@ -64,6 +67,7 @@ fn parse_coverage_data() -> CoverageData {
     data
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn test_plugins_with_perf() -> Vec<PluginResult> {
     println!("\n🔌 Testing plugins with perf recording...");
     
@@ -107,6 +111,7 @@ fn test_plugins_with_perf() -> Vec<PluginResult> {
     results
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 210)]
 fn extract_metric(report: &str, metric: &str) -> u64 {
     report.lines()
         .find(|l| l.contains(metric))
@@ -115,6 +120,7 @@ fn extract_metric(report: &str, metric: &str) -> u64 {
         .unwrap_or(0)
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 140)]
 fn generate_report(coverage: &CoverageData, plugins: &[PluginResult]) {
     println!("\n📄 Generating report from actual data...");
     

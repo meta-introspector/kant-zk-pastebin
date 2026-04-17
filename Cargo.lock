@@ -5118,7 +5118,7 @@ dependencies = [
 
 [[package]]
 name = "web_atoms"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "phf 0.13.1",
  "phf_codegen 0.13.1",

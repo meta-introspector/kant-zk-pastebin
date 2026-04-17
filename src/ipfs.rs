@@ -49,6 +49,7 @@ pub trait ContentStore: Send + Sync {
 
 /// Resolve the IPFS repo path: `$IPFS_PATH` or `~/.ipfs`.
 /// Returns `None` if the directory doesn't exist.
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 180)]
 fn ipfs_repo() -> Option<String> {
     std::env::var("IPFS_PATH")
         .ok()
@@ -61,6 +62,7 @@ fn ipfs_repo() -> Option<String> {
 /// Block path: `{repo}/blocks/{shard}/{key}.data`
 /// - `key` = base32upper(multihash)
 /// - `shard` = next-to-last 2 characters of `key` (go-ipfs sharding scheme)
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 210)]
 fn write_block(cid: &Cid, block: &[u8]) -> bool {
     let Some(repo) = ipfs_repo() else {
         return false;
@@ -85,6 +87,7 @@ fn write_block(cid: &Cid, block: &[u8]) -> bool {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn store_blocks<I, B>(blocks: I, root_cid: &mut Option<Cid>) -> bool
 where
     I: IntoIterator<Item = (Cid, B)>,
@@ -105,6 +108,7 @@ where
 ///
 /// For files under 256KB (default chunk size), produces a single leaf block.
 /// Larger files are chunked into a balanced Merkle DAG automatically.
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 pub fn ipfs_add_bytes(data: &[u8]) -> Option<String> {
     ipfs_repo()?;
 
@@ -129,12 +133,14 @@ pub fn ipfs_add_bytes(data: &[u8]) -> Option<String> {
 }
 
 /// Convenience wrapper: add UTF-8 content to IPFS.
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 pub fn ipfs_add(content: &str) -> Option<String> {
     ipfs_add_bytes(content.as_bytes())
 }
 
 /// Read a raw block from go-ipfs flatfs by CID string.
 /// Parses the CID, derives the flatfs path, and reads the block bytes.
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 210)]
 pub fn ipfs_cat(cid_str: &str) -> Option<Vec<u8>> {
     let repo = ipfs_repo()?;
     let cid: Cid = cid_str.parse().ok()?;
@@ -150,12 +156,14 @@ pub fn ipfs_cat(cid_str: &str) -> Option<Vec<u8>> {
 }
 
 /// Quick local content hash (not IPFS-compatible, for dedup only).
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 110)]
 pub fn local_cid(data: &[u8]) -> String {
     let hash = Sha256::digest(data);
     format!("bafk{}", hex::encode(&hash[..16]))
 }
 
 /// Convert any CID string to CIDv1 base32lower for display.
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 170)]
 pub fn cid_to_v1(cid_str: &str) -> String {
     if let Ok(cid) = cid_str.parse::<Cid>() {
         let v1 = Cid::new_v1(cid.codec(), cid.hash().to_owned());
@@ -198,6 +206,7 @@ pub struct DaslObject {
 /// The envelope includes the content's IPFS CID, DASL address, orbifold
 /// coordinates, and Bott index — bridging IPFS content addressing with
 /// Monster group symmetry.
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 pub fn wrap_dasl_cbor(data: &[u8]) -> (Vec<u8>, String) {
     let cid = ipfs_add_bytes(data).unwrap_or_default();
     let dasl_addr = crate::dasl::dasl_cid(data);

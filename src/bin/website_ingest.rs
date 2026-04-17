@@ -46,6 +46,7 @@ struct StaticAsset {
     coords: Vec<u64>,
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 250)]
 fn ingest_html(path: &Path) -> HtmlFile {
     let html = fs::read_to_string(path).expect("read html");
     let dom = parse_document(RcDom::default(), Default::default())
@@ -62,6 +63,7 @@ fn ingest_html(path: &Path) -> HtmlFile {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 230)]
 fn ingest_js(path: &Path) -> JsFile {
     let source = fs::read_to_string(path).expect("read js");
     let allocator = Allocator::default();
@@ -77,6 +79,7 @@ fn ingest_js(path: &Path) -> JsFile {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 190)]
 fn ingest_css(path: &Path) -> CssFile {
     let css = fs::read_to_string(path).expect("read css");
     let coords = erdfa_dasl::orbifold_coords_full(css.len());

@@ -125,6 +125,7 @@ impl TestContext {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 130)]
 fn test_home_page(html: &str) -> bool {
     let ctx = TestContext::from_html(html);
     let title = ctx.title();
@@ -132,6 +133,7 @@ fn test_home_page(html: &str) -> bool {
     title.contains("Kant Pastebin")
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 120)]
 fn test_form_elements(html: &str) -> bool {
     let ctx = TestContext::from_html(html);
     let has_form = !ctx.forms.is_empty();
@@ -139,6 +141,7 @@ fn test_form_elements(html: &str) -> bool {
     has_form
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 140)]
 fn test_links(html: &str) -> bool {
     let ctx = TestContext::from_html(html);
     let has_browse = ctx.links.iter().any(|l| l.contains("/browse"));

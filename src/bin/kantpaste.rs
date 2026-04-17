@@ -11,6 +11,7 @@ const RMQ_API: &str = "http://localhost:15672/api";
 const RMQ_AUTH: (&str, &str) = ("monster", "gyroscope");
 const RMQ_VHOST: &str = "%2Fmonster";
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn parse_paste(path: &PathBuf) -> Option<PasteIndex> {
     let text = fs::read_to_string(path).ok()?;
     let fname = path.file_name()?.to_str()?;
@@ -71,6 +72,7 @@ fn parse_paste(path: &PathBuf) -> Option<PasteIndex> {
     })
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn load_all() -> Vec<PasteIndex> {
     let spool = env::var("UUCP_SPOOL").unwrap_or_else(|_| SPOOL.to_string());
     let mut pastes: Vec<PasteIndex> = fs::read_dir(&spool)
@@ -83,6 +85,7 @@ fn load_all() -> Vec<PasteIndex> {
     pastes
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_list(n: usize) {
     let pastes = load_all();
     for p in pastes.iter().take(n) {
@@ -93,6 +96,7 @@ fn cmd_list(n: usize) {
     eprintln!("({} total pastes)", pastes.len());
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_thread(id: &str) {
     let pastes = load_all();
     let by_id: HashMap<&str, &PasteIndex> = pastes.iter().map(|p| (p.id.as_str(), p)).collect();
@@ -133,6 +137,7 @@ fn cmd_thread(id: &str) {
     print_tree(root_id, &by_id, &children, 0);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 320)]
 fn cmd_post(title: &str, content: &str, reply_to: Option<&str>, keywords: &[String]) {
     let api = env::var("PASTE_API").unwrap_or_else(|_| PASTE_API.to_string());
     let url = format!("{}/paste", api).replace("/pastebin/paste", "/paste");
@@ -167,6 +172,7 @@ fn cmd_post(title: &str, content: &str, reply_to: Option<&str>, keywords: &[Stri
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 250)]
 fn cmd_post_spool(title: &str, content: &str, reply_to: Option<&str>, keywords: &[String]) {
     let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let slug = slugify(title);
@@ -190,6 +196,7 @@ fn cmd_post_spool(title: &str, content: &str, reply_to: Option<&str>, keywords: 
     eprintln!("Wrote {}", path);
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_route(id: &str, exchange: &str, routing_key: &str) {
     let pastes = load_all();
     let paste = pastes.iter().find(|p| p.id == id || p.id.contains(id));
@@ -220,6 +227,7 @@ fn cmd_route(id: &str, exchange: &str, routing_key: &str) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_delete(id: &str) {
     let spool = env::var("UUCP_SPOOL").unwrap_or_else(|_| SPOOL.to_string());
     let trash = format!("{}/.trash", spool);
@@ -239,6 +247,7 @@ fn cmd_delete(id: &str) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_restore(id: &str) {
     let spool = env::var("UUCP_SPOOL").unwrap_or_else(|_| SPOOL.to_string());
     let trash = format!("{}/.trash", spool);
@@ -264,6 +273,7 @@ fn cmd_restore(id: &str) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_trash_list() {
     let spool = env::var("UUCP_SPOOL").unwrap_or_else(|_| SPOOL.to_string());
     let trash = format!("{}/.trash", spool);
@@ -281,6 +291,7 @@ fn cmd_trash_list() {
     eprintln!("({} in trash)", entries.len());
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_show(id: &str) {
     let pastes = load_all();
     let paste = pastes.iter().find(|p| p.id == id || p.id.contains(id));
@@ -293,6 +304,7 @@ fn cmd_show(id: &str) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn read_body(path: &str) -> String {
     let content = fs::read_to_string(path).unwrap_or_default();
     let mut in_body = false;
@@ -304,6 +316,7 @@ fn read_body(path: &str) -> String {
     lines.join("\n")
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1050)]
 fn cmd_export(id: &str, thread: bool, format: &str) {
     let pastes = load_all();
     let ids: Vec<&PasteIndex> = if thread {
@@ -353,6 +366,7 @@ fn cmd_export(id: &str, thread: bool, format: &str) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_import(path: &str, reply_to: Option<&str>) {
     let content = fs::read_to_string(path).unwrap_or_else(|e| { eprintln!("Cannot read {}: {}", path, e); process::exit(1); });
 
@@ -383,6 +397,7 @@ fn cmd_import(path: &str, reply_to: Option<&str>) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_replies(id: &str) {
     let api = env::var("PASTE_API").unwrap_or_else(|_| PASTE_API.to_string());
     let url = format!("{}/thread/{}", api, id);
@@ -415,6 +430,7 @@ fn cmd_replies(id: &str) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K2:matrix", max_n = 1000, max_ms = 5020)]
 fn cmd_tags(tag: Option<&str>) {
     let pastes = load_all();
     if let Some(tag) = tag {
@@ -444,6 +460,7 @@ fn cmd_tags(tag: Option<&str>) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn cmd_search(query: &str) {
     let pastes = load_all();
     let q = query.to_lowercase();
@@ -461,6 +478,7 @@ fn cmd_search(query: &str) {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K2:matrix", max_n = 1000, max_ms = 5020)]
 fn cmd_garden() {
     let pastes = load_all();
 
@@ -533,6 +551,7 @@ fn cmd_garden() {
     }
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K2:matrix", max_n = 1000, max_ms = 5700)]
 fn cmd_publish_tour(geojson_path: &str, outdir: &str) {
     let raw = fs::read_to_string(geojson_path)
         .unwrap_or_else(|e| { eprintln!("Cannot read {}: {}", geojson_path, e); process::exit(1); });

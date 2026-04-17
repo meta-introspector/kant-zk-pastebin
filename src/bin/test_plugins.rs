@@ -42,6 +42,7 @@ struct PluginTestResult {
     errors: Vec<String>,
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 520)]
 fn register_all_plugins(registry: &mut PluginRegistry) {
     // Mock plugins for testing
     struct HtmlPlugin;
@@ -115,6 +116,7 @@ fn register_all_plugins(registry: &mut PluginRegistry) {
     registry.register(Box::new(CircuitPlugin));
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K1:vector", max_n = 10000, max_ms = 1010)]
 fn test_plugin(registry: &PluginRegistry, name: &str) -> PluginTestResult {
     let mut result = PluginTestResult {
         success: true,
@@ -246,6 +248,7 @@ fn test_plugin(registry: &PluginRegistry, name: &str) -> PluginTestResult {
     result
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 120)]
 fn generate_fuzz_input(seed: usize) -> Vec<u8> {
     let patterns: Vec<Vec<u8>> = vec![
         vec![],
@@ -262,6 +265,7 @@ fn generate_fuzz_input(seed: usize) -> Vec<u8> {
     patterns[seed % patterns.len()].clone()
 }
 
+#[zkperf_macros::witness_boundary(complexity = "K2:matrix", max_n = 1000, max_ms = 5020)]
 fn generate_plugin_report(results: &[(String, PluginTestResult)]) {
     println!("\n=== Plugin Test Report ===\n");
     
