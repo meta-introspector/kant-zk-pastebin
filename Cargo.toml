@@ -2,7 +2,118 @@
 members = [
     ".",
     "pastebin-wasm",
+    "plugins/html5ever/tendril",
+    "plugins/html5ever/web_atoms",
+    "plugins/html5ever/markup5ever",
+    "plugins/html5ever/html5ever",
+    "plugins/html5ever/rcdom",
+    "plugins/html5ever/xml5ever",
+    "plugins/html5ever/cssparser",
+    "plugins/html5ever/cssparser/macros",
+    "plugins/html5ever/cssparser/color",
+    "plugins/oxc/crates/oxc_allocator",
+    "plugins/oxc/crates/oxc_ast",
+    "plugins/oxc/crates/oxc_ast_macros",
+    "plugins/oxc/crates/oxc_ast_visit",
+    "plugins/oxc/crates/oxc_data_structures",
+    "plugins/oxc/crates/oxc_diagnostics",
+    "plugins/oxc/crates/oxc_ecmascript",
+    "plugins/oxc/crates/oxc_estree",
+    "plugins/oxc/crates/oxc_parser",
+    "plugins/oxc/crates/oxc_regular_expression",
+    "plugins/oxc/crates/oxc_span",
+    "plugins/oxc/crates/oxc_str",
+    "plugins/oxc/crates/oxc_syntax",
 ]
+exclude = []
+
+[patch."https://github.com/meta-introspector/erdfa-dasl"]
+erdfa-dasl = { path = "plugins/erdfa-dasl" }
+
+[patch.crates-io]
+erdfa-dasl = { path = "plugins/erdfa-dasl" }
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["meta-introspector"]
+repository = "https://github.com/meta-introspector/kant-zk-pastebin"
+rust-version = "1.92.0"
+description = "Kant ZK Pastebin"
+homepage = "https://solana.solfunmeme.com/pastebin"
+keywords = ["pastebin", "zk", "ipfs"]
+categories = ["web-programming"]
+
+[workspace.dependencies]
+# html5ever family
+tendril = { path = "plugins/html5ever/tendril" }
+web_atoms = { path = "plugins/html5ever/web_atoms" }
+markup5ever = { path = "plugins/html5ever/markup5ever" }
+xml5ever = { path = "plugins/html5ever/xml5ever" }
+html5ever = { path = "plugins/html5ever/html5ever" }
+# html5ever external deps (versions from their workspace)
+encoding_rs = "0.8.35"
+env_logger = "0.11"
+log = "0.4"
+new_debug_unreachable = "1.0.2"
+phf = "0.13.1"
+phf_codegen = "0.13.1"
+string_cache = { version = "0.9.0", default-features = false }
+string_cache_codegen = "0.6.1"
+# dev
+criterion = "0.8"
+libtest-mimic = "0.8.1"
+typed-arena = "2.0.2"
+
+# oxc crates (path-based, from plugins/oxc)
+oxc_allocator = { version = "0.126.0", path = "plugins/oxc/crates/oxc_allocator" }
+oxc_ast = { version = "0.126.0", path = "plugins/oxc/crates/oxc_ast" }
+oxc_ast_macros = { version = "0.126.0", path = "plugins/oxc/crates/oxc_ast_macros" }
+oxc_ast_visit = { version = "0.126.0", path = "plugins/oxc/crates/oxc_ast_visit" }
+oxc_data_structures = { version = "0.126.0", path = "plugins/oxc/crates/oxc_data_structures" }
+oxc_diagnostics = { version = "0.126.0", path = "plugins/oxc/crates/oxc_diagnostics" }
+oxc_ecmascript = { version = "0.126.0", path = "plugins/oxc/crates/oxc_ecmascript" }
+oxc_estree = { version = "0.126.0", path = "plugins/oxc/crates/oxc_estree" }
+oxc_parser = { version = "0.126.0", path = "plugins/oxc/crates/oxc_parser", features = ["regular_expression"] }
+oxc_regular_expression = { version = "0.126.0", path = "plugins/oxc/crates/oxc_regular_expression" }
+oxc_span = { version = "0.126.0", path = "plugins/oxc/crates/oxc_span" }
+oxc_str = { version = "0.126.0", path = "plugins/oxc/crates/oxc_str" }
+oxc_syntax = { version = "0.126.0", path = "plugins/oxc/crates/oxc_syntax" }
+oxc_index = { version = "4.1.0", features = ["nonmax", "serde"] }
+oxc_resolver = "11.16.3"
+oxc_sourcemap = "6.0.1"
+
+# oxc external deps
+allocator-api2 = "=0.2.21"
+bitflags = "2.10.0"
+compact_str = "0.9.0"
+cow-utils = "0.1.3"
+hashbrown = { version = "0.17.0", default-features = false }
+indexmap = "2"
+itoa = "1.0.17"
+memchr = "2.7.6"
+miette = { package = "oxc-miette", version = "2.7.1", features = ["fancy-no-syscall"] }
+nonmax = "0.5.5"
+num-bigint = "0.4.6"
+num-traits = "0.2.19"
+proc-macro2 = "1"
+quote = "1"
+rand = "0.10.0"
+rustc-hash = "2"
+schemars = { package = "oxc-schemars", version = "0.8.27" }
+seq-macro = "0.3.6"
+serde = "1"
+serde_json = "1"
+smallvec = { version = "1.15.1", features = ["union", "serde"] }
+syn = { version = "2", default-features = false }
+unicode-id-start = "1"
+pico-args = "0.5.0" # Minimal argument parser
+insta = "1.43.2" # Snapshot testing
+percent-encoding = "2.3.2" # URL encoding
+dragonbox_ecma = "0.1.0" # Fast float formatting
+ropey = "1.6.1" # Rope text structure
+quickcheck = "1.1.0" # Property-based testing
 
 [package]
 name = "kant-pastebin"
@@ -16,7 +127,7 @@ oxc_parser = { path = "plugins/oxc/crates/oxc_parser" }
 oxc_span = { path = "plugins/oxc/crates/oxc_span" }
 oxc_ast = { path = "plugins/oxc/crates/oxc_ast" }
 html5ever = { path = "plugins/html5ever/html5ever" }
-markup5ever_rcdom = { path = "plugins/html5ever/markup5ever/rcdom" }
+markup5ever_rcdom = { path = "plugins/html5ever/rcdom" }
 cssparser = { path = "plugins/html5ever/cssparser" }
 serde_cbor = "0.11"
 actix-web = "4"
@@ -61,3 +172,19 @@ path = "src/bin/freeze_chats.rs"
 [[bin]]
 name = "kantpaste"
 path = "src/bin/kantpaste.rs"
+
+[workspace.lints.rust]
+absolute_paths_not_starting_with_crate = "warn"
+non_ascii_idents = "warn"
+unit-bindings = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)', 'cfg(coverage_nightly)'] }
+unsafe_op_in_unsafe_fn = "warn"
+unused_unsafe = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# allow noisy pedantic rules
+struct_excessive_bools = "allow"
+too_many_lines = "allow"
+must_use_candidate = "allow"

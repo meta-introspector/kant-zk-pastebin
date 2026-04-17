@@ -1,0 +1,22 @@
+body {
+  background-color: #fff;
+  font-family: sans-serif;
+  margin: 0;
+  padding: 1rem;
+}
+
+h1 {
+  color: #333;
+  font-size: 2rem;
+}
+
+.content {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.paste-box {
+  border: 1px solid #ccc;
+  padding: 1rem;
+  border-radius: 4px;
+}

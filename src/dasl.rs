@@ -183,3 +183,22 @@ pub fn all_cids(data: &[u8]) -> Vec<(String, String)> {
         ("shard_prime".into(), MONSTER_PRIMES[(data[0] as usize) % 15].to_string()),
     ]
 }
+
+/// Distance between two orbifold coordinate vectors (modular, per Monster prime).
+pub fn orbifold_distance(a: &[u64], b: &[u64]) -> u64 {
+    a.iter().zip(b.iter())
+        .zip(MONSTER_PRIMES.iter())
+        .map(|((ai, bi), &p)| { let d = ai.abs_diff(*bi); d.min(p - d) })
+        .sum()
+}
+
+/// Distance from j-invariant origin (0,...,0).
+pub fn distance_from_origin(coords: &[u64]) -> u64 {
+    coords.iter().sum()
+}
+
+/// Full orbifold coordinates for a usize value (e.g. span offset, depth, length).
+/// Returns one coordinate per Monster prime (15 values).
+pub fn orbifold_coords_full(n: usize) -> Vec<u64> {
+    MONSTER_PRIMES.iter().map(|&p| (n as u64) % p).collect()
+}

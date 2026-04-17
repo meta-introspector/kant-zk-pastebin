@@ -1,7 +1,5 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
-use oxc_ast::visit::walk;
-use oxc_ast::Visit;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use std::collections::HashMap;
@@ -70,7 +68,7 @@ impl<'a> JsInterpreter<'a> {
                 for declarator in &decl.declarations {
                     if let Some(init) = &declarator.init {
                         let value = self.eval_expression(init)?;
-                        if let BindingPatternKind::BindingIdentifier(id) = &declarator.id.kind {
+                        if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                             let coords = erdfa_dasl::orbifold_coords_full(id.span.start as usize);
                             self.trace.push(ExecutionStep {
                                 coords: coords[..3].to_vec(),
