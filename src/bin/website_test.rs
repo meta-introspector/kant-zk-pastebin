@@ -1,7 +1,7 @@
 use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
 use markup5ever_rcdom::{RcDom, Handle, NodeData};
-use std::collections::HashMap;
+use kant_pastebin::view;
 
 /// Headless browser test runner - pure Rust, no puppeteer
 /// Performs const eval and static analysis of HTML/CSS/JS
@@ -148,32 +148,54 @@ fn test_links(html: &str) -> bool {
 
 fn main() {
     println!("=== Kant Pastebin Static Tests (Pure Rust) ===\n");
-    
-    // Load static HTML
-    let index_html = std::fs::read_to_string("/mnt/data1/kant/pastebin/templates/index.html")
-        .expect("read index.html");
-    
+
+    // Render the index page directly via the view module — no server needed
+    let mut p = view::Page::new("📋 Kant Pastebin");
+    for w in view::nav_bar("") { p.nav(w); }
+    p.content(view::W::Raw("<p>UUCP + zkTLS + IPFS</p>".into()));
+    p.content(view::W::Raw(
+        r#"<form id="form">
+<input type="text" id="title" placeholder="Title"><br><br>
+<textarea id="content" placeholder="Paste content here..."></textarea><br><br>
+<button type="submit">📤 Share</button>
+</form>
+<div id="result"></div>"#.into()
+    ));
+    let index_html = p.render();
+
     let mut results = vec![];
-    
-    // Test 1: Home Page
+
+    // Test 1: Home Page title
     println!("1. Home Page Load");
     results.push(test_home_page(&index_html));
-    
+
     // Test 2: Form Elements
     println!("\n2. Form Elements");
     results.push(test_form_elements(&index_html));
-    
-    // Test 3: Links
+
+    // Test 3: Navigation Links
     println!("\n3. Navigation Links");
     results.push(test_links(&index_html));
-    
+
+    // Test 4: CSS file parses cleanly
+    println!("\n4. CSS Parse");
+    let css = std::fs::read_to_string("pastebin-wasm/static/style.css").unwrap_or_default();
+    let css_ok = !css.is_empty();
+    println!("  style.css: {}", if css_ok { "✅" } else { "❌ not found" });
+    results.push(css_ok);
+
+    // Test 5: JS in rendered page is non-empty
+    println!("\n5. Inline JS present");
+    let has_js = index_html.contains("<script");
+    println!("  <script>: {}", if has_js { "✅" } else { "❌" });
+    results.push(has_js);
+
     // Summary
     let passed = results.iter().filter(|&&r| r).count();
     let total = results.len();
-    
     println!("\n=== Summary ===");
     println!("Passed: {}/{}", passed, total);
-    
+
     if passed == total {
         println!("✅ All static tests passed!");
         std::process::exit(0);

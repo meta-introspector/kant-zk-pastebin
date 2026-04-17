@@ -40,4 +40,7 @@ test-generators:
 test-css:
 	nix develop --command cargo run --bin css_parser -- test-fixtures/sample.css
 
-test-bins: test-js test-html test-generators test-css
+test-website:
+	nix develop --command cargo run --bin website_test
+
+test-bins: test-js test-html test-generators test-css test-website
