@@ -1,9 +1,10 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
-use oxc_ast::visit::walk;
-use oxc_ast::Visit;
+use oxc_ast_visit::walk;
+use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
+use oxc_syntax::scope::ScopeFlags as _;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -32,7 +33,7 @@ impl<'a> Visit<'a> for DeobfuscateVisitor {
         walk::walk_program(self, prog);
     }
 
-    fn visit_function(&mut self, func: &Function<'a>) {
+    fn visit_function(&mut self, func: &Function<'a>, flags: oxc_syntax::scope::ScopeFlags) {
         let coords = erdfa_dasl::orbifold_coords_full(func.span.start as usize);
         let distance = erdfa_dasl::distance_from_origin(&coords);
         let canonical = self.canonical_name(&coords);
@@ -42,7 +43,7 @@ impl<'a> Visit<'a> for DeobfuscateVisitor {
         println!("{}// Canonical: {}", "  ".repeat(self.depth), canonical);
         
         self.depth += 1;
-        walk::walk_function(self, func);
+        walk::walk_function(self, func, flags);
         self.depth -= 1;
     }
 

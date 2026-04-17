@@ -126,6 +126,8 @@ oxc_allocator = { path = "plugins/oxc/crates/oxc_allocator" }
 oxc_parser = { path = "plugins/oxc/crates/oxc_parser" }
 oxc_span = { path = "plugins/oxc/crates/oxc_span" }
 oxc_ast = { path = "plugins/oxc/crates/oxc_ast" }
+oxc_ast_visit = { path = "plugins/oxc/crates/oxc_ast_visit" }
+oxc_syntax = { path = "plugins/oxc/crates/oxc_syntax" }
 html5ever = { path = "plugins/html5ever/html5ever" }
 markup5ever_rcdom = { path = "plugins/html5ever/rcdom" }
 cssparser = { path = "plugins/html5ever/cssparser" }

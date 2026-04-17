@@ -43,11 +43,11 @@ fn parse_coverage_data() -> CoverageData {
     
     for line in lcov.lines() {
         if line.starts_with("LF:") {
-            if let Some(n) = line.strip_prefix("LF:").and_then(|s| s.parse().ok()) {
+            if let Some(n) = line.strip_prefix("LF:").and_then(|s| s.parse::<u64>().ok()) {
                 data.lines_total += n;
             }
         } else if line.starts_with("LH:") {
-            if let Some(n) = line.strip_prefix("LH:").and_then(|s| s.parse().ok()) {
+            if let Some(n) = line.strip_prefix("LH:").and_then(|s| s.parse::<u64>().ok()) {
                 data.lines_hit += n;
             }
         }
@@ -111,7 +111,7 @@ fn extract_metric(report: &str, metric: &str) -> u64 {
     report.lines()
         .find(|l| l.contains(metric))
         .and_then(|l| l.split_whitespace().next())
-        .and_then(|s| s.replace(",", "").parse().ok())
+        .and_then(|s| s.replace(",", "").parse::<u64>().ok())
         .unwrap_or(0)
 }
 

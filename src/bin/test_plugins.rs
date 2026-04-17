@@ -225,9 +225,7 @@ fn test_plugin(registry: &PluginRegistry, name: &str) -> PluginTestResult {
         };
         
         let start = std::time::Instant::now();
-        let exec_result = std::panic::catch_unwind(|| {
-            registry.execute(name, &fuzz_input)
-        });
+        let exec_result = registry.execute(name, &fuzz_input);
         times.push(start.elapsed().as_micros() as f64 / 1000.0);
         
         if exec_result.is_err() {
