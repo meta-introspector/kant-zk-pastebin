@@ -43,4 +43,7 @@ test-css:
 test-website:
 	nix develop --command cargo run --bin website_test
 
-test-bins: test-js test-html test-generators test-css test-website
+test-fuzz-frontend:
+	nix develop --command cargo run --bin fuzz_frontend
+
+test-bins: test-js test-html test-generators test-css test-website test-fuzz-frontend
