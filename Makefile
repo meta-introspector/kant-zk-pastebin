@@ -1,5 +1,33 @@
 .PHONY: build deploy check test test-extended test-all deps update-lock \
-        test-js test-html test-generators
+        test-js test-html test-generators test-comprehensive test-plugins \
+        test-report test-all-coverage help
+
+help:
+	@echo "Kant Pastebin - Test Suite"
+	@echo ""
+	@echo "Quick Commands:"
+	@echo "  make test-all-coverage  - Run all tests and generate report"
+	@echo "  ./run-all-tests.sh      - Master test orchestrator"
+	@echo ""
+	@echo "Individual Tests:"
+	@echo "  make test-js            - Test JavaScript parser"
+	@echo "  make test-html          - Test HTML parser"
+	@echo "  make test-css           - Test CSS parser"
+	@echo "  make test-generators    - Test data generators"
+	@echo "  make test-website       - Test website integration"
+	@echo "  make test-fuzz-frontend - Test frontend fuzzer"
+	@echo ""
+	@echo "Comprehensive:"
+	@echo "  make test-comprehensive - Coverage + fuzz + perf tests"
+	@echo "  make test-plugins       - Test all plugins"
+	@echo "  make test-report        - Generate HTML report"
+	@echo ""
+	@echo "Build & Deploy:"
+	@echo "  make build              - Build with Nix"
+	@echo "  make deploy             - Deploy to server"
+	@echo "  make check              - Check compilation"
+	@echo ""
+	@echo "See TEST_SUITE.md for detailed documentation"
 
 build:
 	nix build
@@ -47,3 +75,11 @@ test-fuzz-frontend:
 	nix develop --command cargo run --bin fuzz_frontend
 
 test-bins: test-js test-html test-generators test-css test-website test-fuzz-frontend
+
+test-zkperf:
+	./test-with-zkperf.sh
+
+test-all-coverage: test-bins test-zkperf
+	@echo "✅ All tests completed"
+	@echo "📊 zkPerf witnesses: test-recordings/*.perf.data"
+	@echo "📄 Report: zkperf-test-report.json"

@@ -1,0 +1,133 @@
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Kant Pastebin Test Suite                         │
+│                     Comprehensive Coverage                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+                         ┌──────────────────┐
+                         │  make test-all   │
+                         │   -coverage      │
+                         └────────┬─────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │  run-all-tests.sh         │
+                    │  (Master Orchestrator)    │
+                    └─────────────┬─────────────┘
+                                  │
+        ┌─────────────────────────┼─────────────────────────┐
+        │                         │                         │
+        ▼                         ▼                         ▼
+┌───────────────┐         ┌───────────────┐       ┌───────────────┐
+│  Binary Tests │         │ Comprehensive │       │ Plugin Tests  │
+│               │         │     Test      │       │               │
+├───────────────┤         ├───────────────┤       ├───────────────┤
+│ • js_parser   │         │ • Coverage    │       │ • html5ever   │
+│ • html_parser │         │ • Fuzzing     │       │ • cssparser   │
+│ • css_parser  │         │ • Performance │       │ • oxc         │
+│ • test_gen    │         │               │       │ • erdfa-dasl  │
+│ • website     │         │ Tests:        │       │ • zos-circuit │
+│ • fuzz_front  │         │ • Model       │       │               │
+└───────┬───────┘         │ • View        │       │ Each plugin:  │
+        │                 │ • Handlers    │       │ • Basic exec  │
+        │                 │ • Plugins     │       │ • Edge cases  │
+        │                 └───────┬───────┘       │ • Fuzz (1000) │
+        │                         │               │ • Perf bench  │
+        │                         │               └───────┬───────┘
+        │                         │                       │
+        └─────────────────────────┼───────────────────────┘
+                                  │
+                                  ▼
+                    ┌─────────────────────────┐
+                    │   Report Generation     │
+                    │                         │
+                    │ generate_html_report.rs │
+                    └─────────────┬───────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                           │
+                    ▼                           ▼
+          ┌──────────────────┐        ┌──────────────────┐
+          │  JSON Reports    │        │   HTML Report    │
+          ├──────────────────┤        ├──────────────────┤
+          │ • test-report    │        │ • Interactive    │
+          │ • plugin-report  │        │ • Color-coded    │
+          │ • combined       │        │ • Metrics        │
+          └──────────────────┘        │ • Charts         │
+                                      └──────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Test Coverage                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  📦 Model Functions          🎨 View Functions                     │
+│  ├─ Paste::new              ├─ Page::new                          │
+│  ├─ Paste::serialize        ├─ Page::render                       │
+│  └─ PasteIndex ops          ├─ nav_bar                            │
+│                             └─ render_preview                      │
+│  🔧 Handler Paths           🔌 Plugin System                       │
+│  ├─ index                   ├─ PluginRegistry::new                │
+│  ├─ create_paste            ├─ PluginRegistry::register           │
+│  ├─ view_paste              ├─ PluginRegistry::execute            │
+│  ├─ browse                  └─ Plugin::execute (all)              │
+│  ├─ raw_paste                                                      │
+│  └─ reply_form                                                     │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                      Fuzzing Strategy                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Input Types:                    Iterations:                       │
+│  • Empty inputs                  • 1000 per path                   │
+│  • Large inputs (1MB+)           • 5000+ total                     │
+│  • Binary data (0x00-0xFF)                                         │
+│  • Special chars (<>&'")         Coverage:                         │
+│  • Malformed data                • All code paths                  │
+│  • Edge cases                    • All plugins                     │
+│  • Unicode                       • All handlers                    │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                   Performance Benchmarks                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Metrics:                        Iterations:                       │
+│  • Average time (mean)           • 10000 per path                  │
+│  • P99 latency                   • 30000+ total                    │
+│  • Throughput                                                      │
+│                                  Targets:                          │
+│  Components:                     • View: < 1ms                     │
+│  • View rendering                • Model: < 1ms                    │
+│  • Model operations              • Plugin: < 10ms                  │
+│  • Plugin execution                                                │
+│  • Handler responses                                               │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Output Files                                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  📄 test-report.json          - Detailed test data                 │
+│  📄 plugin-test-report.json   - Plugin-specific data               │
+│  📄 combined-report.json      - Unified report                     │
+│  🌐 test-report.html          - Interactive dashboard              │
+│  🏷️  coverage-badge.svg        - Visual coverage indicator         │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                      Quick Commands                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  make test-all-coverage    # Run everything                        │
+│  ./run-all-tests.sh        # Master orchestrator                   │
+│  make test-comprehensive   # Coverage + fuzz + perf                │
+│  make test-plugins         # Test all plugins                      │
+│  make test-report          # Generate HTML report                  │
+│  make help                 # Show all commands                     │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
