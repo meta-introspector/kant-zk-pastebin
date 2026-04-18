@@ -1,1 +1,1 @@
-{"signature":"f5298542e4d55847430f994bfa6cc5984b60761f3ad6131a43dbf65b30a2825d","context":"find_fn_end","complexity":"O(n)","max_n":10000,"max_ms":1010,"count":186,"min_ms":0,"max_elapsed_ms":0,"total_ms":0,"violation_count":0,"last_timestamp":1776457775577}
+{"signature":"f5298542e4d55847430f994bfa6cc5984b60761f3ad6131a43dbf65b30a2825d","context":"find_fn_end","complexity":"O(n)","max_n":10000,"max_ms":1010,"count":372,"min_ms":0,"max_elapsed_ms":0,"total_ms":0,"violation_count":0,"last_timestamp":1776458208342}
