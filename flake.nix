@@ -3,227 +3,102 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
-    rust-ipfs = {
-      url = "git+file:///home/mdupont/git/github/dariusc93/rust-ipfs.git?ref=fix/multihash-codetable-yanked";
-      flake = false;
+
+    # Shared inputs — all common git repos declared centrally
+    common-inputs = {
+      url = "path:/home/mdupont/nix-common";
     };
-    erdfa-publish-src = {
-      url = "git+file:///home/mdupont/03-march/17/erdfa-publish";
-      flake = false;
-    };
-    erdfa-clean-src = {
-      url = "https://github.com/Escaped-RDFa/namespace.git";
-      flake = false;
-    };
-    erdfa-canonical-src = {
-      url = "git+file:///home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git";
-      flake = false;
-    };
-    zkperf = {
-      url = "git+file:///mnt/data1/git/github.com/meta-introspector/zkperf.git?ref=feat/rebase-all";
-      flake = false;
-    };
-    erdfa-plugin-ipfs = {
-      url = "git+file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-ipfs.git?ref=main";
-      flake = false;
-    };
-    erdfa-plugin-sheaf = {
-      url = "git+file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-sheaf.git?ref=main";
-      flake = false;
-    };
-    erdfa-core = {
-      url = "git+file:///mnt/data1/git/solana.solfunmeme/erdfa-core.git?ref=main";
-      flake = false;
-    };
-    zos-plugin-interface = {
-      url = "git+file:///mnt/data1/git/solana.solfunmeme/zos-plugin-interface.git?ref=main";
-      flake = false;
-    };
-    erdfa-plugins = {
-      url = "git+file:///mnt/data1/git/solana.solfunmeme/erdfa-plugins.git?ref=main";
-      flake = false;
-    };
-    zos-circuit-optimizer = {
-      url = "git+file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git?ref=main";
-      flake = false;
-    };
+
+    # Pastebin submodules (not in shared flake or different refs)
+    erdfa-canonical-local = { url = "path:/mnt/data1/kant/pastebin/erdfa-canonical"; flake = false; };
+    erdfa-clean-local = { url = "path:/mnt/data1/kant/pastebin/erdfa-clean"; flake = false; };
+    html5ever-local = { url = "path:/mnt/data1/kant/pastebin/plugins/html5ever"; flake = false; };
+    oxc-local = { url = "path:/mnt/data1/kant/pastebin/plugins/oxc"; flake = false; };
+    zos-circuit-local = { url = "path:/mnt/data1/kant/pastebin/plugins/zos-circuit-optimizer"; flake = false; };
+    zkperf-local = { url = "path:/mnt/data1/kant/pastebin/zkperf"; flake = false; };
+
+    # Other local plugins (not submodules)
+    erdfa-dasl = { url = "path:/mnt/data1/kant/pastebin/plugins/erdfa-dasl"; flake = false; };
+    erdfa-sheaf = { url = "path:/mnt/data1/kant/pastebin/plugins/erdfa-sheaf"; flake = false; };
+    zos-pastebin = { url = "path:/mnt/data1/kant/pastebin/plugins/zos-pastebin"; flake = false; };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, erdfa-clean-src, erdfa-canonical-src, zkperf, erdfa-plugin-ipfs, erdfa-plugin-sheaf, erdfa-core, zos-plugin-interface, erdfa-plugins, zos-circuit-optimizer }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        kubo = pkgs.kubo;
+  outputs = { self, nixpkgs, common-inputs,
+    erdfa-canonical-local, erdfa-clean-local,
+    html5ever-local, oxc-local, zos-circuit-local, zkperf-local,
+    erdfa-dasl, erdfa-sheaf, zos-pastebin }:
+    let
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      inherit (common-inputs) rust-ipfs erdfa-publish;
 
-        # Build a patched source tree with all submodules injected
-        patchedSrc = pkgs.runCommand "kant-pastebin-src" {} ''
-          cp -r --no-preserve=mode ${self}/. $out
-          chmod -R u+w $out
-          # Explicitly copy submodule content
-          mkdir -p $out/zkperf
-          cp -r --no-preserve=mode ${zkperf}/. $out/zkperf
-          mkdir -p $out/erdfa-canonical/bindings/rust
-          cp -r --no-preserve=mode ${erdfa-publish-src}/. $out/erdfa-canonical/bindings/rust
-          mkdir -p $out/erdfa-canonical/bindings/rust/vendor/rust-ipfs
-          cp -r --no-preserve=mode ${rust-ipfs}/. $out/erdfa-canonical/bindings/rust/vendor/rust-ipfs
-          mkdir -p $out/plugins/erdfa-plugin-ipfs
-          cp -r --no-preserve=mode ${erdfa-plugin-ipfs}/. $out/plugins/erdfa-plugin-ipfs
-          mkdir -p $out/plugins/erdfa-plugin-sheaf
-          cp -r --no-preserve=mode ${erdfa-plugin-sheaf}/. $out/plugins/erdfa-plugin-sheaf
-          mkdir -p $out/plugins/erdfa-core
-          cp -r --no-preserve=mode ${erdfa-core}/. $out/plugins/erdfa-core
-          mkdir -p $out/plugins/zos-plugin-interface
-          cp -r --no-preserve=mode ${zos-plugin-interface}/. $out/plugins/zos-plugin-interface
-          mkdir -p $out/plugins/erdfa-plugins
-          cp -r --no-preserve=mode ${erdfa-plugins}/. $out/plugins/erdfa-plugins
-          mkdir -p $out/plugins/zos-circuit-optimizer
-          cp -r --no-preserve=mode ${zos-circuit-optimizer}/. $out/plugins/zos-circuit-optimizer
-        '';
-      in
-      {
-        packages = {
-          kant-pastebin = pkgs.rustPlatform.buildRustPackage {
+      makePatchedSrc = pkgs: pkgs.runCommand "kant-pastebin-src" {} ''
+        # Copy root level files, excluding .git and target
+        mkdir -p $out
+        for item in ${self}/*; do
+          base=$(basename "$item")
+          if [ "$base" != ".git" ] && [ "$base" != "target" ]; then
+            cp -r --no-preserve=mode "$item" "$out/$base"
+            chmod -R u+w "$out/$base"
+          fi
+        done
+
+        # Submodules (not tracked in git tree)
+        rm -rf $out/erdfa-canonical
+        cp -r --no-preserve=mode ${erdfa-canonical-local} $out/erdfa-canonical
+        find $out/erdfa-canonical -name target -type d -exec rm -rf {} + 2>/dev/null || true
+        chmod -R u+w $out/erdfa-canonical
+        rm -rf $out/erdfa-clean
+        cp -r --no-preserve=mode ${erdfa-clean-local} $out/erdfa-clean
+        chmod -R u+w $out/erdfa-clean
+        rm -rf $out/plugins/html5ever
+        cp -r --no-preserve=mode ${html5ever-local} $out/plugins/html5ever
+        find $out/plugins/html5ever -name target -type d -exec rm -rf {} + 2>/dev/null || true
+        chmod -R u+w $out/plugins/html5ever
+        rm -rf $out/plugins/oxc
+        cp -r --no-preserve=mode ${oxc-local} $out/plugins/oxc
+        find $out/plugins/oxc -name target -type d -exec rm -rf {} + 2>/dev/null || true
+        chmod -R u+w $out/plugins/oxc
+        rm -rf $out/plugins/zos-circuit-optimizer
+        cp -r --no-preserve=mode ${zos-circuit-local} $out/plugins/zos-circuit-optimizer
+        chmod -R u+w $out/plugins/zos-circuit-optimizer
+        rm -rf $out/zkperf
+        cp -r --no-preserve=mode ${zkperf-local} $out/zkperf
+        find $out/zkperf -name target -type d -exec rm -rf {} + 2>/dev/null || true
+        chmod -R u+w $out/zkperf
+
+        # Shared deps injected into submodule trees
+        ln -s ${erdfa-publish} $out/erdfa-canonical/bindings/rust
+        ln -s ${rust-ipfs}   $out/erdfa-canonical/bindings/rust/vendor/rust-ipfs
+
+        # Non-submodule plugins
+        ln -s ${erdfa-dasl}   $out/plugins/erdfa-dasl
+        ln -s ${erdfa-sheaf}  $out/plugins/erdfa-sheaf
+        ln -s ${zos-pastebin} $out/plugins/zos-pastebin
+      '';
+    in
+    {
+      packages = nixpkgs.lib.genAttrs systems (system:
+        let pkgs = nixpkgs.legacyPackages.${system}; in {
+          default = pkgs.rustPlatform.buildRustPackage {
             pname = "kant-pastebin";
             version = "0.1.0";
-            src = patchedSrc;
-            cargoLock.lockFile = ./Cargo.lock;
+            src = makePatchedSrc pkgs;
+            cargoVendorDir = "${self}/vendor";
             nativeBuildInputs = [ pkgs.pkg-config pkgs.wasm-pack pkgs.git ];
             buildInputs = [ pkgs.openssl ];
           };
+        }
+      );
 
-          index-docs = pkgs.writeShellScriptBin "kant-index-docs" ''
-            PASTEBIN_URL="http://127.0.0.1:8090/paste"
-            DOCS_DIR="$HOME/DOCS"
-            SPOOL_DIR="$HOME/spool"
-
-            index_file() {
-                local file="$1"
-                local title=$(basename "$file")
-                local size=$(stat -c%s "$file" 2>/dev/null || echo 0)
-                
-                if [ "$size" -gt 1048576 ]; then return; fi
-                
-                local content=$(cat "$file" 2>/dev/null || echo "")
-                if [ -z "$content" ] || [ ''${#content} -lt 10 ]; then return; fi
-                
-                local keywords=$(echo "$title" | tr '._-' '\n' | grep -E '^[a-zA-Z0-9]+$' | sort -u | head -10 | ${pkgs.jq}/bin/jq -R . | ${pkgs.jq}/bin/jq -s .)
-                
-                echo "Indexing: $title"
-                
-                local payload=$(${pkgs.jq}/bin/jq -n \
-                    --arg t "$title" \
-                    --arg c "$content" \
-                    --argjson k "$keywords" \
-                    '{title:$t,content:$c,keywords:$k}')
-                
-                ${pkgs.curl}/bin/curl -s -X POST "$PASTEBIN_URL" \
-                    -H "Content-Type: application/json" \
-                    -d "$payload" | ${pkgs.jq}/bin/jq -r '.id // empty'
-            }
-
-            echo "🔍 Indexing ~/DOCS..."
-            ${pkgs.findutils}/bin/find "$DOCS_DIR" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.org" \) 2>/dev/null | while read f; do
-                index_file "$f"
-            done
-
-            echo "🔍 Indexing ~/spool..."
-            ${pkgs.findutils}/bin/find "$SPOOL_DIR" -maxdepth 2 -type f \( -name "*.md" -o -name "*.txt" \) 2>/dev/null | head -30 | while read f; do
-                index_file "$f"
-            done
-
-            echo "✅ Indexing complete!"
-          '';
-
-          default = self.packages.${system}.kant-pastebin;
-          
-          systemd-service = pkgs.writeTextFile {
-            name = "kant-pastebin.service";
-            text = ''
-              [Unit]
-              Description=Kant Pastebin - UUCP + zkTLS + IPFS
-              After=network.target
-
-              [Service]
-              Type=simple
-              WorkingDirectory=/mnt/data1/kant/pastebin
-              ExecStart=${self.packages.${system}.kant-pastebin}/bin/kant-pastebin
-              Restart=always
-              RestartSec=10
-              Environment="BIND_ADDR=127.0.0.1:8090"
-              Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
-              Environment="RUST_LOG=info"
-              Environment="BASE_URL=\${KANT_BASE_URL:-https://solana.solfunmeme.com}"
-              Environment="BASE_PATH=/pastebin"
-              Environment="PATH=${kubo}/bin"
-
-              [Install]
-              WantedBy=default.target
-            '';
+      devShells = nixpkgs.lib.genAttrs systems (system:
+        let pkgs = nixpkgs.legacyPackages.${system}; in {
+          default = pkgs.mkShell {
+            buildInputs = with pkgs; [ cargo rustc rust-analyzer rustfmt clippy pkg-config openssl nodejs chromium wasm-pack ];
+            shellHook = "export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium";
           };
+        }
+      );
 
-          index-docs-service = pkgs.writeTextFile {
-            name = "kant-index-docs.service";
-            text = ''
-              [Unit]
-              Description=Index DOCS and spool to Kant Pastebin
-              After=kant-pastebin.service
-
-              [Service]
-              Type=oneshot
-              ExecStart=${self.packages.${system}.index-docs}/bin/kant-index-docs
-              StandardOutput=journal
-              StandardError=journal
-
-              [Install]
-              WantedBy=default.target
-            '';
-          };
-
-          index-docs-timer = pkgs.writeTextFile {
-            name = "kant-index-docs.timer";
-            text = ''
-              [Unit]
-              Description=Index DOCS and spool daily
-              Requires=kant-index-docs.service
-
-              [Timer]
-              OnCalendar=daily
-              Persistent=true
-
-              [Install]
-              WantedBy=timers.target
-            '';
-          };
-
-        };
-
-        apps = {
-          kant-pastebin = {
-            type = "app";
-            program = "${self.packages.${system}.kant-pastebin}/bin/kant-pastebin";
-          };
-          default = self.apps.${system}.kant-pastebin;
-        };
-
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            cargo
-            rustc
-            rust-analyzer
-            rustfmt
-            clippy
-            pkg-config
-            openssl
-            nodejs
-            chromium
-            wasm-pack
-          ];
-          shellHook = ''
-            export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
-            export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
-          '';
-        };
-      }
-    );
+      formatter = nixpkgs.lib.genAttrs systems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
+    };
 }

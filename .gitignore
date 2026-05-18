@@ -21,3 +21,4 @@ category/kant/tmp-*.nix
 README_WORKSPACE.md
 example-zkperf-nix.nix
 
+vendor

@@ -36,6 +36,7 @@ async fn main() -> std::io::Result<()> {
     // Initialize plugin registry
     let mut registry = plugin::PluginRegistry::new();
     registry.register(Box::new(plugins::screenshot::ScreenshotPlugin::new()));
+    registry.register(Box::new(plugins::bkma::BkmaAnalyzerPlugin::new()));
     let registry = web::Data::new(std::sync::Mutex::new(registry));
     
     let openapi = ApiDoc::openapi();

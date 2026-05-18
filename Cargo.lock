@@ -1477,6 +1477,8 @@ name = "erdfa-dasl"
 version = "0.1.0"
 dependencies = [
  "sha2 0.10.9",
+ "zkperf-macros",
+ "zkperf-witness",
 ]
 
 [[package]]
@@ -4638,7 +4640,19 @@ dependencies = [
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.6.3",
+ "tokio-macros",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "385a6cb71ab9ab790c5fe8d67f1645e6c450a7ce006a33de03daa956cf70a496"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -5640,6 +5654,33 @@ dependencies = [
  "crc32fast",
  "crossbeam-utils",
  "flate2",
+]
+
+[[package]]
+name = "zkperf-macros"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "proc-macro2",
+ "quote",
+ "sha2 0.10.9",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "zkperf-witness"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "hex",
+ "libc",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "toml",
+ "zkperf-macros",
 ]
 
 [[package]]

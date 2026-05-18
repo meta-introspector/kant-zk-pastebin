@@ -1,133 +1,81 @@
 {
   "nodes": {
-    "erdfa-canonical-src": {
+    "common-inputs": {
       "flake": false,
       "locked": {
-        "lastModified": 1775581985,
-        "narHash": "sha256-vrnxHhF/fIhLkDM95S3gABFpvzUAScKHqmLsGExhFuw=",
-        "ref": "refs/heads/main",
-        "rev": "6f8b33d527081a7d780b9a177cb49997a4e12bec",
-        "revCount": 9,
-        "type": "git",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git"
+        "lastModified": 1777295261,
+        "narHash": "sha256-P3mZ9lcOWnXZYZ/zyjtDBbcCMPyzx416KDMMJ/z7ONk=",
+        "path": "/home/mdupont/nix-common",
+        "type": "path"
       },
       "original": {
-        "type": "git",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git"
+        "path": "/home/mdupont/nix-common",
+        "type": "path"
       }
     },
-    "erdfa-clean-src": {
+    "erdfa-canonical-local": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-bxf+1tgFMEAOwLHwOY7EfPCREsdLP7gWC/y92ulQHKM=",
-        "type": "file",
-        "url": "https://github.com/Escaped-RDFa/namespace.git"
+        "lastModified": 1776505560,
+        "narHash": "sha256-78UkFcj1s8OIEYxfDge2KMWkckN238muCUYH3vIXYPU=",
+        "path": "/mnt/data1/kant/pastebin/erdfa-canonical",
+        "type": "path"
       },
       "original": {
-        "type": "file",
-        "url": "https://github.com/Escaped-RDFa/namespace.git"
+        "path": "/mnt/data1/kant/pastebin/erdfa-canonical",
+        "type": "path"
       }
     },
-    "erdfa-core": {
+    "erdfa-clean-local": {
       "flake": false,
       "locked": {
-        "lastModified": 1775357080,
-        "narHash": "sha256-TH+RMy1LK0NaH9AYNGaPpnQtHKmor9TcGcxXrMSenQg=",
-        "ref": "main",
-        "rev": "1da5e823e5b6c9d0572f5dbcd8834bbbd50fb00e",
-        "revCount": 1,
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-core.git"
+        "lastModified": 1776505560,
+        "narHash": "sha256-HU4zafUURcYk0aRRzAhqPJGZjxmx1Ylg8vli6YRk8Cw=",
+        "path": "/mnt/data1/kant/pastebin/erdfa-clean",
+        "type": "path"
       },
       "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-core.git"
+        "path": "/mnt/data1/kant/pastebin/erdfa-clean",
+        "type": "path"
       }
     },
-    "erdfa-plugin-ipfs": {
+    "erdfa-dasl": {
       "flake": false,
       "locked": {
-        "lastModified": 1775352782,
-        "narHash": "sha256-bOx+bwZbOVuTXaLFcDi/v2136Su3jqtf7I8a/GswqE4=",
-        "ref": "main",
-        "rev": "20af1623f0f499382476f19531b8b241fc53e136",
-        "revCount": 1,
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-ipfs.git"
+        "lastModified": 1776457621,
+        "narHash": "sha256-OzzDB0VXg3Gv0RHZY8DPli0l40+UpvmdMzAROjL6Xtg=",
+        "path": "/mnt/data1/kant/pastebin/plugins/erdfa-dasl",
+        "type": "path"
       },
       "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-ipfs.git"
+        "path": "/mnt/data1/kant/pastebin/plugins/erdfa-dasl",
+        "type": "path"
       }
     },
-    "erdfa-plugin-sheaf": {
+    "erdfa-sheaf": {
       "flake": false,
       "locked": {
-        "lastModified": 1775352786,
-        "narHash": "sha256-K+sBQtVI/2j5t871n5T/s9Ex2b2Klo4FfWRfZUhUhy0=",
-        "ref": "main",
-        "rev": "a58cd82340dc51da1cb6f99b2bde369b1ea8ea13",
-        "revCount": 1,
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-sheaf.git"
+        "lastModified": 1776259411,
+        "narHash": "sha256-Q+oV+axx21OUz31gTuye3QoXGVKsh46a9W5ImAfqUMA=",
+        "path": "/mnt/data1/kant/pastebin/plugins/erdfa-sheaf",
+        "type": "path"
       },
       "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugin-sheaf.git"
+        "path": "/mnt/data1/kant/pastebin/plugins/erdfa-sheaf",
+        "type": "path"
       }
     },
-    "erdfa-plugins": {
+    "html5ever-local": {
       "flake": false,
       "locked": {
-        "lastModified": 1774998736,
-        "narHash": "sha256-oVpvSq3J6/clMZyWuBIxElwt3ZZ+w1j71nB4qlQQoSc=",
-        "ref": "main",
-        "rev": "36373ae46f47fbe672636835cbab1c2a58feac59",
-        "revCount": 1,
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugins.git"
+        "lastModified": 1776505560,
+        "narHash": "sha256-sABk0RdvZSMuFnKaap66alG4msrTEynkKBADhw4BViM=",
+        "path": "/mnt/data1/kant/pastebin/plugins/html5ever",
+        "type": "path"
       },
       "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/erdfa-plugins.git"
-      }
-    },
-    "erdfa-publish-src": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1775989429,
-        "narHash": "sha256-ZnA1+4fkhnh8C5+7sdTnVwduh989ouwTBuj74ECs4Xw=",
-        "ref": "refs/heads/feature/kant-kategorie",
-        "rev": "63ad9edfc1f9360788932f1091efad3e7408173d",
-        "revCount": 81,
-        "type": "git",
-        "url": "file:///home/mdupont/03-march/17/erdfa-publish"
-      },
-      "original": {
-        "type": "git",
-        "url": "file:///home/mdupont/03-march/17/erdfa-publish"
-      }
-    },
-    "flake-utils": {
-      "inputs": {
-        "systems": "systems"
-      },
-      "locked": {
-        "lastModified": 1731533236,
-        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
-        "owner": "numtide",
-        "repo": "flake-utils",
-        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "numtide",
-        "repo": "flake-utils",
-        "type": "github"
+        "path": "/mnt/data1/kant/pastebin/plugins/html5ever",
+        "type": "path"
       }
     },
     "nixpkgs": {
@@ -146,104 +94,71 @@
         "type": "github"
       }
     },
+    "oxc-local": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776348811,
+        "narHash": "sha256-ks8d35zPYpOyd4S+0kBBI8D25ypZR7CRXftnQpkwxQY=",
+        "path": "/mnt/data1/kant/pastebin/plugins/oxc",
+        "type": "path"
+      },
+      "original": {
+        "path": "/mnt/data1/kant/pastebin/plugins/oxc",
+        "type": "path"
+      }
+    },
     "root": {
       "inputs": {
-        "erdfa-canonical-src": "erdfa-canonical-src",
-        "erdfa-clean-src": "erdfa-clean-src",
-        "erdfa-core": "erdfa-core",
-        "erdfa-plugin-ipfs": "erdfa-plugin-ipfs",
-        "erdfa-plugin-sheaf": "erdfa-plugin-sheaf",
-        "erdfa-plugins": "erdfa-plugins",
-        "erdfa-publish-src": "erdfa-publish-src",
-        "flake-utils": "flake-utils",
+        "common-inputs": "common-inputs",
+        "erdfa-canonical-local": "erdfa-canonical-local",
+        "erdfa-clean-local": "erdfa-clean-local",
+        "erdfa-dasl": "erdfa-dasl",
+        "erdfa-sheaf": "erdfa-sheaf",
+        "html5ever-local": "html5ever-local",
         "nixpkgs": "nixpkgs",
-        "rust-ipfs": "rust-ipfs",
-        "zkperf": "zkperf",
-        "zos-circuit-optimizer": "zos-circuit-optimizer",
-        "zos-plugin-interface": "zos-plugin-interface"
+        "oxc-local": "oxc-local",
+        "zkperf-local": "zkperf-local",
+        "zos-circuit-local": "zos-circuit-local",
+        "zos-pastebin": "zos-pastebin"
       }
     },
-    "rust-ipfs": {
+    "zkperf-local": {
       "flake": false,
       "locked": {
-        "lastModified": 1776254656,
-        "narHash": "sha256-976gsWBUV8szXEKC2oYpO7Q7zK0eXIj+/XlPbdmwhTI=",
-        "ref": "fix/multihash-codetable-yanked",
-        "rev": "ad0b88c70e78a208baa7e40fdb3274c5a44c9dc9",
-        "revCount": 2824,
-        "type": "git",
-        "url": "file:///home/mdupont/git/github/dariusc93/rust-ipfs.git"
+        "lastModified": 1776505562,
+        "narHash": "sha256-6IF9lgX6TByxh79H2Q51EF+5McjMzPGk32I2k9a0tKc=",
+        "path": "/mnt/data1/kant/pastebin/zkperf",
+        "type": "path"
       },
       "original": {
-        "ref": "fix/multihash-codetable-yanked",
-        "type": "git",
-        "url": "file:///home/mdupont/git/github/dariusc93/rust-ipfs.git"
+        "path": "/mnt/data1/kant/pastebin/zkperf",
+        "type": "path"
       }
     },
-    "systems": {
-      "locked": {
-        "lastModified": 1681028828,
-        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
-        "owner": "nix-systems",
-        "repo": "default",
-        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-systems",
-        "repo": "default",
-        "type": "github"
-      }
-    },
-    "zkperf": {
+    "zos-circuit-local": {
       "flake": false,
       "locked": {
-        "lastModified": 1776088226,
-        "narHash": "sha256-noNMWes1F35BQbmr8eInp645RedlOiVyGJS5Y+3nDVM=",
-        "ref": "feat/rebase-all",
-        "rev": "1f8e8a2a0dd3b2d568c8ee03be871ce1c44b0deb",
-        "revCount": 92,
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/meta-introspector/zkperf.git"
+        "lastModified": 1776507180,
+        "narHash": "sha256-RjNOUIX1kqlBzUxKmo5O98a+KRBnF51ih9xpPr3dLh4=",
+        "path": "/mnt/data1/kant/pastebin/plugins/zos-circuit-optimizer",
+        "type": "path"
       },
       "original": {
-        "ref": "feat/rebase-all",
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/meta-introspector/zkperf.git"
+        "path": "/mnt/data1/kant/pastebin/plugins/zos-circuit-optimizer",
+        "type": "path"
       }
     },
-    "zos-circuit-optimizer": {
+    "zos-pastebin": {
       "flake": false,
       "locked": {
-        "lastModified": 1776338140,
-        "narHash": "sha256-C4CCWx1DrobISi7X3ICRyWSVsE5yyjSYY9skxmahLsg=",
-        "ref": "main",
-        "rev": "b7f1343e3221ffb47c84863263e1eac571012ff0",
-        "revCount": 3,
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git"
+        "lastModified": 1776259849,
+        "narHash": "sha256-xzelx+tvb8hNo9Uf9ypmQ6ogwuFdRMWmsKeHWBhzbfw=",
+        "path": "/mnt/data1/kant/pastebin/plugins/zos-pastebin",
+        "type": "path"
       },
       "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git"
-      }
-    },
-    "zos-plugin-interface": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1775491202,
-        "narHash": "sha256-Qd+JTvNgLU0enGQZjBIIfq5eENsr9VPUkq0RFWjMnfE=",
-        "ref": "main",
-        "rev": "0d7e1a412811ced55f5b9bfe3565cb651908acda",
-        "revCount": 181,
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/zos-plugin-interface.git"
-      },
-      "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "file:///mnt/data1/git/solana.solfunmeme/zos-plugin-interface.git"
+        "path": "/mnt/data1/kant/pastebin/plugins/zos-pastebin",
+        "type": "path"
       }
     }
   },
