@@ -162,6 +162,8 @@ clap = { version = "4", features = ["derive"] }
 walkdir = "2"
 flate2 = "1"
 base64 = "0.22"
+zkperf-macros = { path = "zkperf/zkperf-macros" }
+zkperf-witness = { path = "zkperf/zkperf-witness" }
 
 [[bin]]
 name = "kant-pastebin"

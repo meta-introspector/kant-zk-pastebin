@@ -32,6 +32,9 @@ help:
 build:
 	nix build
 
+cargo-build:
+	nix develop -c cargo build
+
 update-lock:
 	nix develop -c cargo update
 

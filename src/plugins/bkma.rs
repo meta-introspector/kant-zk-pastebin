@@ -176,14 +176,14 @@ impl Plugin for BkmaAnalyzerPlugin {
         if let Some(crt) = crt_solution {
             result.insert("crt_solution".into(), crt.to_string());
         }
-        if let Some(interp) = interpretation {
-            result.insert("interpretation".into(), interp);
+        if let Some(ref interp) = interpretation {
+            result.insert("interpretation".into(), interp.clone());
         }
         if let Some(sum) = t41a_sum_40 {
             result.insert("t41a_sum_40".into(), sum.to_string());
         }
-        result.insert("eigenspace".into(), eigenspace_opt.unwrap_or_default());
-        result.insert("hecke".into(), hecke_opt.unwrap_or_default());
+        result.insert("eigenspace".into(), eigenspace_opt.clone().unwrap_or_default());
+        result.insert("hecke".into(), hecke_opt.clone().unwrap_or_default());
 
         // Build DA51 shard JSON
         let da51_data = json!({
