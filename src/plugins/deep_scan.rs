@@ -14,22 +14,22 @@ impl DeepScanPlugin {
             .unwrap_or_else(|_| "/mnt/data1/time-2026/02-february/22/dasl/deep_scan_output".to_string())
     }
 
-    fn load_scan_log() -> String {
+    fn load_scan_log(&self,) -> String {
         let log_path = Path::new(&Self::scan_dir()).join("scan.log");
         std::fs::read_to_string(&log_path).unwrap_or_default()
     }
 
-    fn load_findings_car() -> Vec<u8> {
+    fn load_findings_car(&self,) -> Vec<u8> {
         let car_path = Path::new("/home/mdupont/projects/dasl/IMPL/deep_scanner").join("findings.car");
         std::fs::read(&car_path).unwrap_or_default()
     }
 
-    fn load_lattice_seeds() -> String {
+    fn load_lattice_seeds(&self,) -> String {
         let seeds_path = Path::new("/home/mdupont/projects/dasl/IMPL/deep_scanner").join("final_lattice_seeds.json");
         std::fs::read_to_string(&seeds_path).unwrap_or_else(|_| "{}".to_string())
     }
 
-    fn extract_conformal_metrics(log: &str) -> HashMap<String, serde_json::Value> {
+    fn extract_conformal_metrics(&self,log: &str) -> HashMap<String, serde_json::Value> {
         let mut metrics = HashMap::new();
 
         // Parse Hecke scores from the log

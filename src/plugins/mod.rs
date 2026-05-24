@@ -15,5 +15,8 @@ pub mod plugin_browser;
 pub mod zombie;
 pub mod zos;
 pub mod deep_scan;
+pub mod git_tile;
+pub mod cargo_tile;
+pub mod nix_tile;
 pub mod testing_tile_matrix;
 pub mod dasl_decode_finder;
