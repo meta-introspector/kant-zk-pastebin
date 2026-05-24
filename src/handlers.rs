@@ -6,6 +6,83 @@ use chrono::Utc;
 use zos_circuit_optimizer as circuit;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+
+/// Detect tile type from content (auto-compose tile detection)
+fn detect_tile_type(title: &str, mime: &str, content: &str) -> &'static str {
+    // Check by MIME first
+    match mime {
+        "text/vnd.plantuml" | "application/x-plantuml" => return "plantuml",
+        "text/vnd.graphviz" | "text/x-graphviz" => return "graphviz",
+        "text/x-minizinc" => return "minizinc",
+        "text/x-lean" => return "lean",
+        "text/x-tulip" => return "tulip",
+        "image/svg+xml" if title.contains("tile") || title.contains("Tile") => return "tile",
+        _ => {}
+    }
+    // Check by extension in title
+    let lower = title.to_lowercase();
+    if lower.ends_with(".puml") || lower.ends_with(".plantuml") { return "plantuml"; }
+    if lower.ends_with(".dot") || lower.ends_with(".gv") { return "graphviz"; }
+    if lower.ends_with(".mzn") { return "minizinc"; }
+    if lower.ends_with(".lean") { return "lean"; }
+    if lower.ends_with(".tlp") { return "tulip"; }
+    // Check by content patterns
+    let trimmed = content.trim();
+    if trimmed.starts_with("@startuml") || trimmed.starts_with("@startdot") { return "plantuml"; }
+    if trimmed.starts_with("digraph") || trimmed.starts_with("graph ") { return "graphviz"; }
+    if trimmed.contains("constraint ") || trimmed.contains("solve satisfy") { return "minizinc"; }
+    if trimmed.starts_with("theorem") || trimmed.starts_with("lemma") || trimmed.starts_with("def ") { return "lean"; }
+    if trimmed.starts_with("(nodes ") || trimmed.starts_with("(TLP") { return "tulip"; }
+    ""
+}
+
+/// Render an interactive tile for a given tile type and content
+fn render_tile_html(tile_type: &str, content: &str, file_url: &str, title: &str) -> String {
+    let escaped = content.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    match tile_type {
+        "plantuml" => format!(
+            r#"<div class="tile" data-tile="plantuml">
+<h3>📐 PlantUML: {}</h3>
+<pre style="max-height:200px;overflow:auto">{}</pre>
+<button onclick="renderPlantUML(this)">▶ Render Diagram</button>
+<div class="tile-output"></div>
+</div>"#, title, escaped),
+        "graphviz" => format!(
+            r#"<div class="tile" data-tile="graphviz">
+<h3>📊 Graphviz: {}</h3>
+<pre style="max-height:200px;overflow:auto">{}</pre>
+<button onclick="renderGraphViz(this)">▶ Render Graph</button>
+<div class="tile-output"></div>
+</div>"#, title, escaped),
+        "minizinc" => format!(
+            r#"<div class="tile" data-tile="minizinc">
+<h3>🧮 MiniZinc: {}</h3>
+<pre style="max-height:200px;overflow:auto">{}</pre>
+<button onclick="solveMiniZinc(this)">▶ Solve</button>
+<div class="tile-output"></div>
+</div>"#, title, escaped),
+        "lean" => format!(
+            r#"<div class="tile" data-tile="lean">
+<h3>🏛️ Lean: {}</h3>
+<pre style="max-height:200px;overflow:auto">{}</pre>
+<button onclick="verifyLean(this)">▶ Verify</button>
+<div class="tile-output"></div>
+</div>"#, title, escaped),
+        "tulip" => format!(
+            r#"<div class="tile" data-tile="tulip">
+<h3>🔗 Tulip Graph: {}</h3>
+<pre style="max-height:200px;overflow:auto">{}</pre>
+<button onclick="analyzeTulip(this)">▶ Analyze</button>
+<div class="tile-output"></div>
+</div>"#, title, escaped),
+        "tile" => format!(
+            r#"<div class="tile" data-tile="dash">
+<h3>🧩 DAG-CBOR Tile: {}</h3>
+<iframe src="{}" style="width:100%;height:600px;border:none"></iframe>
+</div>"#, title, file_url),
+        _ => String::new(),
+    }
+}
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -845,6 +922,54 @@ async function playMidi(){{
             p.nav(view::W::Link { label: "🔧 Format".into(), href: view::url(&base_path, &format!("/file/{}/raw?format=base64", id)) });
             p.content(view::W::Raw(format!("<p>CID: {} | IPFS: {}</p>", cid, ipfs_cid)));
             p.content(view::W::Raw(content_html));
+
+            // Auto-detect tile type from file extension
+            let tile_type = detect_tile_type(&title, &mime, &cid);
+            let file_url_val = view::url(&base_path, &format!("/file/{}", id));
+            if !tile_type.is_empty() {
+                let file_path = std::path::Path::new(&uucp_dir).join(format!("{}.txt", id));
+                let tile_content = std::fs::read_to_string(&file_path).unwrap_or_default();
+                let tile_html = render_tile_html(tile_type, &tile_content, &file_url_val, &title);
+                p.content(view::W::Raw(tile_html));
+                p.js(r#"
+function renderPlantUML(btn) {
+  btn.disabled=true; btn.textContent='⏳ Rendering...';
+  const pre=btn.previousElementSibling;
+  const out=btn.nextElementSibling;
+  fetch('/plugin/plantuml?action=render&format=svg',{method:'POST',body:pre.textContent})
+    .then(r=>r.text()).then(h=>{out.innerHTML=h;btn.textContent='✅ Rendered';}).catch(e=>{out.textContent='Error: '+e;btn.textContent='❌ Failed';});
+}
+function renderGraphViz(btn) {
+  btn.disabled=true; btn.textContent='⏳ Rendering...';
+  const pre=btn.previousElementSibling;
+  const out=btn.nextElementSibling;
+  fetch('/plugin/graphviz?action=render&format=svg',{method:'POST',body:pre.textContent})
+    .then(r=>r.text()).then(h=>{out.innerHTML=h;btn.textContent='✅ Rendered';}).catch(e=>{out.textContent='Error: '+e;btn.textContent='❌ Failed';});
+}
+function solveMiniZinc(btn) {
+  btn.disabled=true; btn.textContent='⏳ Solving...';
+  const pre=btn.previousElementSibling;
+  const out=btn.nextElementSibling;
+  fetch('/plugin/minizinc?action=solve',{method:'POST',body:pre.textContent})
+    .then(r=>r.text()).then(h=>{out.innerHTML='<pre>'+h+'</pre>';btn.textContent='✅ Solved';}).catch(e=>{out.textContent='Error: '+e;btn.textContent='❌ Failed';});
+}
+function verifyLean(btn) {
+  btn.disabled=true; btn.textContent='⏳ Verifying...';
+  const pre=btn.previousElementSibling;
+  const out=btn.nextElementSibling;
+  fetch('/plugin/lean?action=verify',{method:'POST',body:pre.textContent})
+    .then(r=>r.text()).then(h=>{out.innerHTML='<pre>'+h+'</pre>';btn.textContent='✅ Verified';}).catch(e=>{out.textContent='Error: '+e;btn.textContent='❌ Failed';});
+}
+function analyzeTulip(btn) {
+  btn.disabled=true; btn.textContent='⏳ Analyzing...';
+  const pre=btn.previousElementSibling;
+  const out=btn.nextElementSibling;
+  fetch('/plugin/tulip?action=analyze',{method:'POST',body:pre.textContent})
+    .then(r=>r.text()).then(h=>{out.innerHTML='<pre>'+h+'</pre>';btn.textContent='✅ Analyzed';}).catch(e=>{out.textContent='Error: '+e;btn.textContent='❌ Failed';});
+}
+"#);
+            }
+
             let html = p.render();
 
             Ok(HttpResponse::Ok()
