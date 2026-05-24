@@ -4,7 +4,7 @@ const DB_NAME = 'kant-pastebin';
 const STORE_NAME = 'pastes';
 
 let db;
-let serverUrl = localStorage.getItem('serverUrl') || 'https://solana.solfunmeme.com/pastebin';
+let serverUrl = localStorage.getItem('serverUrl') || '';
 
 // Initialize IndexedDB
 function initDB() {
@@ -71,7 +71,7 @@ document.getElementById('pasteForm').onsubmit = async (e) => {
 // Sync to server
 async function syncToServer(paste) {
   try {
-    const res = await fetch(`${serverUrl}/paste`, {
+    const res = await fetch(`${serverUrl}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -89,7 +89,7 @@ async function syncToServer(paste) {
       paste.synced = true;
       paste.serverId = data.id;
       paste.ipfsCid = data.ipfs_cid;
-      paste.serverUrl = `${serverUrl}/paste/${data.id}`;
+      paste.serverUrl = `${serverUrl}/${data.id}`;
       tx.objectStore(STORE_NAME).put(paste);
       
       document.getElementById('result').innerHTML += `<br>☁️ Synced to server: ${data.id}`;
@@ -114,7 +114,7 @@ function loadPastes() {
   request.onsuccess = () => {
     const pastes = request.result.reverse();
     const html = pastes.map(p => {
-      const url = p.serverId ? `${serverUrl}/paste/${p.serverId}` : '';
+      const url = p.serverId ? `${serverUrl}/${p.serverId}` : '';
       return `
       <div class="paste-item ${p.synced ? 'synced' : ''}">
         <strong>${p.title}</strong>

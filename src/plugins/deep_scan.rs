@@ -58,7 +58,7 @@ impl DeepScanPlugin {
         }
 
         // Extract byte frequencies
-        let mut top_bytes: Vec<HashMap<String, serde_json::Value>> = Vec::new();
+        let mut top_bytes: Vec<serde_json::Value> = Vec::new();
         for line in log.lines() {
             if let Some(rest) = line.strip_prefix("  Byte 0x") {
                 let parts: Vec<&str> = rest.splitn(2, ':').collect();
@@ -125,7 +125,7 @@ impl Plugin for DeepScanPlugin {
                     .and_then(|v| v.as_array())
                     .map(|arr| {
                         arr.iter().map(|b| {
-                            let byte = b.get("byte").and_then(|v| v.as_str()).unwrap_or("??");
+                            let byte = b["byte"].as_str().unwrap_or("??");
                             let freq = b.get("frequency").and_then(|v| v.as_u64()).unwrap_or(0);
                             format!("<tr><td>{}</td><td>{}</td></tr>", byte, freq)
                         }).collect::<Vec<_>>().join("\n")

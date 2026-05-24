@@ -36,30 +36,30 @@ impl ZombiePlugin {
 
     /// Basic fallback analysis using simple heuristics (no zombie-cft binary needed)
     fn analyze_basic(&self, source: &str) -> Result<String, String> {
-        let mut result = HashMap::new();
+        let mut result = serde_json::Map::new();
         let lines: Vec<&str> = source.lines().collect();
 
         // Count structural elements
-        result.insert("lines", lines.len());
-        result.insert("chars", source.len());
-        result.insert("fns", source.matches("fn ").count());
-        result.insert("structs", source.matches("struct ").count());
-        result.insert("enums", source.matches("enum ").count());
-        result.insert("impls", source.matches("impl ").count());
-        result.insert("traits", source.matches("trait ").count());
-        result.insert("unsafe", source.matches("unsafe ").count());
-        result.insert("unsafe_blocks", count_balanced(source, "unsafe {", "}"));
+        result.insert("lines".into(), serde_json::json!(lines.len()));
+        result.insert("chars".into(), serde_json::json!(source.len()));
+        result.insert("fns".into(), serde_json::json!(source.matches("fn ").count()));
+        result.insert("structs".into(), serde_json::json!(source.matches("struct ").count()));
+        result.insert("enums".into(), serde_json::json!(source.matches("enum ").count()));
+        result.insert("impls".into(), serde_json::json!(source.matches("impl ").count()));
+        result.insert("traits".into(), serde_json::json!(source.matches("trait ").count()));
+        result.insert("unsafe".into(), serde_json::json!(source.matches("unsafe ").count()));
+        result.insert("unsafe_blocks".into(), serde_json::json!(count_balanced(source, "unsafe {", "}")));
 
         // N-gram analysis (character level, up to prime 71)
-        let mut ngram_totals = HashMap::new();
+        let mut ngram_totals = serde_json::Map::new();
         for n in [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31] {
             let mut seen = std::collections::HashSet::new();
             for w in source.as_bytes().windows(n) {
                 seen.insert(w.to_vec());
             }
-            ngram_totals.insert(n, seen.len());
+            ngram_totals.insert(n.to_string().into(), serde_json::json!(seen.len()));
         }
-        result.insert("ngram_types", format!("{:?}", ngram_totals));
+        result.insert("ngram_types".into(), serde_json::Value::Object(ngram_totals));
 
         Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
     }

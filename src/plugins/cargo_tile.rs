@@ -93,7 +93,7 @@ impl Plugin for CargoTilePlugin {
 <div style="font-size:10px;color:#484f58;margin-top:4px">{}</div>
 <a href="?action=inspect&path={}" style="font-size:11px">🔍 Inspect</a>
 </div>"#,
-                        pkg_name, path, version, deps, workspace, path
+                        pkg_name, path, version, deps, workspace, path, path
                     ));
                 }
                 html.push_str("</div>");

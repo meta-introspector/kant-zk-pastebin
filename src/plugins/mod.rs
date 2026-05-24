@@ -16,3 +16,4 @@ pub mod git_tile;
 pub mod cargo_tile;
 pub mod nix_tile;
 pub mod data_tiles;
+pub mod decl_patterns_analyzer;
