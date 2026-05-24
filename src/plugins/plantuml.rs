@@ -67,8 +67,8 @@ impl Plugin for PlantUmlPlugin {
                 map.insert("content_type".to_string(), "text/html; charset=utf-8".to_string());
             }
             "view" | "render" => {
-                let path = input.extra.get("path").unwrap_or(&String::new());
-                match std::fs::read_to_string(path) {
+                let path = input.extra.get("path").cloned().unwrap_or_default();
+                match std::fs::read_to_string(&path) {
                     Ok(content) => {
                         if action == "render" {
                             let fmt = input.extra.get("format").map(|s| s.as_str()).unwrap_or("svg");
@@ -100,8 +100,8 @@ impl Plugin for PlantUmlPlugin {
                     files.iter().map(|f| f.size).sum::<u64>().to_string());
             }
             "search" => {
-                let q = input.extra.get("q").unwrap_or(&String::new());
-                let results = self.index.search("puml", q);
+                let q = input.extra.get("q").cloned().unwrap_or_default();
+                let results = self.index.search("puml", &q);
                 let html = results.iter().map(|f| {
                     format!("<li><a href=\"?action=view&path={}\">{}</a></li>",
                         urlencode(&f.path.to_string_lossy()), html_escape(&f.name))

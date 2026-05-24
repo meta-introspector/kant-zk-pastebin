@@ -13,6 +13,7 @@ mod ipfs;
 mod tagging;
 mod plugin;
 mod plugins;
+mod search;
 mod dasl;
 mod sheaf;
 mod car_index;
@@ -97,10 +98,7 @@ async fn main() -> std::io::Result<()> {
             .route("/tiles", web::get().to(handlers::tiles_view))
             .route("/car/midi", web::get().to(handlers::car_browse_midi))
             .route("/car/plantuml", web::get().to(handlers::car_browse_plantuml))
-            .route("/graphviz", web::get().to(handlers::plugin_route_generic("graphviz")))
-            .route("/minizinc", web::get().to(handlers::plugin_route_generic("minizinc")))
-            .route("/lean", web::get().to(handlers::plugin_route_generic("lean")))
-            .route("/tulip", web::get().to(handlers::plugin_route_generic("tulip")))
+            .route("/plugin/{name}", web::get().to(handlers::plugin_route))
             .route("/stego", web::get().to(handlers::stego_dashboard))
             .service(actix_files::Files::new("/stego/pkg", "erdfa-clean/wasm/pkg"))
             .service(actix_files::Files::new("/stego/samples", "erdfa-clean/wasm/samples"))

@@ -67,8 +67,8 @@ impl Plugin for MidiPlugin {
                 map.insert("content_type".to_string(), "text/html; charset=utf-8".to_string());
             }
             "download" => {
-                let path = input.extra.get("path").unwrap_or(&String::new());
-                match std::fs::read(path) {
+                let path = input.extra.get("path").cloned().unwrap_or_default();
+                match std::fs::read(&path) {
                     Ok(bytes) => {
                         use base64::Engine;
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -76,7 +76,7 @@ impl Plugin for MidiPlugin {
                         map.insert("content_type".to_string(), "audio/midi".to_string());
                         map.insert("encoding".to_string(), "base64".to_string());
                         map.insert("filename".to_string(),
-                            std::path::Path::new(path)
+                            std::path::Path::new(&path)
                                 .file_name().map(|n| n.to_string_lossy().to_string())
                                 .unwrap_or_else(|| "unknown.mid".to_string()));
                     }
@@ -94,17 +94,17 @@ impl Plugin for MidiPlugin {
                     if files.is_empty() { 0.0 } else { total_size as f64 / files.len() as f64 / 1000.0 }));
             }
             "search" => {
-                let q = input.extra.get("q").unwrap_or(&String::new());
+                let q = input.extra.get("q").cloned().unwrap_or_default();
                 if q.is_empty() {
                     map.insert("html".to_string(),
                         r#"<h1>🔍 Search MIDI</h1><form><input name="q" placeholder="Search..."><button>Search</button></form>"#.to_string());
                 } else {
-                    let results = self.index.search("mid", q);
+                    let results = self.index.search("mid", &q);
                     let html = results.iter().map(|f| {
                         format!(r#"<li><a href="?action=download&path={}">{} ({})</a></li>"#,
                             urlencode(&f.path.to_string_lossy()), html_escape(&f.name), f.size)
                     }).collect::<Vec<_>>().join("\n");
-                    map.insert("html".to_string(), format!("<h3>{} results for '{}'</h3><ul>{}</ul>", results.len(), html_escape(q), html));
+                    map.insert("html".to_string(), format!("<h3>{} results for '{}'</h3><ul>{}</ul>", results.len(), html_escape(&q), html));
                 }
             }
             _ => {

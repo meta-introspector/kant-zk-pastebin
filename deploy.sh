@@ -2,66 +2,37 @@
 set -e
 
 echo "=== Deploying Kant Pastebin ==="
+nix build 2>&1 || { echo "⚠️  nix build failed, trying cargo build..."; cargo build; }
 
-# Build with Nix
-nix build
+STORE_PATH=$(readlink -f result 2>/dev/null || echo "./target/debug")
+BINARY="$STORE_PATH/bin/kant-pastebin"
+[ -x "$BINARY" ] || BINARY="./target/debug/kant-pastebin"
+[ -x "$BINARY" ] || { echo "Binary not found at $BINARY"; exit 1; }
 
-# Get Nix store path
-STORE_PATH=$(readlink -f result)
-echo "Built: $STORE_PATH"
-
-# Generate systemd service
-cat > kant-pastebin.service << EOF
+echo "Built: $BINARY"
+echo ""
+echo "To run manually:"
+echo "  export DAGCBOR_TILES_PATH=/mnt/data1/time-2026/02-february/22/dasl/dasl-testing/sheaf/tiles/dagcbor_tiles.html"
+echo "  RUST_LOG=info $BINARY"
+echo ""
+echo "Or install systemd service:"
+cat > kant-pastebin.service << UNIT
 [Unit]
-Description=Kant Pastebin - UUCP + zkTLS
+Description=Kant Pastebin
 After=network.target
-
 [Service]
 Type=simple
 WorkingDirectory=$(pwd)
-ExecStart=$STORE_PATH/bin/kant-pastebin
+ExecStart=$BINARY
 Restart=always
 RestartSec=10
-Environment="BIND_ADDR=127.0.0.1:8090"
-Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
-Environment="BASE_PATH=/pastebin"
-Environment="BASE_URL=${KANT_BASE_URL:-https://solana.solfunmeme.com}"
-Environment="NFT_DIR=/mnt/data1/time-2026/03-march/13/nft_enriched"
-Environment="ENRICH_PIPELINE=/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh"
-Environment="DAGCBOR_TILES_PATH=/mnt/data1/time-2026/02-february/22/dasl/dasl-testing/sheaf/tiles/dagcbor_tiles.html"
-Environment="RUST_LOG=info"
-Environment="PATH=$(dirname $(which ipfs 2>/dev/null || echo /usr/bin/ipfs)):/usr/local/bin:/usr/bin:/bin"
-
+Environment=BIND_ADDR=127.0.0.1:8090
+Environment=UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin
+Environment=DAGCBOR_TILES_PATH=/mnt/data1/time-2026/02-february/22/dasl/dasl-testing/sheaf/tiles/dagcbor_tiles.html
+Environment=RUST_LOG=info
 [Install]
 WantedBy=default.target
-EOF
-
-# Generate nginx config
-cat > kant-pastebin.nginx << 'EOF'
-location /pastebin/ {
-    proxy_pass http://127.0.0.1:8090/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-EOF
-
+UNIT
+echo "  Systemd: cp kant-pastebin.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user restart kant-pastebin"
 echo ""
-echo "=== Install ==="
-echo "1. Systemd:"
-cp kant-pastebin.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user restart kant-pastebin
-echo "   ✅ Service restarted"
-echo ""
-echo "2. Nginx:"
-sudo cp kant-pastebin.nginx /etc/nginx/conf.d/kant-pastebin.conf
-sudo nginx -t && sudo systemctl reload nginx
-echo "   ✅ Nginx reloaded"
-echo ""
-echo "3. Test:"
-curl -s http://127.0.0.1:8090/ | head -5
-echo ""
-echo "   ${KANT_BASE_URL:-https://solana.solfunmeme.com}/pastebin/"
+echo "Test: curl -s http://127.0.0.1:8090/ | head -5"
