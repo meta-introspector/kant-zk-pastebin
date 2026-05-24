@@ -54,6 +54,10 @@ async fn main() -> std::io::Result<()> {
     registry.register(Box::new(plugins::tiles::TilesPlugin::new()));
     registry.register(Box::new(plugins::midi::MidiPlugin::new(car_index.clone())));
     registry.register(Box::new(plugins::plantuml::PlantUmlPlugin::new(car_index.clone())));
+    registry.register(Box::new(plugins::graphviz::GraphvizPlugin::new()));
+    registry.register(Box::new(plugins::minizinc::MiniZincPlugin::new()));
+    registry.register(Box::new(plugins::lean::LeanPlugin::new()));
+    registry.register(Box::new(plugins::tulip::TulipPlugin::new()));
     let registry = web::Data::new(std::sync::Mutex::new(registry));
     let car_index_data = web::Data::new(car_index);
     
@@ -93,6 +97,10 @@ async fn main() -> std::io::Result<()> {
             .route("/tiles", web::get().to(handlers::tiles_view))
             .route("/car/midi", web::get().to(handlers::car_browse_midi))
             .route("/car/plantuml", web::get().to(handlers::car_browse_plantuml))
+            .route("/graphviz", web::get().to(handlers::plugin_route_generic("graphviz")))
+            .route("/minizinc", web::get().to(handlers::plugin_route_generic("minizinc")))
+            .route("/lean", web::get().to(handlers::plugin_route_generic("lean")))
+            .route("/tulip", web::get().to(handlers::plugin_route_generic("tulip")))
             .route("/stego", web::get().to(handlers::stego_dashboard))
             .service(actix_files::Files::new("/stego/pkg", "erdfa-clean/wasm/pkg"))
             .service(actix_files::Files::new("/stego/samples", "erdfa-clean/wasm/samples"))

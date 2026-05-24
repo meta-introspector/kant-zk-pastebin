@@ -1555,18 +1555,47 @@ pub async fn car_browse_plantuml(
     }
 }
 
+/// Generic plugin route handler — dispatches to any named plugin
+pub fn plugin_route_generic(plugin_name: &'static str) -> impl Fn(web::Query<std::collections::HashMap<String, String>>, web::Data<std::sync::Mutex<plugin::PluginRegistry>>) -> std::future::Ready<Result<HttpResponse>> + Clone {
+    move |query, registry| {
+        let action = query.get("action").map(|s| s.as_str()).unwrap_or("browse");
+        let mut extra: std::collections::HashMap<String, String> = query.into_inner();
+        if !extra.contains_key("action") {
+            extra.insert("action".to_string(), action.to_string());
+        }
+        let input = plugin::PluginInput {
+            id: format!("plugin-{}", plugin_name),
+            content: Vec::new(),
+            mime: "text/html".to_string(),
+            url: String::new(),
+            extra,
+        };
+        match registry.lock().unwrap().execute(plugin_name, &input) {
+            Ok(map) => {
+                let html = map.get("html").cloned().unwrap_or_else(|| {
+                    let content = map.get("content").cloned().unwrap_or_default();
+                    if content.is_empty() {
+                        format!("<p>{} plugin executed (no output)</p>", plugin_name)
+                    } else {
+                        format!("<pre>{}</pre>", content)
+                    }
+                });
+                std::future::ready(Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html)))
+            }
+            Err(e) => std::future::ready(Ok(HttpResponse::InternalServerError().body(
+                format!("<h1>Plugin error</h1><p>{}</p>", e)
+            ))),
+        }
+    }
+}
+
 pub async fn tiles_view() -> Result<HttpResponse> {
     let tiles_path = env::var("DAGCBOR_TILES_PATH")
-    let tiles_path = env::var("DAGCBOR_TILES_PATH")
         .unwrap_or_else(|_| "/mnt/data1/time-2026/02-february/22/dasl/dasl-testing/sheaf/tiles/dagcbor_tiles.html".to_string());
-    
     match tokio::fs::read_to_string(&tiles_path).await {
-        Ok(html) => Ok(HttpResponse::Ok()
-            .content_type("text/html; charset=utf-8")
-            .body(html)),
-        Err(e) => Ok(HttpResponse::NotFound()
-            .content_type("text/html; charset=utf-8")
-            .body(format!("<h1>Tiles not found</h1><p>Build them first: <code>make tiles</code></p><p>Error: {}</p>", e))),
+        Ok(html) => Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html)),
+        Err(e) => Ok(HttpResponse::NotFound().content_type("text/html; charset=utf-8")
+            .body(format!("<h1>Tiles not found</h1><p>Build: <code>make tiles</code></p><p>Error: {}</p>", e))),
     }
 }
 

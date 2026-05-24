@@ -3,3 +3,7 @@ pub mod screenshot;
 pub mod tiles;
 pub mod midi;
 pub mod plantuml;
+pub mod graphviz;
+pub mod minizinc;
+pub mod lean;
+pub mod tulip;
