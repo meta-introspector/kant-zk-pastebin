@@ -43,7 +43,7 @@ async fn main() -> std::io::Result<()> {
             log::info!("📂 Building CAR file index from locate DB...");
             match idx.build(&[("mid", "MIDI"), ("puml", "PlantUML"), ("plantuml", "PlantUML")]) {
                 Ok(_) => log::info!("✅ CAR index built: {:?}", idx.stats()),
-                Err(e) => log::warn!("⚠️  CAR index build: {}", e),
+                Err(e) => log::warn!("CAR index build skipped: {}", e),
             }
         });
     }
@@ -66,7 +66,9 @@ async fn main() -> std::io::Result<()> {
     registry.register(Box::new(plugins::plugin_browser::PluginBrowserPlugin::new()));
     registry.register(Box::new(plugins::zombie::ZombiePlugin::new()));
     registry.register(Box::new(plugins::zos::ZosPlugin::new()));
+    registry.register(Box::new(plugins::deep_scan::DeepScanPlugin::new()));
     registry.register(Box::new(plugins::dasl_decode_finder::DaslDecodeFinderPlugin::new()));
+    registry.register(Box::new(plugins::testing_tile_matrix::TestingTileMatrixPlugin::new()));
     let registry = web::Data::new(std::sync::Mutex::new(registry));
     let car_index_data = web::Data::new(car_index);
     
