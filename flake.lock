@@ -1,81 +1,21 @@
 {
   "nodes": {
-    "common-inputs": {
-      "flake": false,
+    "flake-utils": {
+      "inputs": {
+        "systems": "systems"
+      },
       "locked": {
-        "lastModified": 1777295261,
-        "narHash": "sha256-P3mZ9lcOWnXZYZ/zyjtDBbcCMPyzx416KDMMJ/z7ONk=",
-        "path": "/home/mdupont/nix-common",
-        "type": "path"
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
       },
       "original": {
-        "path": "/home/mdupont/nix-common",
-        "type": "path"
-      }
-    },
-    "erdfa-canonical-local": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1776505560,
-        "narHash": "sha256-78UkFcj1s8OIEYxfDge2KMWkckN238muCUYH3vIXYPU=",
-        "path": "/mnt/data1/kant/pastebin/erdfa-canonical",
-        "type": "path"
-      },
-      "original": {
-        "path": "/mnt/data1/kant/pastebin/erdfa-canonical",
-        "type": "path"
-      }
-    },
-    "erdfa-clean-local": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1776505560,
-        "narHash": "sha256-HU4zafUURcYk0aRRzAhqPJGZjxmx1Ylg8vli6YRk8Cw=",
-        "path": "/mnt/data1/kant/pastebin/erdfa-clean",
-        "type": "path"
-      },
-      "original": {
-        "path": "/mnt/data1/kant/pastebin/erdfa-clean",
-        "type": "path"
-      }
-    },
-    "erdfa-dasl": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1776457621,
-        "narHash": "sha256-OzzDB0VXg3Gv0RHZY8DPli0l40+UpvmdMzAROjL6Xtg=",
-        "path": "/mnt/data1/kant/pastebin/plugins/erdfa-dasl",
-        "type": "path"
-      },
-      "original": {
-        "path": "/mnt/data1/kant/pastebin/plugins/erdfa-dasl",
-        "type": "path"
-      }
-    },
-    "erdfa-sheaf": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1776259411,
-        "narHash": "sha256-Q+oV+axx21OUz31gTuye3QoXGVKsh46a9W5ImAfqUMA=",
-        "path": "/mnt/data1/kant/pastebin/plugins/erdfa-sheaf",
-        "type": "path"
-      },
-      "original": {
-        "path": "/mnt/data1/kant/pastebin/plugins/erdfa-sheaf",
-        "type": "path"
-      }
-    },
-    "html5ever-local": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1776505560,
-        "narHash": "sha256-sABk0RdvZSMuFnKaap66alG4msrTEynkKBADhw4BViM=",
-        "path": "/mnt/data1/kant/pastebin/plugins/html5ever",
-        "type": "path"
-      },
-      "original": {
-        "path": "/mnt/data1/kant/pastebin/plugins/html5ever",
-        "type": "path"
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
       }
     },
     "nixpkgs": {
@@ -94,71 +34,46 @@
         "type": "github"
       }
     },
-    "oxc-local": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1776348811,
-        "narHash": "sha256-ks8d35zPYpOyd4S+0kBBI8D25ypZR7CRXftnQpkwxQY=",
-        "path": "/mnt/data1/kant/pastebin/plugins/oxc",
-        "type": "path"
-      },
-      "original": {
-        "path": "/mnt/data1/kant/pastebin/plugins/oxc",
-        "type": "path"
-      }
-    },
     "root": {
       "inputs": {
-        "common-inputs": "common-inputs",
-        "erdfa-canonical-local": "erdfa-canonical-local",
-        "erdfa-clean-local": "erdfa-clean-local",
-        "erdfa-dasl": "erdfa-dasl",
-        "erdfa-sheaf": "erdfa-sheaf",
-        "html5ever-local": "html5ever-local",
+        "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
-        "oxc-local": "oxc-local",
-        "zkperf-local": "zkperf-local",
-        "zos-circuit-local": "zos-circuit-local",
-        "zos-pastebin": "zos-pastebin"
+        "rust-overlay": "rust-overlay"
       }
     },
-    "zkperf-local": {
-      "flake": false,
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
       "locked": {
-        "lastModified": 1776505562,
-        "narHash": "sha256-6IF9lgX6TByxh79H2Q51EF+5McjMzPGk32I2k9a0tKc=",
-        "path": "/mnt/data1/kant/pastebin/zkperf",
-        "type": "path"
+        "lastModified": 1779506148,
+        "narHash": "sha256-OffE5yuMrSW71zIJNLvtl9MCO6WTAHEjlFPUCvkd/QM=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "d9973e2ab49747fada06ebbe26cda27eb0220cf1",
+        "type": "github"
       },
       "original": {
-        "path": "/mnt/data1/kant/pastebin/zkperf",
-        "type": "path"
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
       }
     },
-    "zos-circuit-local": {
-      "flake": false,
+    "systems": {
       "locked": {
-        "lastModified": 1776507180,
-        "narHash": "sha256-RjNOUIX1kqlBzUxKmo5O98a+KRBnF51ih9xpPr3dLh4=",
-        "path": "/mnt/data1/kant/pastebin/plugins/zos-circuit-optimizer",
-        "type": "path"
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
       },
       "original": {
-        "path": "/mnt/data1/kant/pastebin/plugins/zos-circuit-optimizer",
-        "type": "path"
-      }
-    },
-    "zos-pastebin": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1776259849,
-        "narHash": "sha256-xzelx+tvb8hNo9Uf9ypmQ6ogwuFdRMWmsKeHWBhzbfw=",
-        "path": "/mnt/data1/kant/pastebin/plugins/zos-pastebin",
-        "type": "path"
-      },
-      "original": {
-        "path": "/mnt/data1/kant/pastebin/plugins/zos-pastebin",
-        "type": "path"
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
       }
     }
   },

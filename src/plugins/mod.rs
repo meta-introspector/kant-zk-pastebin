@@ -7,3 +7,5 @@ pub mod graphviz;
 pub mod minizinc;
 pub mod lean;
 pub mod tulip;
+pub mod flamegraph;
+pub mod dasl_testing;

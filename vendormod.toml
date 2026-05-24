@@ -1,0 +1,9 @@
+# Vendormod configuration for pastebin project
+git-path = "git"
+vendor-dir = "vendor"
+submodules-dir = "submodules"
+mirrors-dir = "~/git"
+target-branch = "main"
+version-branch-format = "v{}"
+create-version-branches = false
+default-threads = 8

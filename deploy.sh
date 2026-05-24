@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== Deploying Kant Pastebin ==="
+echo "=== Deploying Kant Pastebin with Plugins ==="
 cargo build 2>&1
 
 STORE_PATH=$(echo "./target/debug")
@@ -29,6 +29,7 @@ RestartSec=10
 Environment=BIND_ADDR=127.0.0.1:8090
 Environment=UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin
 Environment=DAGCBOR_TILES_PATH=/mnt/data1/time-2026/02-february/22/dasl/dasl-testing/sheaf/tiles/dagcbor_tiles.html
+Environment=FLAMEGRAPH_MAX_TILES=100
 Environment=RUST_LOG=info
 [Install]
 WantedBy=default.target
@@ -36,3 +37,17 @@ UNIT
 echo "  Systemd: cp kant-pastebin.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user restart kant-pastebin"
 echo ""
 echo "Test: curl -s http://127.0.0.1:8090/ | head -5"
+echo ""
+echo "=== Plugin Endpoints ==="
+echo "  POST /plugin/flamegraph?action=generate    - Generate flamegraph SVG"
+echo "  POST content: folded stack data"
+echo "  GET  /plugin/flamegraph/help               - Interactive HTML form"
+echo "  GET  /plugin/dasl_testing/help             - Dashboard overview"
+echo "  GET  /plugin/dasl_testing/demo             - Full ECharts demo"
+echo "  POST /plugin/dasl_testing/lattice          - Generate complexity lattice"
+echo "  GET  /plugin/midi/help                     - MIDI tile generator"
+echo "  GET  /plugin/plantuml/help                 - PlantUML diagram viewer"
+echo ""
+echo "Quick test:"
+echo "  curl http://127.0.0.1:8090/plugin/flamegraph/help | head -3"
+echo "  curl http://127.0.0.1:8090/plugin/dasl_testing/demo | head -5"

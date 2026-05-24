@@ -13,10 +13,10 @@ DASL_TESTING := /mnt/data1/time-2026/02-february/22/dasl/dasl-testing
 export DAGCBOR_TILES_PATH := $(DASL_TESTING)/sheaf/tiles/dagcbor_tiles.html
 
 build:
-	cargo build
+	nix develop -c cargo build
 
 run:
-	cargo run
+	nix develop -c cargo run
 
 deploy: build
 	bash deploy.sh

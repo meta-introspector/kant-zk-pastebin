@@ -1,0 +1,129 @@
+{ pkgs ? import <nixpkgs> {} }:
+
+let
+  cargo2nix = pkgs.callPackage (pkgs.fetchFromGitHub {
+    owner = "cargo2nix";
+    repo = "cargo2nix";
+    rev = "master";
+    sha256 = "0z1j2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3";
+  }) {};
+in
+{
+  description = "Vendored crate: zerocopy-derive
+zerocopy_derive
+deprecated
+enum_from_zeros
+enum_known_layout
+enum_no_cell
+enum_to_bytes
+enum_try_from_bytes
+enum_unaligned
+eq
+hash
+hygiene
+include
+issue_2117
+issue_2835
+issue_2880
+issue_2915
+on_error
+paths_and_modules
+priv_in_pub
+struct_from_bytes
+struct_from_zeros
+struct_known_layout
+struct_no_cell
+struct_to_bytes
+struct_try_from_bytes
+struct_unaligned
+ui
+union_from_bytes
+union_from_zeros
+union_known_layout
+union_no_cell
+union_to_bytes
+union_try_from_bytes
+union_unaligned
+unsafe_cell (0.8.48
+1.0.1
+1.0.40
+2.0.46
+1.0.9
+=0.2.17
+1.0
+1.1
+2.0.46)";
+  
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    cargo2nix.url = "github:cargo2nix/cargo2nix";
+  };
+  
+  outputs = { self, nixpkgs, cargo2nix }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+      cargo2nixPkgs = cargo2nix.packages.${system};
+      
+    in {
+      packages.${system}.zerocopy-derive-0.8.48 = cargo2nixPkgs.mkRustCrate {
+        name = "zerocopy-derive
+zerocopy_derive
+deprecated
+enum_from_zeros
+enum_known_layout
+enum_no_cell
+enum_to_bytes
+enum_try_from_bytes
+enum_unaligned
+eq
+hash
+hygiene
+include
+issue_2117
+issue_2835
+issue_2880
+issue_2915
+on_error
+paths_and_modules
+priv_in_pub
+struct_from_bytes
+struct_from_zeros
+struct_known_layout
+struct_no_cell
+struct_to_bytes
+struct_try_from_bytes
+struct_unaligned
+ui
+union_from_bytes
+union_from_zeros
+union_known_layout
+union_no_cell
+union_to_bytes
+union_try_from_bytes
+union_unaligned
+unsafe_cell";
+        version = "0.8.48
+1.0.1
+1.0.40
+2.0.46
+1.0.9
+=0.2.17
+1.0
+1.1
+2.0.46";
+        src = ././vendor/zerocopy-derive-0.8.48;
+        buildInputs = [ ];
+        dependencies = { };
+      };
+      
+      defaultPackage = self.packages.${system}.zerocopy-derive-0.8.48;
+      
+      devShell = pkgs.mkShell {
+        buildInputs = [ 
+          cargo2nixPkgs.cargo
+          cargo2nixPkgs.rustc
+        ];
+      };
+    };
+}

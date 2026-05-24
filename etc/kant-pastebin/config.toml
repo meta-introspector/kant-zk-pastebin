@@ -1,0 +1,23 @@
+[search]
+dirs = [
+  "/mnt/data1/spool/uucp/pastebin",
+  "/mnt/data1/spool/uucp/pastebin-beta"
+]
+
+# Optional: Configure search behavior
+[search.options]
+# Enable case-insensitive search (default is true)
+case_sensitive = false
+
+# Enable fuzzy matching for better search results
+fuzzy_matching = true
+
+# Maximum number of search results to return
+max_results = 100
+
+# Search weighting - newer posts get higher priority
+# 1.0 = equal weight, >1.0 = favor newer, <1.0 = favor older
+newer_post_weight = 1.2
+
+# Additional directories to search (if needed later)
+# additional_dirs = ["/path/to/other/directory"]

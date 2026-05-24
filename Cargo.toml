@@ -65,6 +65,7 @@ string_cache_codegen = "0.6.1"
 criterion = "0.8"
 libtest-mimic = "0.8.1"
 typed-arena = "2.0.2"
+rand = "0.10.0"
 
 # oxc crates (path-based, from plugins/oxc)
 oxc_allocator = { version = "0.126.0", path = "plugins/oxc/crates/oxc_allocator" }
@@ -99,7 +100,8 @@ num-bigint = "0.4.6"
 num-traits = "0.2.19"
 proc-macro2 = "1"
 quote = "1"
-rand = "0.10.0"
+toml = "0.8"
+toml_edit = "0.22"
 rustc-hash = "2"
 schemars = { package = "oxc-schemars", version = "0.8.27" }
 seq-macro = "0.3.6"
@@ -143,7 +145,7 @@ log = "0.4"
 chrono = "0.4"
 sha2 = "0.10"
 hex = "0.4"
-reqwest = { version = "0.11", features = ["blocking", "json", "multipart"] }
+reqwest = { version = "0.11", default-features = false, features = ["blocking", "json", "multipart", "native-tls-vendored"] }
 data-encoding = "2"
 ciborium = "0.2"
 serde_bytes = "0.11"
@@ -157,11 +159,14 @@ mime_guess = "2"
 futures-util = "0.3"
 utoipa = { version = "4", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "6", features = ["actix-web"] }
+inferno = "0.12"
 erdfa-publish = { path = "erdfa-canonical/bindings/rust" }
 clap = { version = "4", features = ["derive"] }
 walkdir = "2"
 flate2 = "1"
 base64 = "0.22"
+toml = "0.8"
+toml_edit = "0.22"
 zkperf-macros = { path = "zkperf/zkperf-macros" }
 zkperf-witness = { path = "zkperf/zkperf-witness" }
 

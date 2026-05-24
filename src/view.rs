@@ -310,12 +310,13 @@ pub fn url(base: &str, path: &str) -> String {
 #[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn nav_bar(base: &str) -> Vec<W> {
     vec![W::Raw(format!(
-        r#"<a href="{}">🏠</a> <a href="{}">📚</a> <a href="{}">🖼️</a> <a href="{}">🧩</a> <a href="{}">🎵</a> <a href="{}">📐</a> <a href="{}">📊</a> <a href="{}">🧮</a> <a href="{}">🏛️</a> <a href="{}">🔗</a> <a href="{}">📖</a>"#,
+        r#"<a href="{}">🏠</a> <a href="{}">📚</a> <a href="{}">🖼️</a> <a href="{}">🧩</a> <a href="{}">🧪</a> <a href="{}">📊</a> <a href="{}">🎵</a> <a href="{}">📐</a> <a href="{}">🧮</a> <a href="{}">🏛️</a> <a href="{}">🔗</a> <a href="{}">📖</a>"#,
         url(base, "/"), url(base, "/browse"), url(base, "/gallery"),
         url(base, "/tiles"),
+        url(base, "/plugin/fuzz"), url(base, "/plugin/perf"),
         url(base, "/car/midi"), url(base, "/car/plantuml"),
-        url(base, "/graphviz"), url(base, "/minizinc"),
-        url(base, "/lean"), url(base, "/tulip"),
+        url(base, "/plugin/minizinc"),
+        url(base, "/plugin/lean"), url(base, "/plugin/tulip"),
         url(base, "/openapi.json"),
     ))]
 }

@@ -1,0 +1,269 @@
+// Search - Shared search functionality for web and CLI
+use crate::model::PasteIndex;
+use std::collections::HashMap;
+use std::env;
+use std::fs::{self, File};
+use std::io::Read;
+use std::path::Path;
+use toml::Value;
+
+/// Read workspace member paths from Cargo.toml
+pub fn read_workspace_paths() -> Vec<String> {
+    let cargo_path = "Cargo.toml";
+    
+    if let Ok(mut file) = File::open(cargo_path) {
+        let mut contents = String::new();
+        if file.read_to_string(&mut contents).is_ok() {
+            if let Ok(config) = toml::from_str::<Value>(&contents) {
+                if let Some(workspace) = config.get("workspace") {
+                    if let Some(members) = workspace.get("members") {
+                        if let Some(members_array) = members.as_array() {
+                            return members_array.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect::<Vec<_>>();
+                        }
+                    }
+                }
+                // Also check for workspace.packages in newer Cargo.toml format
+                if let Some(packages) = config.get("workspace").and_then(|w| w.get("packages")) {
+                    if let Some(packages_array) = packages.as_array() {
+                        return packages_array.iter()
+                            .filter_map(|v| v.get("path").and_then(|p| p.as_str()).map(|s| s.to_string()))
+                            .collect::<Vec<_>>();
+                    }
+                }
+            }
+        }
+    }
+    
+    vec![]
+}
+
+/// Get default search directories from various sources
+/// Priority: env var > config file > workspace paths > defaults
+pub fn load_search_dirs() -> Vec<String> {
+    // Check environment variable first
+    if let Ok(env_dirs) = env::var("PASTEBIN_SEARCH_DIRS") {
+        return env_dirs.split(':').map(|s| s.to_string()).collect::<Vec<_>>();
+    }
+    
+    // Try to load from config
+    let config_path = "/etc/kant-pastebin-search.toml";
+    if let Ok(mut file) = File::open(config_path) {
+        let mut contents = String::new();
+        if file.read_to_string(&mut contents).is_ok() {
+            if let Ok(config) = toml::from_str::<Value>(&contents) {
+                if let Some(dirs) = config.get("search").and_then(|s| s.get("dirs")) {
+                    if let Some(dirs_array) = dirs.as_array() {
+                        let mut result: Vec<String> = dirs_array.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<_>>();
+                        // If we got some dirs from config, return them
+                        if !result.is_empty() {
+                            return result;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Try workspace paths
+    let workspace_paths = read_workspace_paths();
+    if !workspace_paths.is_empty() {
+        // Convert workspace paths to pastebin directories
+        return workspace_paths.iter()
+            .map(|p| {
+                // Convert path like "plugins/html5ever" to potential spool dir
+                // or use it directly if it's already a data path
+                if p.contains("spool") || p.contains("pastebin") {
+                    p.clone()
+                } else {
+                    // Default spool location
+                    format!("/mnt/data1/spool/uucp/pastebin")
+                }
+            })
+            .collect::<Vec<_>>();
+    }
+    
+    // Default directories
+    vec![
+        "/var/spool/uucp/pastebin".to_string(),
+        "/mnt/data1/spool/uucp/pastebin".to_string(),
+        "/mnt/data1/spool/uucp/pastebin-beta".to_string(),
+    ]
+}
+
+/// Load paste index entries from multiple directories
+pub fn load_paste_entries_from_dirs(dirs: &[String]) -> Vec<PasteIndex> {
+    let mut all_entries = Vec::new();
+    
+    for dir in dirs {
+        let index_file = format!("{}/index.jsonl", dir);
+        if let Ok(content) = fs::read_to_string(&index_file) {
+            let entries: Vec<PasteIndex> = content
+                .lines()
+                .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
+                .collect::<Vec<_>>();
+            all_entries.extend(entries);
+        } else {
+            // If no index.jsonl, try to load individual .txt files
+            // This is for backwards compatibility
+            if let Ok(read_dir) = fs::read_dir(dir) {
+                for entry in read_dir.flatten() {
+                    let path = entry.path();
+                    if path.extension().map(|e| e == "txt").unwrap_or(false) {
+                        if let Ok(file_content) = fs::read_to_string(&path) {
+                            if let Some(index_entry) = parse_paste_file(&file_content, &path, dir) {
+                                all_entries.push(index_entry);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Remove duplicates by ID and sort by timestamp (newest first)
+    all_entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    all_entries.dedup_by(|a, b| a.id == b.id);
+    
+    all_entries
+}
+
+/// Load all pastes with full content for full-text search
+/// This is more expensive but enables body search
+pub fn load_pastes_with_content(dirs: &[String]) -> Vec<(PasteIndex, String)> {
+    let entries = load_paste_entries_from_dirs(dirs);
+    let mut results = Vec::new();
+    
+    for entry in &entries {
+        // Try to read the full content from the file
+        if Path::new(&entry.uucp_path).exists() {
+            if let Ok(content) = fs::read_to_string(&entry.uucp_path) {
+                results.push((entry.clone(), content));
+                continue;
+            }
+        }
+        
+        // Fallback: try common spool directories
+        for dir in dirs {
+            let possible_path = format!("{}/{}.txt", dir, entry.id);
+            if Path::new(&possible_path).exists() {
+                if let Ok(content) = fs::read_to_string(&possible_path) {
+                    results.push((entry.clone(), content));
+                    break;
+                }
+            }
+        }
+    }
+    
+    results
+}
+
+/// Parse a paste from its .txt file format
+fn parse_paste_file(content: &str, path: &std::path::Path, dir: &str) -> Option<PasteIndex> {
+    use sha2::{Digest, Sha256};
+    use crate::tagging;
+    
+    let filename = path.file_name()?.to_string_lossy().to_string();
+    let id = filename.trim_end_matches(".txt");
+    
+    // Parse header fields
+    let mut title = String::new();
+    let mut keywords = Vec::new();
+    let mut cid = String::new();
+    let mut witness = String::new();
+    let mut reply_to = None;
+    let mut ipfs_cid = None;
+    let mut description = None;
+    let mut body_start = 0;
+    
+    for (i, line) in content.lines().enumerate() {
+        if line.is_empty() && i > 0 {
+            body_start = content.lines().take(i + 1).map(|l| l.len() + 1).sum();
+            break;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            let key = key.trim();
+            let value = value.trim();
+            match key {
+                "Title" => title = value.to_string(),
+                "Keywords" => keywords = value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>(),
+                "CID" => cid = value.to_string(),
+                "Witness" => witness = value.to_string(),
+                "IPFS" => ipfs_cid = Some(value.to_string()),
+                "Reply-To" => reply_to = Some(value.to_string()),
+                _ => {}
+            }
+        }
+    }
+    
+    let body = &content[body_start..];
+    
+    // Generate CID and witness if not present
+    let (cid, witness) = if cid.is_empty() || witness.is_empty() {
+        let mut hasher = Sha256::new();
+        hasher.update(body.as_bytes());
+        let hash = hasher.finalize();
+        let cid_val = format!("bafk{}", hex::encode(&hash[..16]));
+        let witness_val = hex::encode(&hash);
+        (cid_val, witness_val)
+    } else {
+        (cid, witness)
+    };
+    
+    // Auto-generate description and keywords if not present
+    let description = description.or_else(|| Some(tagging::auto_describe(body)));
+    let keywords = if keywords.is_empty() {
+        tagging::auto_tag(body)
+    } else {
+        keywords
+    };
+    
+    let ngrams = tagging::extract_ngrams(body, 2, 5);
+    
+    Some(PasteIndex {
+        id: id.to_string(),
+        title: if title.is_empty() { "untitled".to_string() } else { title },
+        description,
+        keywords,
+        cid,
+        witness,
+        timestamp: extract_timestamp(id, path, dir),
+        filename: filename.clone(),
+        ngrams,
+        ipfs_cid,
+        reply_to,
+        size: body.len(),
+        uucp_path: path.to_string_lossy().to_string(),
+    })
+}
+
+/// Extract timestamp from ID or file metadata
+fn extract_timestamp(id: &str, path: &std::path::Path, dir: &str) -> String {
+    // Try to extract from ID (format: YYYYMMDD_HHMMSS_slug)
+    if id.len() >= 15 {
+        let prefix = &id[..15];
+        if prefix.chars().take(8).all(|c| c.is_ascii_digit())
+            && prefix.chars().nth(8) == Some('_')
+            && prefix.chars().skip(9).take(6).all(|c| c.is_ascii_digit())
+        {
+            return prefix.to_string();
+        }
+    }
+    
+    // Fallback to modification time
+    if let Ok(metadata) = fs::metadata(path) {
+        if let Ok(modified) = metadata.modified() {
+            if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
+                let timestamp = chrono::DateTime::from_timestamp(duration.as_secs() as i64, 0);
+                if let Some(ts) = timestamp {
+                    return ts.format("%Y%m%d_%H%M%S").to_string();
+                }
+            }
+        }
+    }
+    
+    String::new()
+}
