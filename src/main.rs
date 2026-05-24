@@ -15,6 +15,7 @@ mod plugin;
 mod plugins;
 mod dasl;
 mod sheaf;
+mod car_index;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -33,11 +34,28 @@ async fn main() -> std::io::Result<()> {
     log::info!("🚀 Starting kant-pastebin microservice on {}", bind);
     log::info!("📁 UUCP spool: {}", uucp_dir);
     
+    // Initialize CAR file index (searches locate DB)
+    let car_index = std::sync::Arc::new(car_index::CarIndex::new());
+    {
+        let idx = car_index.clone();
+        actix_web::rt::spawn(async move {
+            log::info!("📂 Building CAR file index from locate DB...");
+            match idx.build(&[("mid", "MIDI"), ("puml", "PlantUML"), ("plantuml", "PlantUML")]) {
+                Ok(_) => log::info!("✅ CAR index built: {:?}", idx.stats()),
+                Err(e) => log::warn!("⚠️  CAR index build: {}", e),
+            }
+        });
+    }
+    
     // Initialize plugin registry
     let mut registry = plugin::PluginRegistry::new();
     registry.register(Box::new(plugins::screenshot::ScreenshotPlugin::new()));
     registry.register(Box::new(plugins::bkma::BkmaAnalyzerPlugin::new()));
+    registry.register(Box::new(plugins::tiles::TilesPlugin::new()));
+    registry.register(Box::new(plugins::midi::MidiPlugin::new(car_index.clone())));
+    registry.register(Box::new(plugins::plantuml::PlantUmlPlugin::new(car_index.clone())));
     let registry = web::Data::new(std::sync::Mutex::new(registry));
+    let car_index_data = web::Data::new(car_index);
     
     let openapi = ApiDoc::openapi();
     
@@ -73,6 +91,8 @@ async fn main() -> std::io::Result<()> {
             .route("/plugin/{name}/{id}", web::post().to(handlers::run_plugin))
             .route("/plugins", web::get().to(handlers::list_plugins))
             .route("/tiles", web::get().to(handlers::tiles_view))
+            .route("/car/midi", web::get().to(handlers::car_browse_midi))
+            .route("/car/plantuml", web::get().to(handlers::car_browse_plantuml))
             .route("/stego", web::get().to(handlers::stego_dashboard))
             .service(actix_files::Files::new("/stego/pkg", "erdfa-clean/wasm/pkg"))
             .service(actix_files::Files::new("/stego/samples", "erdfa-clean/wasm/samples"))

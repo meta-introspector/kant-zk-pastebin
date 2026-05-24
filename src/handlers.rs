@@ -1491,7 +1491,72 @@ mod tests {
 
 /// GET /tiles — DAG-CBOR spec tiles viewer
 /// Serves the interactive tiles HTML built from the coverage sheaf
+/// GET /car/midi — Browse MIDI files via CAR index
+pub async fn car_browse_midi(
+    query: web::Query<std::collections::HashMap<String, String>>,
+    registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>,
+) -> Result<HttpResponse> {
+    let action = query.get("action").map(|s| s.as_str()).unwrap_or("browse");
+    let page = query.get("page").map(|s| s.to_string()).unwrap_or_default();
+    let q = query.get("q").map(|s| s.to_string()).unwrap_or_default();
+    let path = query.get("path").map(|s| s.to_string()).unwrap_or_default();
+
+    let mut extra = std::collections::HashMap::new();
+    extra.insert("action".to_string(), action.to_string());
+    if !page.is_empty() { extra.insert("page".to_string(), page); }
+    if !q.is_empty() { extra.insert("q".to_string(), q); }
+    if !path.is_empty() { extra.insert("path".to_string(), path); }
+
+    let input = plugin::PluginInput {
+        id: "car-midi".to_string(),
+        content: Vec::new(),
+        mime: "text/html".to_string(),
+        url: String::new(),
+        extra,
+    };
+
+    match registry.lock().unwrap().execute("midi", &input) {
+        Ok(map) => {
+            let html = map.get("html").cloned().unwrap_or_else(|| "<p>No content</p>".to_string());
+            Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+        }
+        Err(e) => Ok(HttpResponse::InternalServerError().body(format!("<h1>Plugin error</h1><p>{}</p>", e))),
+    }
+}
+
+/// GET /car/plantuml — Browse PlantUML files via CAR index
+pub async fn car_browse_plantuml(
+    query: web::Query<std::collections::HashMap<String, String>>,
+    registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>,
+) -> Result<HttpResponse> {
+    let action = query.get("action").map(|s| s.as_str()).unwrap_or("browse");
+    let q = query.get("q").map(|s| s.to_string()).unwrap_or_default();
+    let path = query.get("path").map(|s| s.to_string()).unwrap_or_default();
+
+    let mut extra = std::collections::HashMap::new();
+    extra.insert("action".to_string(), action.to_string());
+    if !q.is_empty() { extra.insert("q".to_string(), q); }
+    if !path.is_empty() { extra.insert("path".to_string(), path); }
+
+    let input = plugin::PluginInput {
+        id: "car-plantuml".to_string(),
+        content: Vec::new(),
+        mime: "text/html".to_string(),
+        url: String::new(),
+        extra,
+    };
+
+    match registry.lock().unwrap().execute("plantuml", &input) {
+        Ok(map) => {
+            let html = map.get("html").cloned().unwrap_or_else(|| "<p>No content</p>".to_string());
+            Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+        }
+        Err(e) => Ok(HttpResponse::InternalServerError().body(format!("<h1>Plugin error</h1><p>{}</p>", e))),
+    }
+}
+
 pub async fn tiles_view() -> Result<HttpResponse> {
+    let tiles_path = env::var("DAGCBOR_TILES_PATH")
     let tiles_path = env::var("DAGCBOR_TILES_PATH")
         .unwrap_or_else(|_| "/mnt/data1/time-2026/02-february/22/dasl/dasl-testing/sheaf/tiles/dagcbor_tiles.html".to_string());
     
