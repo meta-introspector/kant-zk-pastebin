@@ -30,7 +30,8 @@
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = [ rustToolchain pkgs.pkg-config pkgs.openssl ];
+          buildInputs = [ rustToolchain pkgs.pkg-config pkgs.openssl pkgs.openssl.dev ];
+          PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
           shellHook = ''
             echo "Kant Pastebin dev shell"
             echo "  cargo build   — Build"

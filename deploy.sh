@@ -2,9 +2,9 @@
 set -e
 
 echo "=== Deploying Kant Pastebin ==="
-nix build 2>&1 || { echo "⚠️  nix build failed, trying cargo build..."; cargo build; }
+cargo build 2>&1
 
-STORE_PATH=$(readlink -f result 2>/dev/null || echo "./target/debug")
+STORE_PATH=$(echo "./target/debug")
 BINARY="$STORE_PATH/bin/kant-pastebin"
 [ -x "$BINARY" ] || BINARY="./target/debug/kant-pastebin"
 [ -x "$BINARY" ] || { echo "Binary not found at $BINARY"; exit 1; }
