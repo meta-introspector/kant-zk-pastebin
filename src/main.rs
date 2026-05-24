@@ -61,9 +61,6 @@ async fn main() -> std::io::Result<()> {
     registry.register(Box::new(plugins::tulip::TulipPlugin::new()));
     registry.register(Box::new(plugins::flamegraph::FlamegraphPlugin::new()));
     registry.register(Box::new(plugins::dasl_testing::DaslTestingPlugin::new()));
-    registry.register(Box::new(plugins::decl_tile::DeclTilePlugin::new()));
-    registry.register(Box::new(plugins::perf_annotations::PerfAnnotationsPlugin::new()));
-    registry.register(Box::new(plugins::plugin_browser::PluginBrowserPlugin::new()));
     registry.register(Box::new(plugins::zombie::ZombiePlugin::new()));
     registry.register(Box::new(plugins::zos::ZosPlugin::new()));
     registry.register(Box::new(plugins::deep_scan::DeepScanPlugin::new()));
@@ -71,9 +68,7 @@ async fn main() -> std::io::Result<()> {
     registry.register(Box::new(plugins::cargo_tile::CargoTilePlugin::new()));
     registry.register(Box::new(plugins::nix_tile::NixTilePlugin::new()));
     registry.register(Box::new(plugins::data_tiles::DataTilesPlugin::new()));
-    registry.register(Box::new(plugins::dasl_decode_finder::DaslDecodeFinderPlugin::new()));
-    registry.register(Box::new(plugins::testing_tile_matrix::TestingTileMatrixPlugin::new()));
-    registry.register(Box::new(plugins::plocate_search::PlocateSearchPlugin::new()));
+    registry.register(Box::new(plugins::decl_patterns_analyzer::DeclPatternsAnalyzerPlugin::new()));
     let registry = web::Data::new(std::sync::Mutex::new(registry));
     let car_index_data = web::Data::new(car_index);
     
