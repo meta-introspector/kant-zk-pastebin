@@ -1,6 +1,8 @@
 .PHONY: build deploy check test test-extended test-all deps update-lock \
         test-js test-html test-generators test-comprehensive test-plugins \
-        test-report test-all-coverage help
+        test-report test-all-coverage tiles deploy-tiles help
+
+DASL_TESTING := /mnt/data1/time-2026/02-february/22/dasl/dasl-testing
 
 help:
 	@echo "Kant Pastebin - Test Suite"
@@ -40,6 +42,15 @@ update-lock:
 
 deploy: build
 	bash deploy.sh
+
+tiles:
+	@echo "=== Building DAG-CBOR spec tiles ==="
+	cd $(DASL_TESTING) && python3 sheaf/tiles/build_tiles.py
+
+deploy-tiles: tiles
+	@echo "=== Deploying tiles to pastebin ==="
+	cp $(DASL_TESTING)/sheaf/tiles/dagcbor_tiles.html static/
+	@echo "✅ Tiles deployed to static/dagcbor_tiles.html"
 
 check:
 	nix develop --command cargo check

@@ -28,6 +28,7 @@ Environment="BASE_PATH=/pastebin"
 Environment="BASE_URL=${KANT_BASE_URL:-https://solana.solfunmeme.com}"
 Environment="NFT_DIR=/mnt/data1/time-2026/03-march/13/nft_enriched"
 Environment="ENRICH_PIPELINE=/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh"
+Environment="DAGCBOR_TILES_PATH=/mnt/data1/time-2026/02-february/22/dasl/dasl-testing/sheaf/tiles/dagcbor_tiles.html"
 Environment="RUST_LOG=info"
 Environment="PATH=$(dirname $(which ipfs 2>/dev/null || echo /usr/bin/ipfs)):/usr/local/bin:/usr/bin:/bin"
 

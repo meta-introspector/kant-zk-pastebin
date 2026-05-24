@@ -9,6 +9,9 @@
       url = "path:/home/mdupont/nix-common";
     };
 
+    # Cargo2nix for vendored dependencies
+    cargo2nix.url = "github:cargo2nix/cargo2nix";
+
     # Pastebin submodules (not in shared flake or different refs)
     erdfa-canonical-local = { url = "path:/mnt/data1/kant/pastebin/erdfa-canonical"; flake = false; };
     erdfa-clean-local = { url = "path:/mnt/data1/kant/pastebin/erdfa-clean"; flake = false; };
@@ -23,13 +26,24 @@
     zos-pastebin = { url = "path:/mnt/data1/kant/pastebin/plugins/zos-pastebin"; flake = false; };
   };
 
-  outputs = { self, nixpkgs, common-inputs,
+  outputs = { self, nixpkgs, common-inputs, cargo2nix,
     erdfa-canonical-local, erdfa-clean-local,
     html5ever-local, oxc-local, zos-circuit-local, zkperf-local,
     erdfa-dasl, erdfa-sheaf, zos-pastebin }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       inherit (common-inputs) rust-ipfs erdfa-publish;
+      cargo2nixPkgs = cargo2nix.packages.x86_64-linux;
+
+      # Import vendored crate configurations
+      vendoredCrates = builtins.listToAttrs (map (crateName: {
+        name = crateName;
+        value = import ./vendor-cargo2nix/${crateName}.nix {
+          mkRustCrate = cargo2nixPkgs.mkRustCrate;
+          fetchFromGitHub = pkgs.fetchFromGitHub;
+          lib = pkgs.lib;
+        };
+      }) (builtins.attrNames (builtins.readDir ./vendor-cargo2nix)));
 
       makePatchedSrc = pkgs: pkgs.runCommand "kant-pastebin-src" {} ''
         # Copy root level files, excluding .git and target
@@ -79,25 +93,67 @@
     {
       packages = nixpkgs.lib.genAttrs systems (system:
         let pkgs = nixpkgs.legacyPackages.${system}; in {
+          # Legacy build (original)
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "kant-pastebin";
             version = "0.1.0";
             src = makePatchedSrc pkgs;
             cargoVendorDir = "${self}/vendor";
-            nativeBuildInputs = [ pkgs.pkg-config pkgs.wasm-pack pkgs.git ];
+            nativeBuildInputs = [ pkgs.pkg-config pkgs.wasm-pack pkasg.git ];
             buildInputs = [ pkgs.openssl ];
           };
+
+          # DAG-CBOR spec tiles (built from dasl-testing coverage sheaf)
+          dagcbor-tiles = pkgs.stdenvNoCC.mkDerivation {
+            name = "dagcbor-tiles";
+            src = /mnt/data1/time-2026/02-february/22/dasl/dasl-testing/sheaf/tiles;
+            dontBuild = true;
+            installPhase = ''
+              mkdir -p $out
+              cp dagcbor_tiles.html $out/
+            '';
+          };
+
+          # New cargo2nix build with vendored dependencies
+          kant-pastebin-cargo2nix = cargo2nixPkgs.mkRustCrate {
+            name = "kant-pastebin";
+            version = "0.1.0";
+            src = makePatchedSrc pkgs;
+            buildInputs = [ pkgs.openssl ];
+            dependencies = {
+              inherit (vendoredCrates) serde tokio actix-web clap;
+            };
+          };
+
+          # Vendored crates individually
+          vendored-crates = vendoredCrates;
         }
       );
 
       devShells = nixpkgs.lib.genAttrs systems (system:
         let pkgs = nixpkgs.legacyPackages.${system}; in {
           default = pkgs.mkShell {
-            buildInputs = with pkgs; [ cargo rustc rust-analyzer rustfmt clippy pkg-config openssl nodejs chromium wasm-pack ];
-            shellHook = "export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium";
+            buildInputs = with pkgs; [ 
+              cargo2nixPkgs.cargo
+              cargo2nixPkgs.rustc
+              cargo rustc rust-analyzer rustfmt clippy pkg-config openssl nodejs chromium wasm-pack cargo-audit
+            ];
+            shellHook = ''
+              echo "Kant Pastebin Development Environment"
+              echo "Vendored crates: $(ls vendor-cargo2nix/ | wc -l) crates"
+              echo "Available commands:"
+              echo "  cargo build          - Build the project"
+              echo "  cargo test          - Run tests"
+              echo "  cargo check         - Check for errors"
+              echo "  cargo audit         - Security audit"
+              echo "  nix develop         - Enter development shell"
+            '';
           };
         }
       );
+
+      # Vendored crates flake
+      vendored = import ./flake-vendor-unified.nix;
 
       formatter = nixpkgs.lib.genAttrs systems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
     };

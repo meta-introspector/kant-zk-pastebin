@@ -310,9 +310,9 @@ pub fn url(base: &str, path: &str) -> String {
 #[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 100)]
 pub fn nav_bar(base: &str) -> Vec<W> {
     vec![W::Raw(format!(
-        r#"<a href="{}">🏠 Home</a> <a href="{}">📚 Browse</a> <a href="{}">🖼️ Gallery</a> <a href="{}">✂️ Splitter</a> <a href="{}">🔐 Stego</a> <a href="{}">📖 API</a>"#,
+        r#"<a href="{}">🏠 Home</a> <a href="{}">📚 Browse</a> <a href="{}">🖼️ Gallery</a> <a href="{}">✂️ Splitter</a> <a href="{}">🔐 Stego</a> <a href="{}">🧩 Tiles</a> <a href="{}">📖 API</a>"#,
         url(base, "/"), url(base, "/browse"), url(base, "/gallery"),
-        url(base, "/splitter"), url(base, "/stego"), url(base, "/openapi.json"),
+        url(base, "/splitter"), url(base, "/stego"), url(base, "/tiles"), url(base, "/openapi.json"),
     ))]
 }
 

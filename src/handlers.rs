@@ -1,21 +1,17 @@
 // Handlers - Request handlers for kant-pastebin microservice
 use crate::model::{Paste, PasteIndex, Response};
-use crate::{ipfs, plugin, storage, tagging, view};
+use crate::{ipfs, plugin, search, storage, tagging, view};
 use actix_web::{web, HttpResponse, Result};
 use chrono::Utc;
 use zos_circuit_optimizer as circuit;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 use std::sync::Mutex;
 use std::{env, fs};
-
-static BROWSE_CACHE: Mutex<Option<BrowseCache>> = Mutex::new(None);
-
-struct BrowseCache {
-    pages: HashMap<usize, String>,
-    total: usize,
-    index_mtime: std::time::SystemTime,
-}
+use toml::Value;
 
 struct AccessCommands {
     ipfs: String,
@@ -109,16 +105,25 @@ pub async fn index(
         r#"<form id="form">
 <input type="text" id="title" placeholder="Title"><br><br>
 <textarea id="content" placeholder="Paste content here..." style="width:100%;height:300px">{body}</textarea><br><br>
-<input type="file" id="file" accept="image/*,audio/*,.html,.json,.svg,.midi,.mid,.wav,.ly"><br><br>
+<input type="file" id="file" accept="image/*,audio/*,.html,.json,.svg,.midi,.mid,.wav,.ly,.txt,.csv,.xml,.yaml,.yml,.toml,.rs,.py,.js,.ts,.md,.pdf,.zip,.cbor,.bin,.dat,.log,.env,.sh,.bash,.zsh"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
 <input type="hidden" id="reply_to" value="{reply_to}">
 <button type="submit">📤 Share</button>
 <button type="button" onclick="preview()">👁️ Preview</button>
 <button type="button" onclick="sendToSplitter()">✂️ Split</button>
 </form>
-<div id="result"></div>"#
-    )));
-    p.js_var("basePath", bp);
+<div id="result"></div>
+
+<div style="margin-top:20px;padding:15px;background:#111;border:1px solid #333;border-radius:5px">
+<h3 style="color:#0ff;margin-bottom:10px">🔍 Quick Search</h3>
+<form method="get" action="{}/browse" style="display:flex;gap:10px;align-items:center">
+<input type="text" name="q" placeholder="Search pastes..." style="flex:1;padding:8px;background:#0a0a0a;border:1px solid #0f0;color:#0f0">
+<button type="submit" style="padding:8px 16px;background:#0f0;color:#000;border:none;border-radius:3px;cursor:pointer">🔍 Search</button>
+</form>
+<p style="color:#666;font-size:12px;margin-top:10px">Or browse all <a href="{}/browse">pastes</a></p>
+</div>"#,
+        bp, bp
+    ))));
     p.js(INDEX_JS);
 
     Ok(HttpResponse::Ok()
@@ -193,6 +198,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     let witness = hex::encode(&hash);
 
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let old_spool = "/mnt/data1/spool/uucp/pastebin".to_string();
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
 
     if std::path::Path::new(&cid_file).exists() {
@@ -478,6 +484,107 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
     }
 }
 
+/// GET /file/{id}/source - View file as text paste
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 480)]
+pub async fn get_file_source(path: web::Path<String>) -> Result<HttpResponse> {
+    let id = path.into_inner();
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let base_path = env::var("BASE_PATH").unwrap_or_default();
+
+    // Find file with any extension matching the id
+    let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
+        entries.filter_map(|e| e.ok()).find(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+            stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
+        })
+    });
+
+    match file {
+        Some(entry) => {
+            let data = fs::read_to_string(entry.path())
+                .map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
+            
+            let mut p = view::Page::new("File Source");
+            for w in view::nav_bar(&base_path) { p.nav(w); }
+            p.nav(view::W::Link { label: "📄 Raw".into(), href: view::url(&base_path, &format!("/file/{}", id)) });
+            p.content(view::W::Raw(format!(
+                r#"<h2>Source View: {}</h2>
+<div style="background:#0a0a0a;color:#0f0;padding:15px;border:1px solid #333;white-space:pre-wrap;word-wrap:break-word;font-family:monospace">
+{}"#,
+                entry.file_name().to_string_lossy(), data
+            )));
+            p.cmd(view::W::Cmd { text: format!("cat {}", entry.path().display()) });
+            
+            Ok(HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(p.render()))
+        }
+        None => Ok(HttpResponse::NotFound().body("File not found")),
+    }
+}
+
+/// GET /file/{id}/raw - View file with different codecs
+#[zkperf_macros::witness_boundary(complexity = "K0:scalar", max_n = 1, max_ms = 480)]
+pub async fn get_file_raw(
+    path: web::Path<String>,
+    query: web::Query<std::collections::HashMap<String, String>>
+) -> Result<HttpResponse> {
+    let id = path.into_inner();
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let format = query.get("format").map(|s| s.as_str()).unwrap_or("raw");
+
+    // Find file with any extension matching the id
+    let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
+        entries.filter_map(|e| e.ok()).find(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+            stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
+        })
+    });
+
+    match file {
+        Some(entry) => {
+            let data = fs::read(entry.path())
+                .map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
+            
+            let (content, content_type) = match format {
+                "base64" => (base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data), "text/plain"),
+                "hex" => (hex::encode(&data), "text/plain"),
+                "cbor" => {
+                    // Try to parse as CBOR and re-serialize
+                    match serde_cbor::from_slice::<serde_cbor::Value>(&data) {
+                        Ok(val) => {
+                            let mut buf = Vec::new();
+                            serde_cbor::to_writer(&mut buf, &val).unwrap();
+                            let encoded = hex::encode(&buf);
+                            (encoded, "application/cbor")
+                        }
+                        Err(_) => (hex::encode(&data), "text/plain")
+                    }
+                }
+                "json" => {
+                    match std::str::from_utf8(&data) {
+                        Ok(s) => {
+                            match serde_json::from_str::<serde_json::Value>(s) {
+                                Ok(val) => (serde_json::to_string_pretty(&val).unwrap(), "application/json"),
+                                Err(_) => (s.to_string(), "text/plain")
+                            }
+                        }
+                        Err(_) => (hex::encode(&data), "text/plain")
+                    }
+                }
+                _ => (String::from_utf8_lossy(&data).to_string(), "application/octet-stream"),
+            };
+
+            Ok(HttpResponse::Ok()
+                .content_type(content_type)
+                .body(content))
+        }
+        None => Ok(HttpResponse::NotFound().body("File not found")),
+    }
+}
+
 /// GET /paste/{id} - View paste
 #[utoipa::path(
     get,
@@ -734,6 +841,8 @@ async function playMidi(){{
             let mut p = view::Page::new(&title);
             for w in view::nav_bar(&base_path) { p.nav(w); }
             p.nav(view::W::Link { label: "📄 Raw".into(), href: view::url(&base_path, &format!("/file/{}", id)) });
+            p.nav(view::W::Link { label: "📝 Source".into(), href: view::url(&base_path, &format!("/file/{}/source", id)) });
+            p.nav(view::W::Link { label: "🔧 Format".into(), href: view::url(&base_path, &format!("/file/{}/raw?format=base64", id)) });
             p.content(view::W::Raw(format!("<p>CID: {} | IPFS: {}</p>", cid, ipfs_cid)));
             p.content(view::W::Raw(content_html));
             let html = p.render();
@@ -901,40 +1010,25 @@ pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
 pub async fn browse(
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponse> {
-    let uucp_dir =
-        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let base_path = env::var("BASE_PATH").unwrap_or_default();
     let bp = &base_path;
-    let index_file = format!("{}/index.jsonl", uucp_dir);
 
     let search = query.get("q").map(|s| s.to_lowercase());
     let page: usize = query.get("page").and_then(|p| p.parse().ok()).unwrap_or(1).max(1);
     const PAGE_SIZE: usize = 50;
 
-    // If no search, try cache
-    if search.is_none() {
-        let mtime = fs::metadata(&index_file).ok().and_then(|m| m.modified().ok());
-        let mut cache = BROWSE_CACHE.lock().unwrap();
-        if let (Some(ref c), Some(mt)) = (&*cache, mtime) {
-            if c.index_mtime == mt {
-                if let Some(html) = c.pages.get(&page) {
-                    return Ok(HttpResponse::Ok()
-                        .content_type("text/html; charset=utf-8")
-                        .body(html.clone()));
-                }
-            } else {
-                *cache = None; // invalidate
-            }
-        }
-    }
-
-    let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
+    // Load search directories
+    let search_dirs = load_search_dirs();
+    
+    // Load entries from all directories
+    let entries = load_paste_entries_from_dirs(&search_dirs);
+    
+    // Filter by search query
+    let filtered_entries: Vec<_> = entries.iter()
         .filter(|entry| {
             if let Some(ref q) = search {
                 entry.title.to_lowercase().contains(q)
+                    || entry.description.as_deref().unwrap_or("").to_lowercase().contains(q)
                     || entry.keywords.iter().any(|k| k.to_lowercase().contains(q))
             } else {
                 true
@@ -942,14 +1036,14 @@ pub async fn browse(
         })
         .collect();
 
-    let total = entries.len();
+    let total = filtered_entries.len();
     let total_pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
     let search_val = search.as_deref().unwrap_or("");
     let q_param = if search_val.is_empty() { String::new() } else { format!("&q={}", search_val) };
 
-    let items: String = entries.iter().rev()
+    let items: String = filtered_entries.iter()
+        .rev()
         .skip((page - 1) * PAGE_SIZE)
-        .take(PAGE_SIZE)
         .map(|e| {
             let display_title = if e.title == "untitled" || e.title.is_empty() {
                 e.description.as_deref().unwrap_or("untitled")
@@ -979,17 +1073,6 @@ pub async fn browse(
     )));
 
     let html = p.render();
-
-    // Cache non-search pages
-    if search.is_none() {
-        if let Some(mtime) = fs::metadata(&index_file).ok().and_then(|m| m.modified().ok()) {
-            let mut cache = BROWSE_CACHE.lock().unwrap();
-            let c = cache.get_or_insert_with(|| BrowseCache {
-                pages: HashMap::new(), total, index_mtime: mtime,
-            });
-            c.pages.insert(page, html.clone());
-        }
-    }
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -1406,7 +1489,23 @@ mod tests {
         .unwrap();
     }
 
-    #[actix_web::test]
+/// GET /tiles — DAG-CBOR spec tiles viewer
+/// Serves the interactive tiles HTML built from the coverage sheaf
+pub async fn tiles_view() -> Result<HttpResponse> {
+    let tiles_path = env::var("DAGCBOR_TILES_PATH")
+        .unwrap_or_else(|_| "/mnt/data1/time-2026/02-february/22/dasl/dasl-testing/sheaf/tiles/dagcbor_tiles.html".to_string());
+    
+    match tokio::fs::read_to_string(&tiles_path).await {
+        Ok(html) => Ok(HttpResponse::Ok()
+            .content_type("text/html; charset=utf-8")
+            .body(html)),
+        Err(e) => Ok(HttpResponse::NotFound()
+            .content_type("text/html; charset=utf-8")
+            .body(format!("<h1>Tiles not found</h1><p>Build them first: <code>make tiles</code></p><p>Error: {}</p>", e))),
+    }
+}
+
+#[actix_web::test]
     async fn get_paste_uses_forwarded_origin_for_access_commands() {
         let _guard = env_lock().lock().unwrap();
         let spool = temp_spool();
