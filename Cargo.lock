@@ -1595,8 +1595,6 @@ dependencies = [
  "log",
  "multibase",
  "parquet",
- "proc-macro2",
- "quote",
  "rayon",
  "rust-unixfs",
  "serde",
@@ -1604,7 +1602,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.10.9",
- "syn 2.0.117",
  "toml",
  "ureq",
 ]

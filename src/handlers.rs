@@ -26,6 +26,8 @@ pub(crate) fn detect_tile_type(title: &str, mime: &str, content: &str) -> &'stat
     if lower.ends_with(".mzn") { return "minizinc"; }
     if lower.ends_with(".lean") { return "lean"; }
     if lower.ends_with(".tlp") { return "tulip"; }
+    if lower.ends_with(".so") || lower.ends_with(".elf") { return "zos"; }
+    if lower.ends_with(".rs") { return "zombie"; }
     // Check by content patterns
     let trimmed = content.trim();
     if trimmed.starts_with("@startuml") || trimmed.starts_with("@startdot") { return "plantuml"; }

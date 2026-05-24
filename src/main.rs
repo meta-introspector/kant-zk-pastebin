@@ -61,6 +61,12 @@ async fn main() -> std::io::Result<()> {
     registry.register(Box::new(plugins::tulip::TulipPlugin::new()));
     registry.register(Box::new(plugins::flamegraph::FlamegraphPlugin::new()));
     registry.register(Box::new(plugins::dasl_testing::DaslTestingPlugin::new()));
+    registry.register(Box::new(plugins::decl_tile::DeclTilePlugin::new()));
+    registry.register(Box::new(plugins::perf_annotations::PerfAnnotationsPlugin::new()));
+    registry.register(Box::new(plugins::plugin_browser::PluginBrowserPlugin::new()));
+    registry.register(Box::new(plugins::zombie::ZombiePlugin::new()));
+    registry.register(Box::new(plugins::zos::ZosPlugin::new()));
+    registry.register(Box::new(plugins::dasl_decode_finder::DaslDecodeFinderPlugin::new()));
     let registry = web::Data::new(std::sync::Mutex::new(registry));
     let car_index_data = web::Data::new(car_index);
     
