@@ -18,5 +18,7 @@ pub mod deep_scan;
 pub mod git_tile;
 pub mod cargo_tile;
 pub mod nix_tile;
+pub mod data_tiles;
 pub mod testing_tile_matrix;
 pub mod dasl_decode_finder;
+pub mod plocate_search;

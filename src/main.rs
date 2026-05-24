@@ -70,8 +70,10 @@ async fn main() -> std::io::Result<()> {
     registry.register(Box::new(plugins::git_tile::GitTilePlugin::new()));
     registry.register(Box::new(plugins::cargo_tile::CargoTilePlugin::new()));
     registry.register(Box::new(plugins::nix_tile::NixTilePlugin::new()));
+    registry.register(Box::new(plugins::data_tiles::DataTilesPlugin::new()));
     registry.register(Box::new(plugins::dasl_decode_finder::DaslDecodeFinderPlugin::new()));
     registry.register(Box::new(plugins::testing_tile_matrix::TestingTileMatrixPlugin::new()));
+    registry.register(Box::new(plugins::plocate_search::PlocateSearchPlugin::new()));
     let registry = web::Data::new(std::sync::Mutex::new(registry));
     let car_index_data = web::Data::new(car_index);
     

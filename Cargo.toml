@@ -25,7 +25,6 @@ members = [
     "plugins/oxc/crates/oxc_str",
     "plugins/oxc/crates/oxc_syntax",
 ]
-exclude = []
 
 [patch."https://github.com/meta-introspector/erdfa-dasl"]
 erdfa-dasl = { path = "plugins/erdfa-dasl" }
