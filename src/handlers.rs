@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 /// Detect tile type from content (auto-compose tile detection)
-fn detect_tile_type(title: &str, mime: &str, content: &str) -> &'static str {
+pub(crate) fn detect_tile_type(title: &str, mime: &str, content: &str) -> &'static str {
     // Check by MIME first
     match mime {
         "text/vnd.plantuml" | "application/x-plantuml" => return "plantuml",
@@ -37,7 +37,7 @@ fn detect_tile_type(title: &str, mime: &str, content: &str) -> &'static str {
 }
 
 /// Render an interactive tile for a given tile type and content
-fn render_tile_html(tile_type: &str, content: &str, file_url: &str, title: &str) -> String {
+pub(crate) fn render_tile_html(tile_type: &str, content: &str, file_url: &str, title: &str) -> String {
     let escaped = content.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
     match tile_type {
         "plantuml" => format!(

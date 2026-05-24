@@ -12,3 +12,4 @@ pub mod plugins;
 pub mod dasl;
 pub mod sheaf;
 pub mod car_index;
+pub mod tile_test;
