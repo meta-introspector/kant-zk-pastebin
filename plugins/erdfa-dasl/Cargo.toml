@@ -1,0 +1,9 @@
+[package]
+name = "erdfa-dasl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sha2 = "0.10"
+zkperf-macros = { path = "../../zkperf/zkperf-macros" }
+zkperf-witness = { path = "../../zkperf/zkperf-witness" }
