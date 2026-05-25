@@ -15,9 +15,12 @@
     zos-circuit-tile = {
       url = "path:./tiles/zos-circuit-tile";
     };
+    org-tile = {
+      url = "path:./tiles/org-tile";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, zos-circuit-tile }:
+  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, zos-circuit-tile, org-tile }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -39,7 +42,7 @@
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.openssl ];
-            TILES_DIR = "${zos-circuit-tile.packages.${system}.default}/lib";
+            TILES_DIR = "${zos-circuit-tile.packages.${system}.default}/lib:${org-tile.packages.${system}.default}/lib";
           };
 
           index-docs = pkgs.writeShellScriptBin "kant-index-docs" ''

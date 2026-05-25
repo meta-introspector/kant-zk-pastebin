@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "erdfa-dasl-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779718144,
+        "narHash": "sha256-TQnx6bIn30unw1RDrQXvtWkgQGJ5lGcJ6RvP2miGdeI=",
+        "ref": "refs/heads/main",
+        "rev": "1aa2574e94b0869b1f4c4592e89f9bca9cb1a95e",
+        "revCount": 1,
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/erdfa-dasl.git"
+      },
+      "original": {
+        "rev": "1aa2574e94b0869b1f4c4592e89f9bca9cb1a95e",
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/erdfa-dasl.git"
+      }
+    },
     "erdfa-publish-src": {
       "flake": false,
       "locked": {
@@ -34,6 +51,42 @@
         "type": "github"
       }
     },
+    "flake-utils_2": {
+      "inputs": {
+        "systems": "systems_2"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "flake-utils_3": {
+      "inputs": {
+        "systems": "systems_3"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1773389992,
@@ -50,12 +103,61 @@
         "type": "github"
       }
     },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1779560665,
+        "narHash": "sha256-tpyBcxPpcQb8ukyNF7DoCwfSY3VPsxHoYwj00Cayv5o=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "64c08a7ca051951c8eae34e3e3cb1e202fe36786",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_3": {
+      "locked": {
+        "lastModified": 1779560665,
+        "narHash": "sha256-tpyBcxPpcQb8ukyNF7DoCwfSY3VPsxHoYwj00Cayv5o=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "64c08a7ca051951c8eae34e3e3cb1e202fe36786",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "org-tile": {
+      "inputs": {
+        "flake-utils": "flake-utils_2",
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "path": "./tiles/org-tile",
+        "type": "path"
+      },
+      "original": {
+        "path": "./tiles/org-tile",
+        "type": "path"
+      },
+      "parent": []
+    },
     "root": {
       "inputs": {
         "erdfa-publish-src": "erdfa-publish-src",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
-        "rust-ipfs": "rust-ipfs"
+        "org-tile": "org-tile",
+        "rust-ipfs": "rust-ipfs",
+        "zos-circuit-tile": "zos-circuit-tile"
       }
     },
     "rust-ipfs": {
@@ -74,6 +176,27 @@
         "type": "github"
       }
     },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "zos-circuit-tile",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1779679233,
+        "narHash": "sha256-qSIAAfK66X6waos6alIYxVze1ZU3C/WPp7NlN4ooP54=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "47ab6c7b3c6a68beac60067490240efa32ae344c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
     "systems": {
       "locked": {
         "lastModified": 1681028828,
@@ -88,6 +211,89 @@
         "repo": "default",
         "type": "github"
       }
+    },
+    "systems_2": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "systems_3": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "zkperf-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776507153,
+        "narHash": "sha256-92sOXdZmrawXxWnwmk+HOL0CEHDL13PGvIJtwuCcM3E=",
+        "ref": "refs/heads/main",
+        "rev": "4346b6e28b1ca4a6a51a30f2d386d09dd2638c33",
+        "revCount": 119,
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/zkperf.git"
+      },
+      "original": {
+        "rev": "4346b6e28b1ca4a6a51a30f2d386d09dd2638c33",
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/zkperf.git"
+      }
+    },
+    "zos-circuit-optimizer-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779719988,
+        "narHash": "sha256-0G59ZYiDzcgbrPrlo08ELWJ0Y34Gq90isbKvWnsm0Y8=",
+        "ref": "refs/heads/main",
+        "rev": "3f66f4d096788869abc18d7bc5c79cb6669a93f8",
+        "revCount": 6,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git"
+      },
+      "original": {
+        "rev": "3f66f4d096788869abc18d7bc5c79cb6669a93f8",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git"
+      }
+    },
+    "zos-circuit-tile": {
+      "inputs": {
+        "erdfa-dasl-src": "erdfa-dasl-src",
+        "flake-utils": "flake-utils_3",
+        "nixpkgs": "nixpkgs_3",
+        "rust-overlay": "rust-overlay",
+        "zkperf-src": "zkperf-src",
+        "zos-circuit-optimizer-src": "zos-circuit-optimizer-src"
+      },
+      "locked": {
+        "path": "./tiles/zos-circuit-tile",
+        "type": "path"
+      },
+      "original": {
+        "path": "./tiles/zos-circuit-tile",
+        "type": "path"
+      },
+      "parent": []
     }
   },
   "root": "root",

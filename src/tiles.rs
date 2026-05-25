@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Expected C-ABI symbols in each tile .so
-pub(crate) const TILE_PING_SYMBOL: &str = "zos_circuit_tile_ping";
-pub(crate) const TILE_RENDER_SYMBOL: &str = "render_zos_circuit";
-pub(crate) const TILE_FREE_SYMBOL: &str = "free_zos_circuit_result";
+pub(crate) const TILE_PING_SYMBOL: &str = "tile_ping";
+pub(crate) const TILE_RENDER_SYMBOL: &str = "tile_render";
+pub(crate) const TILE_FREE_SYMBOL: &str = "tile_free_result";
 
 /// Holds a loaded .so library and its known extern symbols.
 pub(crate) struct LoadedTile {
@@ -56,7 +56,7 @@ impl LoadedTile {
 
 /// A Plugin wrapper around a loaded .so tile.
 pub(crate) struct TilePlugin {
-    tile: Arc<LoadedTile>,
+    tile: LoadedTile,
     lib: Arc<Library>,
     version_str: String,
 }
@@ -74,7 +74,7 @@ impl TilePlugin {
 
 impl Plugin for TilePlugin {
     fn name(&self) -> &str {
-        &self.tile.name
+        self.tile.name()
     }
 
     fn version(&self) -> &str {
@@ -153,7 +153,23 @@ impl Plugin for TilePlugin {
 
 /// Discover and load all tile .so files from a directory.
 /// Each file matching `lib*.so` is tried as a tile.
-pub(crate) fn discover_tiles(tiles_dir: &Path) -> Vec<LoadedTile> {
+/// Discover and load all tile .so files from a colon-separated list of directories.
+/// Each directory is scanned for `lib*.so` files.
+pub(crate) fn discover_tiles(tiles_dir: &str) -> Vec<LoadedTile> {
+    let mut tiles = Vec::new();
+    for dir in tiles_dir.split(':') {
+        let path = Path::new(dir);
+        if dir.trim().is_empty() {
+            continue;
+        }
+        log::info!("Scanning tile dir: {}", path.display());
+        tiles.extend(discover_tiles_in(path));
+    }
+    tiles
+}
+
+/// Discover and load all tile .so files from a single directory.
+fn discover_tiles_in(tiles_dir: &Path) -> Vec<LoadedTile> {
     let mut tiles = Vec::new();
 
     if !tiles_dir.is_dir() {

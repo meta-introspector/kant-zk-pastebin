@@ -20,7 +20,7 @@ fn coords_in_regs(data: &[u8]) -> [u64; 8] {
 /// Accepts: {"input": "...byte content"}
 /// Returns JSON: {"steps": [...], "cost": N, "optimized_steps": N}
 #[no_mangle]
-pub extern "C" fn render_zos_circuit(input: *const c_char) -> *mut c_char {
+pub extern "C" fn tile_render(input: *const c_char) -> *mut c_char {
     let input_str = if input.is_null() {
         "{}"
     } else {
@@ -66,7 +66,7 @@ pub extern "C" fn render_zos_circuit(input: *const c_char) -> *mut c_char {
 
 /// Free memory allocated by `render_zos_circuit`.
 #[no_mangle]
-pub extern "C" fn free_zos_circuit_result(ptr: *mut c_char) {
+pub extern "C" fn tile_free_result(ptr: *mut c_char) {
     if !ptr.is_null() {
         unsafe { drop(CString::from_raw(ptr)); }
     }
@@ -78,6 +78,6 @@ pub static zos_circuit_tile_version: [u8; 4] = [0, 1, 0, 0];
 
 /// Test helper: simple ping to verify the tile loads correctly.
 #[no_mangle]
-pub extern "C" fn zos_circuit_tile_ping() -> i32 {
+pub extern "C" fn tile_ping() -> i32 {
     1
 }

@@ -1,7 +1,6 @@
 use actix_web::{web, App, HttpServer};
 use actix_cors::Cors;
 use std::env;
-use std::path::Path;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -42,8 +41,8 @@ async fn main() -> std::io::Result<()> {
     // Discover and register tile plugins from TILES_DIR
     let tiles_dir = env::var("TILES_DIR").unwrap_or_default();
     if !tiles_dir.is_empty() {
-        let tile_path = Path::new(&tiles_dir);
-        for loaded in tiles::discover_tiles(tile_path) {
+        let loaded_tiles = tiles::discover_tiles(&tiles_dir);
+        for loaded in loaded_tiles {
             log::info!("Registering tile plugin: {}", loaded.name());
             let plugin = tiles::TilePlugin::new(loaded);
             registry.register(Box::new(plugin));
