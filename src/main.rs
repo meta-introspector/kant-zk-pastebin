@@ -1,6 +1,7 @@
 use actix_web::{web, App, HttpServer};
 use actix_cors::Cors;
 use std::env;
+use std::path::Path;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -13,6 +14,7 @@ mod ipfs;
 mod tagging;
 mod plugin;
 mod plugins;
+mod tiles;
 mod dasl;
 mod sheaf;
 
@@ -36,6 +38,21 @@ async fn main() -> std::io::Result<()> {
     // Initialize plugin registry
     let mut registry = plugin::PluginRegistry::new();
     registry.register(Box::new(plugins::screenshot::ScreenshotPlugin::new()));
+
+    // Discover and register tile plugins from TILES_DIR
+    let tiles_dir = env::var("TILES_DIR").unwrap_or_default();
+    if !tiles_dir.is_empty() {
+        let tile_path = Path::new(&tiles_dir);
+        for loaded in tiles::discover_tiles(tile_path) {
+            log::info!("Registering tile plugin: {}", loaded.name());
+            let plugin = tiles::TilePlugin::new(loaded);
+            registry.register(Box::new(plugin));
+        }
+        log::info!("Tile plugin discovery complete");
+    } else {
+        log::warn!("TILES_DIR not set — no tile plugins loaded");
+    }
+
     let registry = web::Data::new(std::sync::Mutex::new(registry));
     
     let openapi = ApiDoc::openapi();

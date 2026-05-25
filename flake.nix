@@ -12,9 +12,12 @@
       url = "github:meta-introspector/erdfa-publish";
       flake = false;
     };
+    zos-circuit-tile = {
+      url = "path:./tiles/zos-circuit-tile";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src }:
+  outputs = { self, nixpkgs, flake-utils, rust-ipfs, erdfa-publish-src, zos-circuit-tile }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -36,6 +39,7 @@
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.openssl ];
+            TILES_DIR = "${zos-circuit-tile.packages.${system}.default}/lib";
           };
 
           index-docs = pkgs.writeShellScriptBin "kant-index-docs" ''
