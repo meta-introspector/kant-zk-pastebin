@@ -1,5 +1,56 @@
 {
   "nodes": {
+    "crate2nix": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1774369503,
+        "narHash": "sha256-YeCF4iBhlvTqkn4mihjZgixnDcEVgfyQlNeBsbLYUgQ=",
+        "rev": "b873ca53dd64e12340416f0fd5e3b33792b9c17b",
+        "revCount": 1452,
+        "submodules": true,
+        "type": "git",
+        "url": "file:///mnt/data1/time-2026/04-april/26/crate2nix-zos/vendor/crate2nix"
+      },
+      "original": {
+        "submodules": true,
+        "type": "git",
+        "url": "file:///mnt/data1/time-2026/04-april/26/crate2nix-zos/vendor/crate2nix"
+      }
+    },
+    "erdfa-canonical-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776505436,
+        "narHash": "sha256-nRsNExayQ2uus5MWB5Om4ua5esSO1o5FEeq09TPuPPk=",
+        "ref": "refs/heads/main",
+        "rev": "6645fbbb3450ea142e461517cb170d74126310f1",
+        "revCount": 11,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/erdfa-canonical.git"
+      },
+      "original": {
+        "rev": "6645fbbb3450ea142e461517cb170d74126310f1",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/erdfa-canonical.git"
+      }
+    },
+    "erdfa-publish-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776455912,
+        "narHash": "sha256-dNR1B4vAG+DvbsBenUx+r/IvMrx3I++fmpF2ZeTg2DI=",
+        "ref": "refs/heads/main",
+        "rev": "92f0bae8640c6defed0c6d2abc5e136e161c74d4",
+        "revCount": 83,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/erdfa-publish.git"
+      },
+      "original": {
+        "rev": "92f0bae8640c6defed0c6d2abc5e136e161c74d4",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/erdfa-publish.git"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -18,13 +69,30 @@
         "type": "github"
       }
     },
+    "html5ever-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776507153,
+        "narHash": "sha256-cogwXxjPr+a6/GFcpWGnhEzPZqe/o59FFNbN/TXJBA0=",
+        "ref": "refs/heads/main",
+        "rev": "70a1b3a7568f7e302367dd4b2806cf2fd22758cc",
+        "revCount": 1441,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/html5ever.git"
+      },
+      "original": {
+        "rev": "70a1b3a7568f7e302367dd4b2806cf2fd22758cc",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/html5ever.git"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1775710090,
-        "narHash": "sha256-ar3rofg+awPB8QXDaFJhJ2jJhu+KqN/PRCXeyuXR76E=",
+        "lastModified": 1779508470,
+        "narHash": "sha256-Ap9KJX+5xHIn3bPIpfNgT6MEXdAECECwo4/rmlQD74M=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "4c1018dae018162ec878d42fec712642d214fdfa",
+        "rev": "29916453413845e54a65b8a1cf996842300cd299",
         "type": "github"
       },
       "original": {
@@ -34,11 +102,72 @@
         "type": "github"
       }
     },
+    "oxc-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776348794,
+        "narHash": "sha256-wNy3VUbwYzjLCaVKcgwpWDE6P1zmxONI6tX+78F+ALo=",
+        "ref": "cargo0.0.1",
+        "rev": "0fa6e540aa11d2026d8fcaacfe8381253ddcafd5",
+        "revCount": 16992,
+        "type": "git",
+        "url": "file:///mnt/data1/nix/time/2024/09/01/oxc/"
+      },
+      "original": {
+        "ref": "cargo0.0.1",
+        "rev": "0fa6e540aa11d2026d8fcaacfe8381253ddcafd5",
+        "type": "git",
+        "url": "file:///mnt/data1/nix/time/2024/09/01/oxc/"
+      }
+    },
     "root": {
       "inputs": {
+        "crate2nix": "crate2nix",
+        "erdfa-canonical-src": "erdfa-canonical-src",
+        "erdfa-publish-src": "erdfa-publish-src",
         "flake-utils": "flake-utils",
+        "html5ever-src": "html5ever-src",
         "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay"
+        "oxc-src": "oxc-src",
+        "rust-cssparser-src": "rust-cssparser-src",
+        "rust-ipfs-src": "rust-ipfs-src",
+        "rust-overlay": "rust-overlay",
+        "zkperf-src": "zkperf-src",
+        "zos-circuit-optimizer-src": "zos-circuit-optimizer-src"
+      }
+    },
+    "rust-cssparser-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776507092,
+        "narHash": "sha256-o0ipnjXLs85H8/iOv0nTSbyFKNEfndFYDo18EmMC4kY=",
+        "ref": "refs/heads/main",
+        "rev": "aae89a8330951e441e0010fdd1907be4cb119eb5",
+        "revCount": 1125,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/rust-cssparser.git"
+      },
+      "original": {
+        "rev": "aae89a8330951e441e0010fdd1907be4cb119eb5",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/rust-cssparser.git"
+      }
+    },
+    "rust-ipfs-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779662722,
+        "narHash": "sha256-Gk6F6wwrBfU2swowAul5y9rRx+RzqwTtRqLpUSBS85M=",
+        "ref": "refs/heads/libp2p-next",
+        "rev": "27adf822c10542f191696a1ce01091e08e84beb7",
+        "revCount": 2826,
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/rust-ipfs.git"
+      },
+      "original": {
+        "rev": "27adf822c10542f191696a1ce01091e08e84beb7",
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/rust-ipfs.git"
       }
     },
     "rust-overlay": {
@@ -48,11 +177,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1779506148,
-        "narHash": "sha256-OffE5yuMrSW71zIJNLvtl9MCO6WTAHEjlFPUCvkd/QM=",
+        "lastModified": 1779592685,
+        "narHash": "sha256-p9d56GezhHRf4QfANxwa1d+fvwShvjB5XUhdIl7WEd0=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "d9973e2ab49747fada06ebbe26cda27eb0220cf1",
+        "rev": "3a58b199e7c83a80b85c28044f808085ba7e941c",
         "type": "github"
       },
       "original": {
@@ -74,6 +203,40 @@
         "owner": "nix-systems",
         "repo": "default",
         "type": "github"
+      }
+    },
+    "zkperf-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776507153,
+        "narHash": "sha256-92sOXdZmrawXxWnwmk+HOL0CEHDL13PGvIJtwuCcM3E=",
+        "ref": "refs/heads/main",
+        "rev": "4346b6e28b1ca4a6a51a30f2d386d09dd2638c33",
+        "revCount": 119,
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/zkperf.git"
+      },
+      "original": {
+        "rev": "4346b6e28b1ca4a6a51a30f2d386d09dd2638c33",
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/zkperf.git"
+      }
+    },
+    "zos-circuit-optimizer-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776505437,
+        "narHash": "sha256-mRSBshjYlj5d8uDIMQLx9ONXRkr6mOA2b7svx9DVlmI=",
+        "ref": "refs/heads/main",
+        "rev": "2d26e13f3399438095ae70bec40d81af65f3e014",
+        "revCount": 4,
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git"
+      },
+      "original": {
+        "rev": "2d26e13f3399438095ae70bec40d81af65f3e014",
+        "type": "git",
+        "url": "file:///mnt/data1/git/solana.solfunmeme.com/zos-circuit-optimizer.git"
       }
     }
   },

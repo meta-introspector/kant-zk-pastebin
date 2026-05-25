@@ -80,7 +80,7 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        # Nightly toolchain (needed for some deps like zkperf-macros proc-macros)
+        # Nightly toolchain for proc-macros (zkperf-macros, cssparser-macros)
         rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
         };
@@ -146,34 +146,18 @@
           cp -a --no-preserve=mode ${rust-ipfs-src} $out/erdfa-canonical/bindings/rust/vendor/rust-ipfs
         '';
 
-        # ── crate2nix build ─────────────────────────────────────────────
-        tools = import "${crate2nix}/tools.nix" { inherit pkgs; };
-
-        # Custom rustc via buildRustCrate.override, plus per-crate cargo
-        # commands via defaultCrateOverrides.
-        buildRustCrateForPkgs = p: p.buildRustCrate.override {
-          rustc = rustToolchain;
-          defaultCrateOverrides = p.defaultCrateOverrides // {
-            # Allow workspace-level patching if needed
-            kant-pastebin = attrs: {
-              preBuild = "echo Building kant-pastebin workspace";
-            };
-          };
-        };
-
-        # Generate Cargo.nix from the combined source + Cargo.lock
-        cargoNix = import (tools.generatedCargoNix {
-          name = "kant-pastebin";
-          src = combinedSrc;
-          cargo = rustToolchain;
-        }) {
-          inherit pkgs buildRustCrateForPkgs;
-        };
-
       in {
         packages = {
-          # Main build: uses crate2nix for proper handling of all crate types
-          default = cargoNix.rootCrate.build;
+          # Main build: uses buildRustPackage with submodule content resolved
+          default = pkgs.rustPlatform.buildRustPackage {
+            pname = "kant-pastebin";
+            version = "0.1.0";
+            src = combinedSrc;
+            cargoLock.lockFile = ./Cargo.lock;
+            nativeBuildInputs = [ pkgs.pkg-config pkgs.perl ];
+            buildInputs = [ pkgs.openssl ];
+            doCheck = false;
+          };
 
           # Ideacloud reverse index as JSON
           ideacloud-scan = pkgs.runCommand "ideacloud-scan.json" { } ''

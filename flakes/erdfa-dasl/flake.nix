@@ -33,12 +33,17 @@ resolver = "2"
 TOML
       '';
     in {
-      packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
+      packages.${system}.default = pkgs.rustPlatform.buildRustPackage rec {
         pname = "erdfa-dasl";
         version = "0.1.0";
         src = crateSrc;
         cargoLock.lockFile = crateSrc + "/Cargo.lock";
         doCheck = false;
+        installPhase = ''
+          mkdir -p $out/lib
+          find target/release -maxdepth 1 -name "*.so" -exec cp -t $out/lib {} \;
+          find target/release -maxdepth 1 -name "*.rlib" -exec cp -t $out/lib {} \;
+        '';
       };
     };
 }

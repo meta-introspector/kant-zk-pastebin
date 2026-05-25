@@ -26,25 +26,31 @@
       zk  = inputs.zkperf;
 
       crateSrc = pkgs.runCommand "zos-circuit-optimizer-src" { } ''
-        mkdir -p $out/zos-circuit-optimizer $out/erdfa-dasl $out/zkperf
-        cp -r ${zco}/* $out/zos-circuit-optimizer/
-        cp -r ${edl}/* $out/erdfa-dasl/
+        mkdir -p $out/plugins/zos-circuit-optimizer $out/plugins/erdfa-dasl $out/zkperf
+        cp -r ${zco}/* $out/plugins/zos-circuit-optimizer/
+        cp -r ${edl}/* $out/plugins/erdfa-dasl/
         cp -r ${zk}/zkperf-macros $out/zkperf/
+        cp -r ${zk}/zkperf-witness $out/zkperf/
         chmod -R +w $out/
         cp ${./Cargo.lock} $out/Cargo.lock
         cat > $out/Cargo.toml << 'TOML'
 [workspace]
-members = ["zos-circuit-optimizer", "erdfa-dasl", "zkperf/zkperf-macros"]
+members = ["plugins/zos-circuit-optimizer", "plugins/erdfa-dasl", "zkperf/zkperf-macros", "zkperf/zkperf-witness"]
 resolver = "2"
 TOML
       '';
     in {
-      packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
+      packages.${system}.default = pkgs.rustPlatform.buildRustPackage rec {
         pname = "zos-circuit-optimizer";
         version = "0.1.0";
         src = crateSrc;
         cargoLock.lockFile = crateSrc + "/Cargo.lock";
         doCheck = false;
+        installPhase = ''
+          mkdir -p $out/lib
+          find target/release -maxdepth 1 -name "*.so" -exec cp -t $out/lib {} \;
+          find target/release -maxdepth 1 -name "*.rlib" -exec cp -t $out/lib {} \;
+        '';
       };
     };
 }
