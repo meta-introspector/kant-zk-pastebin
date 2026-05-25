@@ -24,6 +24,10 @@ members = [
     "plugins/oxc/crates/oxc_span",
     "plugins/oxc/crates/oxc_str",
     "plugins/oxc/crates/oxc_syntax",
+    "plugins/zos-circuit-optimizer",
+    "zkperf/zkperf-macros",
+    "zkperf/zkperf-witness",
+    "zkperf/cargo-zkperf",
 ]
 
 [patch."https://github.com/meta-introspector/erdfa-dasl"]

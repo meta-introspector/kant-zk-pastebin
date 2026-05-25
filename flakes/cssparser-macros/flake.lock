@@ -1,0 +1,45 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1779508470,
+        "narHash": "sha256-Ap9KJX+5xHIn3bPIpfNgT6MEXdAECECwo4/rmlQD74M=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "29916453413845e54a65b8a1cf996842300cd299",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "rust-cssparser": "rust-cssparser"
+      }
+    },
+    "rust-cssparser": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776507092,
+        "narHash": "sha256-o0ipnjXLs85H8/iOv0nTSbyFKNEfndFYDo18EmMC4kY=",
+        "ref": "refs/heads/main",
+        "rev": "aae89a8330951e441e0010fdd1907be4cb119eb5",
+        "revCount": 1125,
+        "type": "git",
+        "url": "file:///mnt/data1/git/github.com/servo/rust-cssparser.git"
+      },
+      "original": {
+        "rev": "aae89a8330951e441e0010fdd1907be4cb119eb5",
+        "type": "git",
+        "url": "file:///mnt/data1/git/github.com/servo/rust-cssparser.git"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

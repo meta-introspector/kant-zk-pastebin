@@ -1,0 +1,44 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1779508470,
+        "narHash": "sha256-Ap9KJX+5xHIn3bPIpfNgT6MEXdAECECwo4/rmlQD74M=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "29916453413845e54a65b8a1cf996842300cd299",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "zkperf": "zkperf"
+      }
+    },
+    "zkperf": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1774878182,
+        "narHash": "sha256-O5teiChAvAi/sQpNfXF1ZhOrwUIaDtVHnvSePX2KpSU=",
+        "ref": "refs/heads/main",
+        "rev": "3fd16a1e1e31665987171b871e4beeab0da7645a",
+        "revCount": 49,
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/zkperf.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/meta-introspector/zkperf.git"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
