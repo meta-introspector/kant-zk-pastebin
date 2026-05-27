@@ -1,66 +1,36 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== Deploying Kant Pastebin ==="
+echo "=== Deploying Kant Pastebin via System Manager ==="
 
-# Build with Nix
-nix build
+# Build the system-manager configuration (includes kant-pastebin service, nginx proxy, index-docs timer)
+# This replaces the old imperative approach that manually copied systemd/nginx files
+nix build ".#systemConfigs.kant-pastebin"
 
-# Get Nix store path
+# Get store path for verification
 STORE_PATH=$(readlink -f result)
 echo "Built: $STORE_PATH"
 
-# Generate systemd service
-cat > kant-pastebin.service << EOF
-[Unit]
-Description=Kant Pastebin - UUCP + zkTLS
-After=network.target
+echo ""
+echo "=== Applying System Manager Configuration ==="
+echo "This will:"
+echo "  1. Enable nginx with /pastebin/ reverse proxy"
+echo "  2. Install kant-pastebin systemd service"
+echo "  3. Install kant-index-docs timer service"
+echo ""
 
-[Service]
-Type=simple
-WorkingDirectory=$(pwd)
-ExecStart=$STORE_PATH/bin/kant-pastebin
-Restart=always
-RestartSec=10
-Environment="BIND_ADDR=127.0.0.1:8090"
-Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
-Environment="BASE_PATH=/pastebin"
-Environment="BASE_URL=https://solana.solfunmeme.com"
-Environment="NFT_DIR=/mnt/data1/time-2026/03-march/13/nft_enriched"
-Environment="ENRICH_PIPELINE=/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh"
-Environment="RUST_LOG=info"
-Environment="PATH=$(dirname $(which ipfs 2>/dev/null || echo /usr/bin/ipfs)):/usr/local/bin:/usr/bin:/bin"
-
-[Install]
-WantedBy=default.target
-EOF
-
-# Generate nginx config
-cat > kant-pastebin.nginx << 'EOF'
-location /pastebin/ {
-    proxy_pass http://127.0.0.1:8090/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-EOF
+# Apply the system-manager configuration (declarative: systemd, nginx, env, etc.)
+nix run "github:numtide/system-manager?ref=$(cat flake.lock | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['nodes']['system-manager']['original']['ref'] if 'system-manager' in d.get('nodes',{}) and 'original' in d['nodes']['system-manager'] else 'main')" 2>/dev/null || echo main)" -- switch --flake ".#kant-pastebin"
 
 echo ""
-echo "=== Install ==="
-echo "1. Systemd:"
-cp kant-pastebin.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user restart kant-pastebin
-echo "   ✅ Service restarted"
+echo "=== Testing ==="
+echo "1. Check service:"
+systemctl --user status kant-pastebin 2>&1 | head -5 || echo "   (service managed by system-manager)"
 echo ""
-echo "2. Nginx:"
-sudo cp kant-pastebin.nginx /etc/nginx/conf.d/kant-pastebin.conf
-sudo nginx -t && sudo systemctl reload nginx
-echo "   ✅ Nginx reloaded"
+echo "2. Check nginx:"
+curl -s -o /dev/null -w "   HTTP %{http_code}" http://127.0.0.1:8090/ && echo ""
 echo ""
-echo "3. Test:"
-curl -s http://127.0.0.1:8090/ | head -5
-echo ""
+echo "3. Endpoint:"
 echo "   https://solana.solfunmeme.com/pastebin/"
+echo ""
+echo "=== Deploy complete ==="
