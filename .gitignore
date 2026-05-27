@@ -1,10 +1,10 @@
 target/
-Cargo.lock
 result
 result-*
 *.swp
 *.swo
 *~
+vendor/
 node_modules/
 test-results/
 hf-deploy/
@@ -12,3 +12,4 @@ chats/
 docs/
 shards/
 shards/
+rust-ipfs
