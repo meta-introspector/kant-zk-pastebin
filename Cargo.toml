@@ -20,7 +20,7 @@ data-encoding = "2"
 ciborium = "0.2"
 serde_bytes = "0.11"
 dirs-next = "2"
-rust-unixfs = { path = "vendor/rust-ipfs/unixfs" }
+rust-unixfs = { path = "rust-ipfs/unixfs" }
 ipld-core = "0.4.1"
 multibase = "0.9"
 actix-multipart = "0.7"
@@ -32,6 +32,7 @@ erdfa-publish = { path = "erdfa-publish" }
 clap = { version = "4", features = ["derive"] }
 walkdir = "2"
 libloading = "0.8"
+regex-lite = "0.1"
 
 [[bin]]
 name = "kant-pastebin"
@@ -40,3 +41,7 @@ path = "src/main.rs"
 [[bin]]
 name = "freeze-chats"
 path = "src/bin/freeze_chats.rs"
+
+[[bin]]
+name = "multi-reindex"
+path = "src/bin/multi_reindex.rs"

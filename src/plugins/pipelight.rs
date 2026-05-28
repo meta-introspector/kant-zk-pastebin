@@ -49,8 +49,9 @@ pub fn is_pipelight_config(content: &str) -> bool {
 
 /// Render the interactive tile HTML snippet for a pipelight pipeline config.
 /// `paste_id` is used for the plugin API endpoint URL.
-pub fn render_tile_html(paste_id: &str) -> String {
+pub fn render_tile_html(paste_id: &str, base_path: &str) -> String {
     let escaped_id = paste_id.replace('"', "&quot;");
+    let escaped_base = base_path.trim_end_matches('/');
     format!(
         r#"<div class="pipelight-tile" style="background:#1a1a2e;border:1px solid #0f0;border-radius:8px;padding:15px;margin:15px 0;font-family:monospace">
 <h3 style="color:#0ff;margin:0 0 10px 0">🔷 Pipelight Pipeline</h3>
@@ -61,8 +62,21 @@ pub fn render_tile_html(paste_id: &str) -> String {
 <button class="pipelight-btn" onclick="runPipelight('{0}','logs')" style="background:#9933ff;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer">📜 Logs</button>
 </div>
 <pre id="pipelight-output-{0}" style="background:#0d0d1a;padding:10px;border-radius:4px;margin-top:10px;max-height:300px;overflow:auto;font-size:12px;display:none;white-space:pre-wrap"></pre>
-</div>"#,
-        escaped_id
+</div>
+<script>
+function runPipelight(id,action){{
+  const prefix='{1}';
+  const pre=document.getElementById('pipelight-output-'+id);
+  if(!pre)return;
+  pre.style.display='block';
+  pre.innerHTML='⏳ Running...';
+  fetch(prefix+'/plugin/pipelight/'+id,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{action:action}})}})
+  .then(r=>r.json())
+  .then(data=>{{pre.innerHTML=data.status==='ok'?'✅ OK\n'+data.output:'❌ Error\n'+data.output;}})
+  .catch(err=>{{pre.innerHTML='❌ '+err;}});
+}}
+</script>"#,
+        escaped_id, escaped_base
     )
 }
 
@@ -244,9 +258,10 @@ export default config;"#;
 
     #[test]
     fn test_render_tile_html() {
-        let html = render_tile_html("test-123");
+        let html = render_tile_html("test-123", "/pastebin");
         assert!(html.contains("pipelight-tile"));
         assert!(html.contains("test-123"));
+        assert!(html.contains("prefix+'/plugin/pipelight/'+id"));
         assert!(html.contains("▶ Run"));
         assert!(html.contains("📋 List"));
         assert!(html.contains("📊 Status"));

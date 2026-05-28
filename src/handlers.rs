@@ -1,6 +1,7 @@
 // Handlers - Request handlers for kant-pastebin microservice
 use actix_web::{web, HttpResponse, Result};
 use crate::model::{Paste, Response, PasteIndex};
+use crate::plugins::pipelight;
 use crate::{view, storage, ipfs, tagging, plugin};
 use chrono::Utc;
 use sha2::{Sha256, Digest};
@@ -205,6 +206,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         reply_to: paste.reply_to.clone(),
         size: content.len(),
         uucp_path: uucp.clone(),
+        root: None,
     };
     
     let index_file = format!("{}/index.jsonl", uucp_dir);
@@ -441,6 +443,12 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
                 "".to_string()
             };
             
+            let pipelight_tile = if pipelight::is_pipelight_config(body) {
+                pipelight::render_tile_html(&id)
+            } else {
+                String::new()
+            };
+            
             let html = format!(r#"<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
@@ -458,6 +466,8 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 .qr-modal h3{{color:#000}}
 .preview-modal{{position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:2000;overflow:auto;display:none}}
 .preview-modal iframe{{width:100%;height:100%;border:none}}
+.pipelight-tile{{background:#1a1a2e;border:1px solid #0f0;border-radius:8px;padding:15px;margin:15px 0}}
+.pipelight-btn{{padding:8px 16px;border-radius:4px;border:none;cursor:pointer;font-size:14px}}
 </style>
 </head><body>
 <div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/raw/{}">📄 Raw</a> | {} {}</div>
@@ -477,6 +487,7 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 
 <h3>Content:</h3>
 <pre>{}</pre>
+{}
 {}
 <div id="qrModal" class="qr-modal">
   <h3>{}</h3>
@@ -548,6 +559,7 @@ function showPreview() {{
                 file_cmd, file_cmd,
                 curl_cmd, curl_cmd,
                 body,
+                pipelight_tile,
                 related_html,
                 title,
                 ipfs_cid.unwrap_or(""),
