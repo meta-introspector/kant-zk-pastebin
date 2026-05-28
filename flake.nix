@@ -36,7 +36,7 @@
     };
 
     nora = {
-      url = "git+file:///mnt/data1/git/github.com/getnora-io/nora.git";
+      url = "path:/mnt/data1/time-2026/05-may/28/nora";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
