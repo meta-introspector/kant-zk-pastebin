@@ -2,8 +2,8 @@
   description = "Kant Pastebin - UUCP + zkTLS";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    nixpkgs.url = "git+file:///mnt/data1/git/github.com/NixOS/nixpkgs.git?ref=master";
+    flake-utils.url = "git+file:///mnt/data1/git/github.com/numtide/flake-utils.git?ref=main";
 
     # Shared inputs — all git repos declared centrally in ~/nix-common
     common-inputs = {
@@ -37,7 +37,6 @@
 
     nora = {
       url = "path:/mnt/data1/time-2026/05-may/28/nora";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
