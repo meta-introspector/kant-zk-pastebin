@@ -147,7 +147,8 @@ impl Plugin for PipelightPlugin {
                 let is_pipelight = is_pipelight_config(&content);
                 result.insert("is_pipelight".into(), is_pipelight.to_string());
                 if is_pipelight {
-                    result.insert("tile_html".into(), render_tile_html(&input.id));
+                    let bp = input.extra.get("base_path").map(|s| s.as_str()).unwrap_or("");
+                    result.insert("tile_html".into(), render_tile_html(&input.id, bp));
                 }
             }
             "list" => match run_pipelight(&["ls"]) {

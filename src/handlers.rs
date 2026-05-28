@@ -1030,12 +1030,14 @@ pub async fn run_plugin(
     let content = storage::load_content(&paste_id).unwrap_or_default();
     let url = format!("{}{}/paste/{}", base_url, base_path, paste_id);
 
+    let mut extra = body.into_inner();
+    extra.insert("base_path".into(), base_path.clone());
     let input = plugin::PluginInput {
         id: paste_id.clone(),
         content: content.into_bytes(),
         mime: "text/plain".into(),
         url,
-        extra: body.into_inner(),
+        extra,
     };
 
     let reg = registry.lock().unwrap();
