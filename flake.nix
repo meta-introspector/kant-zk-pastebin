@@ -34,9 +34,14 @@
       url = "path:/mnt/data1/nix-controller/he-lattice/pipelight";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    nora = {
+      url = "git+file:///mnt/data1/git/github.com/getnora-io/nora.git";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, common-inputs, system-manager, pipelight, crate-vendor, zos-circuit-tile, org-tile, kellnr }:
+  outputs = { self, nixpkgs, flake-utils, common-inputs, system-manager, pipelight, crate-vendor, zos-circuit-tile, org-tile, kellnr, nora }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -118,6 +123,7 @@
         packages = {
           inherit kant-pastebin index-docs;
 
+          nora = nora.packages.${system}.nora-registry;
           kellnr = kellnr.packages.${system}.default;
           pipelight = pipelight.packages.${system}.default;
           default = kant-pastebin;
@@ -169,6 +175,16 @@
           { nixpkgs.hostPlatform = "x86_64-linux"; }
         ];
         specialArgs = { inherit self; };
+      };
+
+      # Usage: nix run github:numtide/system-manager -- switch --flake .#nora
+      systemConfigs.nora = system-manager.lib.makeSystemConfig {
+        modules = [
+          "${nora}/nora-system-manager.nix"
+          { nixpkgs.hostPlatform = "x86_64-linux"; }
+        ];
+        # Pass the nora flake as `self` so the module can find its packages
+        specialArgs = { self = nora; };
       };
     };
 }
