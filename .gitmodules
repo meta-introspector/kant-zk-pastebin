@@ -4,3 +4,6 @@
 [submodule "erdfa-publish"]
 	path = erdfa-publish
 	url = /home/mdupont/03-march/17/erdfa-publish
+[submodule "palletizer-rs"]
+	path = palletizer-rs
+	url = https://github.com/de-vri-es/palletizer-rs

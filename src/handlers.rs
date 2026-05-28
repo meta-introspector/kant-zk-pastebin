@@ -444,7 +444,7 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
             };
             
             let pipelight_tile = if pipelight::is_pipelight_config(body) {
-                pipelight::render_tile_html(&id)
+                pipelight::render_tile_html(&id, &base_path)
             } else {
                 String::new()
             };
