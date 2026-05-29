@@ -105,6 +105,7 @@ fn main() {
             reply_to: None,
             size,
             uucp_path: entry.path().to_string_lossy().to_string(),
+            root: None,
         };
 
         if let Ok(json) = serde_json::to_string(&idx) {

@@ -59,5 +59,6 @@ pub async fn get_paste_json(path: web::Path<String>) -> HttpResponse {
         reply_to: None,
         size: 0,
         uucp_path: "".to_string(),
+        root: None,
     })
 }

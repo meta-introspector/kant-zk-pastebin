@@ -1113,8 +1113,8 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "session_id": session_id,
         "filename": orig_name,
-        "entry_count": 0, // will be filled on next call
-        "url": format!("/archive-viewer/{}", session_id),
+        "entry_count": result.entries.len(),
+        "url": format!("/browse-archive/{}", session_id),
     })))
 }
 

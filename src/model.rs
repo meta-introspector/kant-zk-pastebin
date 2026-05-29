@@ -38,4 +38,5 @@ pub struct PasteIndex {
     pub reply_to: Option<String>,
     pub size: usize,
     pub uucp_path: String,
+    pub root: Option<String>,
 }
