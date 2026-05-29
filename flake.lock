@@ -628,22 +628,6 @@
     },
     "nixpkgs_3": {
       "locked": {
-        "lastModified": 1772643971,
-        "narHash": "sha256-+bllfMsclzbAAPMZTm3K9G/a5lG+s6l18/AyyYLPSIE=",
-        "ref": "master",
-        "rev": "400de68cd101e8cfebffea121397683caf7f5a34",
-        "revCount": 958387,
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
-      },
-      "original": {
-        "ref": "master",
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
-      }
-    },
-    "nixpkgs_4": {
-      "locked": {
         "lastModified": 1779560665,
         "narHash": "sha256-tpyBcxPpcQb8ukyNF7DoCwfSY3VPsxHoYwj00Cayv5o=",
         "owner": "NixOS",
@@ -658,7 +642,7 @@
         "type": "github"
       }
     },
-    "nixpkgs_5": {
+    "nixpkgs_4": {
       "locked": {
         "lastModified": 1744536153,
         "narHash": "sha256-awS2zRgF4uTwrOKwwiJcByDzDOdo3Q1rPZbiHQg/N38=",
@@ -674,7 +658,7 @@
         "type": "github"
       }
     },
-    "nixpkgs_6": {
+    "nixpkgs_5": {
       "locked": {
         "lastModified": 1779560665,
         "narHash": "sha256-tpyBcxPpcQb8ukyNF7DoCwfSY3VPsxHoYwj00Cayv5o=",
@@ -694,7 +678,9 @@
       "inputs": {
         "crate2nix": "crate2nix_2",
         "flake-parts": "flake-parts_2",
-        "nixpkgs": "nixpkgs_3",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
         "rust-overlay": "rust-overlay_2"
       },
       "locked": {
@@ -711,7 +697,7 @@
     "org-tile": {
       "inputs": {
         "flake-utils": "flake-utils_2",
-        "nixpkgs": "nixpkgs_4"
+        "nixpkgs": "nixpkgs_3"
       },
       "locked": {
         "path": "./tiles/org-tile",
@@ -871,7 +857,7 @@
     },
     "rust-overlay_3": {
       "inputs": {
-        "nixpkgs": "nixpkgs_5"
+        "nixpkgs": "nixpkgs_4"
       },
       "locked": {
         "lastModified": 1764643237,
@@ -1090,7 +1076,7 @@
       "inputs": {
         "erdfa-dasl-src": "erdfa-dasl-src",
         "flake-utils": "flake-utils_4",
-        "nixpkgs": "nixpkgs_6",
+        "nixpkgs": "nixpkgs_5",
         "rust-overlay": "rust-overlay_4",
         "zkperf-src": "zkperf-src",
         "zos-circuit-optimizer-src": "zos-circuit-optimizer-src"

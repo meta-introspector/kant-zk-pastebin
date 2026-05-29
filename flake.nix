@@ -37,6 +37,7 @@
 
     nora = {
       url = "path:/mnt/data1/time-2026/05-may/28/nora";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
