@@ -1046,3 +1046,659 @@ pub async fn run_plugin(
         Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e}))),
     }
 }
+
+// ═════════════════════════════════════════════════════════════════════
+// Archive Upload + Viewer
+// ═════════════════════════════════════════════════════════════════════
+
+/// Temporary in-memory storage for extracted archives keyed by session ID.
+use std::sync::Mutex;
+use std::collections::HashMap;
+
+lazy_static::lazy_static! {
+    static ref ARCHIVE_STORE: Mutex<HashMap<String, crate::archive::ArchiveResult>> =
+        Mutex::new(HashMap::new());
+}
+
+/// POST /upload-archive — upload a .tar.gz/.zip/etc., extract, return listing
+pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
+    use actix_web::web::BytesMut;
+    use futures_util::StreamExt as _;
+    use sha2::{Sha256, Digest};
+
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let mut file_data: Vec<u8> = Vec::new();
+    let mut orig_name = String::new();
+    let mut title = String::new();
+
+    while let Some(item) = payload.next().await {
+        let mut field = item.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+        let field_name = field.name().unwrap_or("").to_string();
+        let mut buf: Vec<u8> = Vec::new();
+        while let Some(chunk) = field.next().await {
+            let data = chunk.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+            buf.extend_from_slice(&data);
+        }
+        match field_name.as_str() {
+            "file" => {
+                orig_name = field.content_disposition()
+                    .and_then(|cd| cd.get_filename().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "archive.tar.gz".to_string());
+                file_data = buf;
+            }
+            "title" => { title = String::from_utf8_lossy(&buf).to_string(); }
+            _ => {}
+        }
+    }
+
+    if file_data.is_empty() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "no file"})));
+    }
+
+    // Extract the archive
+    let result = match crate::archive::extract(&file_data, &orig_name) {
+        Ok(r) => r,
+        Err(e) => return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": e}))),
+    };
+
+    // Generate a session ID
+    let mut hasher = Sha256::new();
+    hasher.update(&file_data);
+    hasher.update(ts.as_bytes());
+    let session_id = hex::encode(&hasher.finalize())[..16].to_string();
+
+    // Store for later access
+    ARCHIVE_STORE.lock().unwrap().insert(session_id.clone(), result);
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "session_id": session_id,
+        "filename": orig_name,
+        "entry_count": 0, // will be filled on next call
+        "url": format!("/archive-viewer/{}", session_id),
+    })))
+}
+
+/// GET /archive-viewer/{session_id} — HTML view of extracted files with checkboxes
+pub async fn archive_viewer(path: web::Path<String>) -> Result<HttpResponse> {
+    let session_id = path.into_inner();
+    let store = ARCHIVE_STORE.lock().unwrap();
+    let result = match store.get(&session_id) {
+        Some(r) => r,
+        None => return Ok(HttpResponse::NotFound().body("Archive session not found or expired")),
+    };
+
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let mut file_rows = String::new();
+    let mut total_size = 0u64;
+
+    for (i, entry) in result.entries.iter().enumerate() {
+        if entry.is_dir {
+            file_rows.push_str(&format!(
+                r#"<tr style="color:#666"><td><input type="checkbox" disabled></td><td>📁 {}</td><td>—</td><td>dir</td></tr>"#,
+                html_escape(&entry.path)
+            ));
+        } else {
+            total_size += entry.size;
+            let size_str = if entry.size > 1024 * 1024 {
+                format!("{:.1} MB", entry.size as f64 / (1024.0 * 1024.0))
+            } else if entry.size > 1024 {
+                format!("{:.1} KB", entry.size as f64 / 1024.0)
+            } else {
+                format!("{} B", entry.size)
+            };
+            let has_preview = entry.content.is_some();
+            let preview_btn = if has_preview {
+                format!(r#"<button class="preview-btn" onclick="previewFile({},'{}')">👁️</button>"#, i, html_escape(&entry.path))
+            } else {
+                String::new()
+            };
+            file_rows.push_str(&format!(
+                r#"<tr>
+                  <td><input type="checkbox" class="file-select" value="{}" data-idx="{}" onchange="updateSelectAll()"></td>
+                  <td>📄 {} {}</td>
+                  <td>{}</td>
+                  <td>{}</td>
+                </tr>"#,
+                html_escape(&entry.path),
+                i,
+                html_escape(&entry.path),
+                preview_btn,
+                size_str,
+                if entry.content.is_some() { "text" } else { "binary" },
+            ));
+        }
+    }
+
+    let html = format!(r#"<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<title>Archive Viewer — {}</title>
+<style>
+body{{font-family:monospace;max-width:900px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
+a{{color:#0ff;text-decoration:none}}
+.nav{{background:#111;padding:10px;margin-bottom:20px;border:1px solid #0f0}}
+.nav a{{margin-right:15px}}
+table{{width:100%;border-collapse:collapse;margin:10px 0}}
+th,td{{text-align:left;padding:8px;border-bottom:1px solid #333}}
+th{{color:#0ff}}
+.file-select{{cursor:pointer}}
+.actions{{background:#111;padding:15px;margin:15px 0;border:1px solid #0f0}}
+.actions button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;font-weight:bold;margin-right:10px}}
+.actions button:disabled{{background:#333;color:#666;cursor:not-allowed}}
+input[type="checkbox"]{{accent-color:#0f0}}
+.preview-modal{{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a0a;z-index:1000;overflow:auto;padding:40px;box-sizing:border-box}}
+.preview-modal pre{{background:#111;padding:20px;border:1px solid #0f0;white-space:pre-wrap;word-wrap:break-word;max-height:80vh;overflow:auto}}
+.summary{{color:#999;font-size:12px;margin-bottom:10px}}
+</style>
+</head><body>
+<div class="nav">
+<a href="{}/">🏠 Home</a>
+<a href="{}/browse">📚 Browse</a>
+<a href="{}/gallery">🖼️ Gallery</a>
+<a href="{}/splitter/">✂️ Splitter</a>
+</div>
+<h1>📦 Archive: {}</h1>
+<p class="summary">{} files · {} total · {} entries</p>
+
+<div class="actions">
+  <label><input type="checkbox" id="selectAll" onchange="toggleAll()"> Select All</label>
+  <button id="generateBtn" onclick="generateAllm()">📝 Generate allm.txt</button>
+  <button id="splitBtn" onclick="splitSelected()">✂️ Split Selected</button>
+</div>
+
+<table>
+<thead><tr><th style="width:30px"></th><th>File</th><th>Size</th><th>Type</th></tr></thead>
+<tbody>
+<tr style="color:#666"><td></td><td>📁 / (root)</td><td>{}</td><td>dir</td></tr>
+{}
+</tbody>
+</table>
+
+<div id="previewModal" class="preview-modal">
+  <button onclick="closePreview()" style="position:sticky;top:10px;float:right;background:#f00;color:#fff;border:none;padding:5px 15px;cursor:pointer">✕ Close</button>
+  <h3 id="previewTitle"></h3>
+  <pre id="previewContent"></pre>
+</div>
+
+<script>
+const files = {{}};
+const base_path = '{}';
+const session_id = '{}';
+
+function toggleAll() {{
+  const checked = document.getElementById('selectAll').checked;
+  document.querySelectorAll('.file-select').forEach(cb => cb.checked = checked);
+}}
+
+function updateSelectAll() {{
+  const all = document.querySelectorAll('.file-select');
+  const checked = document.querySelectorAll('.file-select:checked');
+  document.getElementById('selectAll').checked = all.length === checked.length;
+}}
+
+async function generateAllm() {{
+  const checked = Array.from(document.querySelectorAll('.file-select:checked')).map(cb => cb.value);
+  if (checked.length === 0) {{ alert('Select at least one file.'); return; }}
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true; btn.textContent = '⏳ Generating...';
+  try {{
+    const res = await fetch(base_path + '/archive-generate/' + session_id, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ files: checked }})
+    }});
+    const data = await res.json();
+    if (data.error) {{ alert('Error: ' + data.error); return; }}
+    // Navigate to the generated paste
+    window.location = base_path + data.url;
+  }} catch(e) {{ alert('Error: ' + e.message); }}
+  finally {{ btn.disabled = false; btn.textContent = '📝 Generate allm.txt'; }}
+}}
+
+async function splitSelected() {{
+  const checked = Array.from(document.querySelectorAll('.file-select:checked')).map(cb => cb.value);
+  if (checked.length === 0) {{ alert('Select at least one file.'); return; }}
+  const btn = document.getElementById('splitBtn');
+  btn.disabled = true; btn.textContent = '⏳ Splitting...';
+  try {{
+    const res = await fetch(base_path + '/archive-split/' + session_id, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ files: checked }})
+    }});
+    const data = await res.json();
+    if (data.error) {{ alert('Error: ' + data.error); return; }}
+    window.location = base_path + data.url;
+  }} catch(e) {{ alert('Error: ' + e.message); }}
+  finally {{ btn.disabled = false; btn.textContent = '✂️ Split Selected'; }}
+}}
+
+function previewFile(idx, name) {{
+  fetch(base_path + '/archive-preview/' + session_id + '/' + idx)
+    .then(r => r.json())
+    .then(data => {{
+      document.getElementById('previewTitle').textContent = name;
+      document.getElementById('previewContent').textContent = data.content || '(binary file — no preview)';
+      document.getElementById('previewModal').style.display = 'block';
+    }});
+}}
+
+function closePreview() {{
+  document.getElementById('previewModal').style.display = 'none';
+}}
+</script>
+</body></html>"#,
+        result.filename,
+        base_path, base_path, base_path, base_path,
+        result.filename,
+        result.entry_count,
+        format_size(result.total_size),
+        result.entries.len(),
+        format_size(total_size),
+        file_rows,
+        base_path,
+        session_id,
+    );
+
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// POST /archive-generate/{session_id} — concatenate selected files into a paste
+pub async fn archive_generate(
+    path: web::Path<String>,
+    body: web::Json<HashMap<String, Vec<String>>>,
+) -> Result<HttpResponse> {
+    let session_id = path.into_inner();
+    let files = body.into_inner().remove("files").unwrap_or_default();
+
+    let store = ARCHIVE_STORE.lock().unwrap();
+    let result = match store.get(&session_id) {
+        Some(r) => r,
+        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))),
+    };
+
+    // Build a table of contents
+    let mut allm = String::new();
+    allm.push_str("=== ALLM.TXT ===\n");
+    allm.push_str(&format!("Source archive: {}\n", result.filename));
+    allm.push_str(&format!("Generated: {}\n", Utc::now().format("%Y-%m-%d %H:%M:%S UTC")));
+    allm.push_str(&format!("Selected files: {}\n\n", files.join(", ")));
+
+    for file_path in &files {
+        // Find the entry by path
+        if let Some(entry) = result.entries.iter().find(|e| e.path == *file_path) {
+            allm.push_str(&format!("\n───── {} ({}) ─────\n", entry.path, format_size(entry.size)));
+            if let Some(ref content) = entry.content {
+                allm.push_str(content);
+                if !content.ends_with('\n') {
+                    allm.push_str("\n");
+                }
+            } else {
+                allm.push_str("[binary file — omitted]\n");
+            }
+        }
+    }
+
+    // Save as a paste
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let slug_title = format!("allm_{}", ts);
+    let filename = format!("{}_{}.txt", ts, slug_title);
+    let id = format!("{}_{}", ts, slug_title);
+    let uucp = format!("{}/{}", uucp_dir, filename);
+
+    // Generate hash and CID
+    let mut hasher = Sha256::new();
+    hasher.update(allm.as_bytes());
+    let hash = hasher.finalize();
+    let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
+    let witness = hex::encode(&hash);
+    let ipfs_cid = ipfs::ipfs_add(&allm);
+
+    let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: allm, archive, {}\nCID: {}\nWitness: {}\nIPFS: {}\n\n{}\n",
+        id, "allm.txt", result.filename, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), allm);
+
+    fs::write(&uucp, &paste_content).ok();
+    let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
+    fs::write(&cid_file, &id).ok();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "id": id,
+        "cid": local_cid,
+        "witness": witness,
+        "url": format!("/paste/{}", id),
+        "size": allm.len(),
+        "files": files.len(),
+    })))
+}
+
+/// POST /archive-split/{session_id} — split selected files into chunks
+pub async fn archive_split(
+    path: web::Path<String>,
+    body: web::Json<HashMap<String, Vec<String>>>,
+) -> Result<HttpResponse> {
+    let session_id = path.into_inner();
+    let files = body.into_inner().remove("files").unwrap_or_default();
+
+    let store = ARCHIVE_STORE.lock().unwrap();
+    let result = match store.get(&session_id) {
+        Some(r) => r,
+        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))),
+    };
+
+    // Collect text from selected files
+    let mut all_text = String::new();
+    for file_path in &files {
+        if let Some(entry) = result.entries.iter().find(|e| e.path == *file_path) {
+            if let Some(ref content) = entry.content {
+                all_text.push_str(&format!("\n───── {} ─────\n", entry.path));
+                all_text.push_str(content);
+                if !content.ends_with('\n') {
+                    all_text.push_str("\n");
+                }
+            }
+        }
+    }
+
+    if all_text.is_empty() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "No text content in selected files"})));
+    }
+
+    // Split into chunks of ~100KB
+    let chunk_size: usize = 100 * 1024;
+    let chunks = crate::archive::split_into_chunks(&all_text, chunk_size);
+
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let mut chunk_ids = Vec::new();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        let chunk_name = format!("split_{}_part{:04}", ts, i);
+        let filename = format!("{}.txt", chunk_name);
+        let uucp = format!("{}/{}", uucp_dir, filename);
+
+        let mut hasher = Sha256::new();
+        hasher.update(chunk.as_bytes());
+        let hash = hasher.finalize();
+        let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
+        let witness = hex::encode(&hash);
+
+        let paste_content = format!("--- {} ---\nTitle: {} (chunk {}/{})\nKeywords: split, chunk\nCID: {}\nWitness: {}\n\n{}\n",
+            chunk_name, result.filename, i + 1, chunks.len(), local_cid, witness, chunk);
+
+        fs::write(&uucp, &paste_content).ok();
+        chunk_ids.push(chunk_name);
+    }
+
+    // Create an index paste linking all chunks
+    let index_content = format!("=== Split Index ===\nSource: {}\nDate: {}\nTotal chunks: {}\nFiles: {}\n\n",
+        result.filename, Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), chunks.len(), files.join(", "));
+    let index_content = index_content + &chunk_ids.iter().enumerate().map(|(i, id)| {
+        format!("Chunk {:04}: /paste/{}\n", i, id)
+    }).collect::<String>();
+
+    let index_id = format!("split_index_{}", ts);
+    let idx_filename = format!("{}.txt", index_id);
+    let idx_uucp = format!("{}/{}", uucp_dir, idx_filename);
+    fs::write(&idx_uucp, &index_content).ok();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "chunks": chunks.len(),
+        "chunk_ids": chunk_ids,
+        "total_size": all_text.len(),
+        "url": format!("/paste/{}", index_id),
+    })))
+}
+
+/// GET /archive-preview/{session_id}/{index} — JSON preview of a single file
+pub async fn archive_preview(
+    path: web::Path<(String, usize)>,
+) -> Result<HttpResponse> {
+    let (session_id, idx) = path.into_inner();
+    let store = ARCHIVE_STORE.lock().unwrap();
+    let result = match store.get(&session_id) {
+        Some(r) => r,
+        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))),
+    };
+
+    match result.entries.get(idx) {
+        Some(entry) => Ok(HttpResponse::Ok().json(serde_json::json!({
+            "path": entry.path,
+            "size": entry.size,
+            "content": entry.content.as_deref().unwrap_or(""),
+            "is_text": entry.content.is_some(),
+        }))),
+        None => Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Index out of range"}))),
+    }
+}
+
+/// GET /splitter/ — text splitter page
+pub async fn splitter_page(query: web::Query<HashMap<String, String>>) -> Result<HttpResponse> {
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let prefill = query.get("text").map(|s| html_escape(s)).unwrap_or_default();
+
+    let html = format!(r#"<!DOCTYPE html>
+<meta charset="UTF-8">
+<title>✂️ Text Splitter</title>
+<style>
+body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
+a{{color:#0ff;text-decoration:none}}
+.nav{{background:#111;padding:10px;margin-bottom:20px;border:1px solid #0f0}}
+.nav a{{margin-right:15px}}
+textarea{{width:100%;height:300px;background:#111;color:#0f0;border:1px solid #0f0;padding:10px;font-family:monospace}}
+input,select{{background:#111;color:#0f0;border:1px solid #0f0;padding:5px}}
+button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;font-weight:bold;margin:5px}}
+button:disabled{{background:#333;color:#666;cursor:not-allowed}}
+.result{{background:#111;padding:15px;margin:10px 0;border:1px solid #0f0;max-height:400px;overflow:auto}}
+.result pre{{margin:5px 0;padding:10px;background:#0a0a0a;border-left:3px solid #0ff;white-space:pre-wrap;word-wrap:break-word}}
+.chunk-label{{color:#0ff;font-weight:bold;margin-top:10px}}
+.settings{{background:#111;padding:15px;margin:15px 0;border:1px solid #0f0}}
+</style>
+</head><body>
+<div class="nav">
+<a href="{bp}/">🏠 Home</a>
+<a href="{bp}/browse">📚 Browse</a>
+<a href="{bp}/gallery">🖼️ Gallery</a>
+</div>
+<h1>✂️ Text Splitter</h1>
+<p>Paste text below, choose chunk size, and split into pieces.</p>
+
+<div class="settings">
+  <label>Chunk size: </label>
+  <select id="chunkSize">
+    <option value="1024">1 KB</option>
+    <option value="5120">5 KB</option>
+    <option value="10240">10 KB</option>
+    <option value="51200">50 KB</option>
+    <option value="102400" selected>100 KB</option>
+    <option value="512000">500 KB</option>
+    <option value="1048576">1 MB</option>
+  </select>
+  <label style="margin-left:15px">Split at: </label>
+  <select id="splitMode">
+    <option value="line">Newline</option>
+    <option value="word" selected>Word boundary</option>
+    <option value="exact">Exact byte</option>
+  </select>
+</div>
+
+<textarea id="textInput" placeholder="Paste text to split here...">{prefill}</textarea><br>
+<button onclick="splitText()">✂️ Split</button>
+<button onclick="pasteFromClipboard()">📋 Paste from Clipboard</button>
+<button onclick="clearText()">🗑️ Clear</button>
+
+<div id="result" style="display:none">
+  <h3>Results</h3>
+  <p id="summary"></p>
+  <div id="chunks"></div>
+  <button onclick="uploadAllChunks()">📤 Upload All as Pastes</button>
+  <button onclick="downloadAllChunks()">💾 Download All</button>
+</div>
+
+<script>
+async function splitText() {{
+  const text = document.getElementById('textInput').value;
+  if (!text.trim()) {{ alert('No text to split.'); return; }}
+  const chunkSize = parseInt(document.getElementById('chunkSize').value);
+  const res = await fetch('{bp}/api/split', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ content: text, chunk_size: chunkSize }})
+  }});
+  const data = await res.json();
+  if (data.error) {{ alert('Error: ' + data.error); return; }}
+  document.getElementById('result').style.display = 'block';
+  document.getElementById('summary').textContent = text.length + ' bytes split into ' + data.chunks + ' chunks (~' + chunkSize + ' B each)';
+  const chunksDiv = document.getElementById('chunks');
+  chunksDiv.innerHTML = '';
+  data.contents.forEach((c, i) => {{
+    const div = document.createElement('div');
+    div.innerHTML = '<div class="chunk-label">Chunk ' + (i+1) + '/' + data.chunks + ' (' + c.length + ' chars)</div>'
+      + '<pre>' + escHtml(c.slice(0,500)) + (c.length > 500 ? '<span style="color:#666">… (truncated)</span>' : '') + '</pre>';
+    chunksDiv.appendChild(div);
+  }});
+}}
+
+function escHtml(s) {{ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }}
+
+async function pasteFromClipboard() {{
+  try {{ document.getElementById('textInput').value = await navigator.clipboard.readText(); }}
+  catch(e) {{ alert('Cannot read clipboard: ' + e.message); }}
+}}
+
+function clearText() {{
+  document.getElementById('textInput').value = '';
+  document.getElementById('result').style.display = 'none';
+}}
+
+async function uploadAllChunks() {{
+  const btn = event.target; btn.disabled = true; btn.textContent = '⏳ Uploading...';
+  try {{
+    const text = document.getElementById('textInput').value;
+    const sz = parseInt(document.getElementById('chunkSize').value);
+    const res = await fetch('{bp}/api/split-upload', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ content: text, chunk_size: sz, title: 'splitter_upload' }})
+    }});
+    const data = await res.json();
+    if (data.error) {{ alert('Error: ' + data.error); return; }}
+    window.location = '{bp}/paste/' + data.index_id;
+  }} catch(e) {{ alert('Error: ' + e.message); }}
+  finally {{ btn.disabled = false; btn.textContent = '📤 Upload All as Pastes'; }}
+}}
+
+async function downloadAllChunks() {{
+  const text = document.getElementById('textInput').value;
+  const sz = parseInt(document.getElementById('chunkSize').value);
+  const res = await fetch('{bp}/api/split', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ content: text, chunk_size: sz }})
+  }});
+  const data = await res.json();
+  const zip = new JSZip();
+  data.contents.forEach((c, i) => {{ zip.file('chunk_' + String(i+1).padStart(4,'0') + '.txt', c); }});
+  const blob = await zip.generateAsync({{type:'blob'}});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'chunks.zip'; a.click();
+}}
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</body></html>"#, bp = base_path, prefill = prefill);
+
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// POST /api/split — split text into chunks (JSON API)
+pub async fn api_split(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    let content = body.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let chunk_size = body.get("chunk_size").and_then(|v| v.as_u64()).unwrap_or(102400) as usize;
+
+    if content.is_empty() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "empty content"})));
+    }
+
+    let chunks = crate::archive::split_into_chunks(content, chunk_size);
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "chunks": chunks.len(),
+        "chunk_size": chunk_size,
+        "total_size": content.len(),
+        "contents": chunks,
+    })))
+}
+
+/// POST /api/split-upload — split text and upload all chunks as pastes
+pub async fn api_split_upload(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    use sha2::{Sha256, Digest};
+
+    let content = body.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let chunk_size = body.get("chunk_size").and_then(|v| v.as_u64()).unwrap_or(102400) as usize;
+    let title = body.get("title").and_then(|v| v.as_str()).unwrap_or("split");
+
+    if content.is_empty() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "empty content"})));
+    }
+
+    let chunks = crate::archive::split_into_chunks(content, chunk_size);
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let mut chunk_ids = Vec::new();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        let id = format!("{}_{}_part{:04}", ts, title, i);
+        let filename = format!("{}.txt", id);
+        let uucp = format!("{}/{}", uucp_dir, filename);
+
+        let mut hasher = Sha256::new();
+        hasher.update(chunk.as_bytes());
+        let hash = hasher.finalize();
+        let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
+        let witness = hex::encode(&hash);
+
+        let paste_content = format!("--- {} ---\nTitle: {} (chunk {}/{})\nKeywords: split, chunk\nCID: {}\nWitness: {}\n\n{}\n",
+            id, title, i + 1, chunks.len(), local_cid, witness, chunk);
+
+        fs::write(&uucp, &paste_content).ok();
+        chunk_ids.push(id);
+    }
+
+    // Index paste
+    let index_id = format!("{}_{}_index", ts, title);
+    let index_filename = format!("{}.txt", index_id);
+    let index_uucp = format!("{}/{}", uucp_dir, index_filename);
+    let index_content = format!("=== Split Index ===\nTitle: {}\nDate: {}\nTotal chunks: {}\n\n{}\n",
+        title, Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), chunks.len(),
+        chunk_ids.iter().enumerate().map(|(i, id)| format!("Chunk {:04}: /paste/{}\n", i, id)).collect::<String>());
+    fs::write(&index_uucp, &index_content).ok();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "chunks": chunks.len(),
+        "chunk_ids": chunk_ids,
+        "index_id": index_id,
+        "url": format!("/paste/{}", index_id),
+        "total_size": content.len(),
+    })))
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn format_size(size: u64) -> String {
+    if size > 1024 * 1024 * 1024 {
+        format!("{:.2} GiB", size as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else if size > 1024 * 1024 {
+        format!("{:.2} MiB", size as f64 / (1024.0 * 1024.0))
+    } else if size > 1024 {
+        format!("{:.2} KiB", size as f64 / 1024.0)
+    } else {
+        format!("{} B", size)
+    }
+}

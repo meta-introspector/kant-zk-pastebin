@@ -10,3 +10,4 @@ pub mod plugin;
 pub mod plugins;
 pub mod dasl;
 pub mod sheaf;
+pub mod archive;

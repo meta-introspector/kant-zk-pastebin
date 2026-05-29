@@ -17,6 +17,8 @@ mod tiles;
 mod dasl;
 mod sheaf;
 
+mod archive;
+
 #[derive(OpenApi)]
 #[openapi(
     paths(handlers::create_paste, handlers::get_paste, handlers::browse),
@@ -37,6 +39,7 @@ async fn main() -> std::io::Result<()> {
     // Initialize plugin registry
     let mut registry = plugin::PluginRegistry::new();
     registry.register(Box::new(plugins::screenshot::ScreenshotPlugin::new()));
+    registry.register(Box::new(plugins::pipelight::PipelightPlugin::new()));
 
     // Discover and register tile plugins from TILES_DIR
     let tiles_dir = env::var("TILES_DIR").unwrap_or_default();
@@ -83,6 +86,15 @@ async fn main() -> std::io::Result<()> {
             .route("/ipfs/{cid}", web::get().to(handlers::ipfs_proxy))
             .route("/gallery", web::get().to(handlers::gallery))
             .route("/gallery/img/{qid}", web::get().to(handlers::gallery_image))
+            .route("/upload-archive", web::post().to(handlers::upload_archive))
+            .route("/browse-archive/{session_id}", web::get().to(handlers::archive_viewer))
+            .route("/allm/{session_id}", web::post().to(handlers::archive_generate))
+            .route("/archive-generate/{session_id}", web::post().to(handlers::archive_generate))
+            .route("/archive-split/{session_id}", web::post().to(handlers::archive_split))
+            .route("/archive-preview/{session_id}/{idx}", web::get().to(handlers::archive_preview))
+            .route("/splitter", web::get().to(handlers::splitter_page))
+            .route("/api/split", web::post().to(handlers::api_split))
+            .route("/api/split-upload", web::post().to(handlers::api_split_upload))
             .route("/plugin/{name}/{id}", web::post().to(handlers::run_plugin))
             .route("/plugins", web::get().to(handlers::list_plugins))
     })
