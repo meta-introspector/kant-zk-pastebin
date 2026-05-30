@@ -59,22 +59,16 @@ in
   # ── Implementation ──────────────────────────────────────────────
   config = mkIf config.services.nora-ci.enable {
 
-    # Ensure the results directory exists
-    systemd.tmpfiles.rules = [
-      "d ${config.services.nora-ci.resultsDir} 0755 root root -"
-      "d ${config.services.nora-ci.resultsDir}/build 0755 root root -"
-      "d ${config.services.nora-ci.resultsDir}/tests 0755 root root -"
-      "d ${config.services.nora-ci.resultsDir}/fuzz 0755 root root -"
-      "d ${config.services.nora-ci.resultsDir}/perf 0755 root root -"
-      "d ${config.services.nora-ci.resultsDir}/coverage 0755 root root -"
-    ];
+    # NOTE: /mnt/data1/nora/ci-results/ directories are created by the
+    # pipeline script (via sudo mkdir) instead of systemd.tmpfiles.rules
+    # because /mnt/data1 is owned by mdupont and tmpfiles refuses unsafe
+    # path transitions across ownership boundaries.
 
     # ── Pipeline runner (oneshot service) ──────────────────────────
     systemd.services.nora-ci-pipeline = {
       description = "NORA CI Pipeline — build, test, fuzz, perf, coverage";
       after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
-      wants = [ "nora.service" ];
+      wants = [ "network-online.target" "nora.service" ];
       before = [ "nora-tile-cache.service" ];
 
       serviceConfig = {
@@ -93,6 +87,7 @@ in
 
       script = ''
         set -eu
+        export PATH="${pkgs.cargo-fuzz}/bin:${pkgs.cargo-nextest}/bin:${pkgs.cargo-tarpaulin}/bin:${pkgs.cargo}/bin:$PATH"
         RESULTS="${config.services.nora-ci.resultsDir}"
         mkdir -p "$RESULTS"/{build,tests,fuzz,perf,coverage}
 
@@ -127,7 +122,7 @@ in
           -- --save-baseline nora-ci 2>&1 | tee "$RESULTS/perf/criterion.log" || true
 
         echo "=== [6/6] Coverage ==="
-        ${pkgs.cargo-tarpaulin}/bin/cargo tarpaulin \
+        ${pkgs.cargo-tarpaulin}/bin/cargo-tarpaulin \
           --package nora-registry --out Html \
           --output-dir "$RESULTS/coverage" --skip-clean 2>&1 | \
           tee "$RESULTS/coverage/tarpaulin.log" || true
@@ -142,14 +137,12 @@ in
           "pipeline": "nora-full-ci",
           "timestamp": "$(date -Iseconds)",
           "build": $(cat "$RESULTS/build/status.json" 2>/dev/null || echo '{"status":"unknown"}'),
-          "tests": {"summary": "${TEST_SUMMARY}"},
+          "tests": {"summary": "''${TEST_SUMMARY}"},
           "fuzz": {"summary": "6 targets, $(grep -c crash "$RESULTS"/fuzz/*.log 2>/dev/null || echo 0) crashes"},
-          "perf": {"binary": "$(cat "$RESULTS/perf/binary-stats.txt 2>/dev/null || echo 'pending')"},
-          "coverage": "${COVERAGE}"
+          "perf": {"binary": "$(cat "$RESULTS"/perf/binary-stats.txt 2>/dev/null || echo 'pending')"},
+          "coverage": "''${COVERAGE}"
         }
 JSON
-
-        echo "=== Pipeline complete ==="
         echo "Dashboard: https://solana.solfunmeme.com/nora/ci-results/"
       '';
     };
@@ -197,7 +190,12 @@ JSON
     };
 
     # ── Serve results directory via nginx ──────────────────────────
-    # The /nora/ci-results/ location is already defined in
-    # system-manager-config.nix under services.nginx.virtualHosts
+    services.nginx.virtualHosts."solana.solfunmeme.com".locations."/nora/ci-results/" = {
+      alias = "/mnt/data1/nora/ci-results/";
+      extraConfig = ''
+        autoindex on;
+        add_header Cache-Control "no-store";
+      '';
+    };
   };
 }

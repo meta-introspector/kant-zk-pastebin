@@ -1,11 +1,55 @@
 // Handlers - Request handlers for kant-pastebin microservice
-use actix_web::{web, HttpResponse, Result};
+use actix_web::{web, HttpResponse, HttpRequest, Result};
 use crate::model::{Paste, Response, PasteIndex};
 use crate::plugins::pipelight;
+use crate::plugins;
 use crate::{view, storage, ipfs, tagging, plugin};
 use chrono::Utc;
 use sha2::{Sha256, Digest};
-use std::{fs, env};
+use ciborium;
+use std::{fs, env, collections::HashMap};
+
+// ─── Helper: append an entry to index.jsonl ──────────────────────────
+fn write_index_entry(
+    uucp_dir: &str,
+    id: &str,
+    title: &str,
+    description: Option<&str>,
+    keywords: Vec<String>,
+    cid: &str,
+    witness: &str,
+    filename: &str,
+    size: usize,
+    ipfs_cid: Option<String>,
+    reply_to: Option<String>,
+    root: Option<String>,
+) {
+    let ngrams = tagging::extract_ngrams(&format!("{} {}", title, keywords.join(" ")), 3, 10);
+    let entry = PasteIndex {
+        id: id.to_string(),
+        title: title.to_string(),
+        description: description.map(|s| s.to_string()),
+        keywords,
+        cid: cid.to_string(),
+        witness: witness.to_string(),
+        timestamp: Utc::now().format("%Y%m%d_%H%M%S").to_string(),
+        filename: filename.to_string(),
+        ngrams,
+        ipfs_cid,
+        reply_to,
+        size,
+        uucp_path: format!("{}/{}", uucp_dir, filename),
+        root,
+    };
+    let index_file = format!("{}/index.jsonl", uucp_dir);
+    let line = format!("{}\n", serde_json::to_string(&entry).unwrap());
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&index_file)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()))
+        .ok();
+}
 
 /// GET / - Home page
 pub async fn index(query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
@@ -450,6 +494,12 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
             } else {
                 String::new()
             };
+
+            let git2nora_tile = if plugins::git2nora::is_publishable_crate(body) {
+                plugins::git2nora::render_git2nora_tile_html(&id, &base_path)
+            } else {
+                String::new()
+            };
             
             let html = format!(r#"<!DOCTYPE html>
 <html lang="en"><head>
@@ -491,6 +541,15 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 <pre>{}</pre>
 {}
 {}
+{}
+<div id="sidebar" class="sidebar">
+  <h3>🔍 Similar Posts</h3>
+  <div id="similarResults" class="sidebar-results"></div>
+  <div class="sidebar-actions">
+    <button class="reply-btn" onclick="bundleSelected()" style="width:100%">📦 Bundle Selected</button>
+    <button class="reply-btn" onclick="toggleSidebar()" style="width:100%;margin-top:5px;background:#333;color:#0f0">✕ Close</button>
+  </div>
+</div>
 <div id="qrModal" class="qr-modal">
   <h3>{}</h3>
   <canvas id="qrcode"></canvas><br>
@@ -550,6 +609,54 @@ function showPreview() {{
   modal.innerHTML = '<button onclick=\"this.parentElement.remove()\" style=\"position:fixed;top:10px;right:10px;z-index:3000;padding:10px 20px;background:#f00;color:#fff;border:none;cursor:pointer\">✕ Close</button><iframe srcdoc=\"' + styledContent.replace(/"/g, '&quot;') + '\"></iframe>';
   document.body.appendChild(modal);
 }}
+
+function toggleSidebar() {{
+  const s = document.getElementById('sidebar');
+  if (s.classList.contains('open')) {{
+    s.classList.remove('open');
+    return;
+  }}
+  s.classList.add('open');
+  fetch('/api/similar/' + currentPasteId)
+    .then(r => r.json())
+    .then(d => {{
+      const div = document.getElementById('similarResults');
+      div.innerHTML = '';
+      if (!d.results || d.results.length === 0) {{
+        div.innerHTML = '<div style="color:#666;padding:10px">No similar posts found.</div>';
+        return;
+      }}
+      d.results.forEach((r, i) => {{
+        const item = document.createElement('div');
+        item.className = 'sidebar-item';
+        item.innerHTML = '<input type="checkbox" id="sim-' + i + '" value="' + r.id + '">' +
+          '<label for="sim-' + i + '"><a href="' + r.url + '" onclick="event.stopPropagation()" style="color:#0ff;font-size:13px">' +
+          r.title.slice(0, 40) + '</a><br><span class="ts">' + r.timestamp + '</span></label>';
+        div.appendChild(item);
+      }});
+    }})
+    .catch(e => {{
+      document.getElementById('similarResults').innerHTML = '<div style="color:#f00">Error: ' + e + '</div>';
+    }});
+}}
+
+function bundleSelected() {{
+  const checks = document.querySelectorAll('#similarResults input:checked');
+  if (checks.length === 0) {{ alert('Select at least one post.'); return; }}
+  const pastes = [currentPasteId];
+  checks.forEach(c => pastes.push(c.value));
+  fetch('/api/bundle', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{pastes: pastes}})
+  }})
+    .then(r => r.json())
+    .then(d => {{
+      window.open(d.url, '_blank');
+      toggleSidebar();
+    }})
+    .catch(e => alert('Bundle error: ' + e));
+}}
 </script>
 <script src="/static/a11y.js"></script>
 </body></html>"#, 
@@ -562,6 +669,7 @@ function showPreview() {{
                 curl_cmd, curl_cmd,
                 body,
                 pipelight_tile,
+                git2nora_tile,
                 related_html,
                 title,
                 ipfs_cid.unwrap_or(""),
@@ -815,6 +923,585 @@ a{{color:#0ff;text-decoration:none}}</style>
     Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
 }
 
+/// Helper: extract raw paste content from a stored paste file
+/// The stored format wraps content with metadata headers and sheaf RDFa.
+fn read_paste_content(uucp_path: &str) -> Option<String> {
+    let raw = fs::read_to_string(uucp_path).ok()?;
+    // The format is:
+    // --- id ---\n
+    // Title: ...\n
+    // Keywords: ...\n
+    // CID: ...\n
+    // Witness: ...\n
+    // IPFS: ...\n
+    // DASL: ...\n
+    // Reply-To: ...\n
+    // {sheaf_header}\n\n
+    // {content}\n\n
+    // {sheaf_rdfa}\n
+    // Find the content between the sheaf header and the RDFa section
+    if let Some(body_start) = raw.find("\n\n") {
+        if let Some(body_start2) = raw[body_start+2..].find("\n\n") {
+            let content_start = body_start + 2 + body_start2 + 2;
+            // Find RDFa section start
+            if let Some(rdfa_start) = raw[content_start..].find("<div") {
+                Some(raw[content_start..content_start + rdfa_start].trim().to_string())
+            } else {
+                // No RDFa — return everything after the metadata
+                Some(raw[content_start..].trim().to_string())
+            }
+        } else {
+            Some(raw[body_start+2..].trim().to_string())
+        }
+    } else {
+        Some(raw.trim().to_string())
+    }
+}
+
+/// Helper: create a content excerpt around a search match (byte-safe)
+fn excerpt_around(content: &str, query: &str, context: usize) -> String {
+    let lower = content.to_lowercase();
+    let q = query.to_lowercase();
+    if let Some(pos) = lower.find(&q) {
+        // Find safe char boundaries around the match
+        let chars: Vec<(usize, char)> = content.char_indices().collect();
+        let mut start_char = 0;
+        for (i, &(idx, _)) in chars.iter().enumerate() {
+            if idx >= pos.saturating_sub(context * 4) {
+                start_char = i.saturating_sub(5);
+                break;
+            }
+        }
+        // Find the match end in char indices
+        let match_end_byte = pos + q.len();
+        let mut end_char = chars.len() - 1;
+        for (i, &(idx, _)) in chars.iter().enumerate() {
+            if idx >= match_end_byte {
+                end_char = (i + 5).min(chars.len() - 1);
+                break;
+            }
+        }
+        let byte_start = chars[start_char].0;
+        let byte_end = chars[end_char].0 + chars[end_char].1.len_utf8();
+        let prefix = if start_char > 0 { "…" } else { "" };
+        let suffix = if end_char < chars.len() - 1 { "…" } else { "" };
+        format!("{}{}{}", prefix, &content[byte_start..byte_end], suffix)
+    } else {
+        // No match — return first N characters (char-safe)
+        content.chars().take(context * 2).collect()
+    }
+}
+
+#[derive(serde::Serialize)]
+struct SearchResult {
+    id: String,
+    title: String,
+    description: Option<String>,
+    keywords: Vec<String>,
+    match_type: String,       // "metadata" | "content" | "doc"
+    excerpt: String,
+    url: String,
+    timestamp: String,
+    size: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<String>,   // "paste" or "doc"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_path: Option<String>, // for doc results, the filesystem path
+}
+
+/// GET /api/search?q=... - JSON search API, searches both metadata and paste content
+/// CLI usage: curl 'http://localhost:8090/api/search?q=CL(15,0,0)'
+/// Optional: &content=0 to skip content search (metadata only, faster)
+/// Optional: &limit=N to control result count (default: 50)
+/// Parse query string manually from the raw URI (handles `(`, `)`, etc.)
+fn parse_query_param(uri: &str, key: &str) -> Option<String> {
+    let qs = uri.split('?').nth(1).unwrap_or("");
+    for pair in qs.split('&') {
+        let mut parts = pair.splitn(2, '=');
+        let k = parts.next().unwrap_or("").trim();
+        if k == key {
+            let v = parts.next().unwrap_or("").trim().to_string();
+            // Simple percent-decode: only decode %20 -> ' '
+            if v.contains('%') {
+                return Some(v.replace("%20", " ").replace("%28", "(").replace("%29", ")").replace("%2C", ","));
+            }
+            return Some(v);
+        }
+    }
+    None
+}
+
+/// Search files in configured doc directories for matching content.
+/// Directories are specified via the SEARCH_DIRS env var (colon-separated).
+/// Default: ~/DOCS/search
+fn search_directories(query: &str, limit: usize, max_per_dir: usize) -> Vec<SearchResult> {
+    let dirs = env::var("SEARCH_DIRS").unwrap_or_else(|_| {
+        let home = env::var("HOME").unwrap_or_else(|_| "/home/mdupont".to_string());
+        format!("{}/DOCS/search", home)
+    });
+
+    let q = query.to_lowercase();
+    let mut results = Vec::new();
+
+    for dir in dirs.split(':') {
+        if results.len() >= limit { break; }
+        let dir = dir.trim();
+        if dir.is_empty() { continue; }
+
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let mut dir_count = 0;
+        for entry in entries.flatten() {
+            if dir_count >= max_per_dir { break; }
+            let path = entry.path();
+            if !path.is_file() { continue; }
+
+            // Check file name match first
+            let fname = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if fname.contains(&q) {
+                let title = format!("DOCS/search/{}", fname);
+                let size = fs::metadata(&path).map(|m| m.len() as usize).unwrap_or(0);
+                results.push(SearchResult {
+                    id: dir_count.to_string(),
+                    title,
+                    description: Some(format!("File name match in {}", dir)),
+                    keywords: vec![],
+                    match_type: "doc".to_string(),
+                    excerpt: String::new(),
+                    url: format!("/api/search-doc?path={}", path.display()),
+                    timestamp: String::new(),
+                    size,
+                    source: Some("doc".to_string()),
+                    file_path: Some(path.display().to_string()),
+                });
+                dir_count += 1;
+                if results.len() >= limit { break; }
+                continue;
+            }
+
+            // Try to read file content for text files
+            let ext = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            match ext {
+                "md" | "txt" | "sh" | "org" | "json" | "yaml" | "yml"
+                | "toml" | "nix" | "rs" | "py" | "js" | "ts" | "html"
+                | "css" | "xml" | "rst" | "rb" | "go" | "java" | "c" | "h" => {}
+                _ => continue,
+            }
+
+            let content = match fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            if content.to_lowercase().contains(&q) {
+                let title = format!("DOCS/search/{}", path.display());
+                let excerpt = excerpt_around(&content, query, 80);
+                let size = fs::metadata(&path).map(|m| m.len() as usize).unwrap_or(0);
+                results.push(SearchResult {
+                    id: format!("doc-{}", dir_count),
+                    title,
+                    description: Some(format!("Content match in {}", dir)),
+                    keywords: vec![],
+                    match_type: "doc".to_string(),
+                    excerpt,
+                    url: format!("/api/search-doc?path={}", path.display()),
+                    timestamp: String::new(),
+                    size,
+                    source: Some("doc".to_string()),
+                    file_path: Some(path.display().to_string()),
+                });
+                dir_count += 1;
+                if results.len() >= limit { break; }
+            }
+        }
+    }
+
+    results
+}
+
+pub async fn api_search(req: HttpRequest) -> Result<HttpResponse> {
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let index_file = format!("{}/index.jsonl", uucp_dir);
+    
+    let uri = req.uri().to_string();
+    let search_q = match parse_query_param(&uri, "q") {
+        Some(q) if !q.is_empty() => q.to_lowercase(),
+        _ => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Missing query parameter: q",
+            "usage": "curl 'http://localhost:8090/api/search?q=<query>'"
+        }))),
+    };
+    let search_content = parse_query_param(&uri, "content")
+        .map(|s| s != "0").unwrap_or(true);
+    let search_dirs = parse_query_param(&uri, "dirs")
+        .map(|s| s != "0").unwrap_or(true);
+    let limit: usize = parse_query_param(&uri, "limit")
+        .and_then(|s| s.parse().ok()).unwrap_or(50);
+
+    let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
+        .collect();
+
+    let mut results: Vec<SearchResult> = Vec::new();
+
+    for entry in entries.iter().rev() {
+        if results.len() >= limit { break; }
+
+        // Always check metadata (title, keywords)
+        let title_match = entry.title.to_lowercase().contains(&search_q);
+        let keyword_match = entry.keywords.iter().any(|k| k.to_lowercase().contains(&search_q));
+        let desc_match = entry.description.as_deref().map(|d| d.to_lowercase().contains(&search_q)).unwrap_or(false);
+
+        if title_match || keyword_match || desc_match {
+            results.push(SearchResult {
+                id: entry.id.clone(),
+                title: entry.title.clone(),
+                description: entry.description.clone(),
+                keywords: entry.keywords.clone(),
+                match_type: "metadata".to_string(),
+                excerpt: String::new(),
+                url: format!("/paste/{}", entry.id),
+                timestamp: entry.timestamp.clone(),
+                size: entry.size,
+                source: Some("paste".to_string()),
+                file_path: None,
+            });
+            continue;
+        }
+
+        // Optionally search content
+        if search_content {
+            if let Some(content) = read_paste_content(&entry.uucp_path) {
+                if content.to_lowercase().contains(&search_q) {
+                    let excerpt = excerpt_around(&content, &search_q, 80);
+                    results.push(SearchResult {
+                        id: entry.id.clone(),
+                        title: entry.title.clone(),
+                        description: entry.description.clone(),
+                        keywords: entry.keywords.clone(),
+                        match_type: "content".to_string(),
+                        excerpt,
+                        url: format!("/paste/{}", entry.id),
+                        timestamp: entry.timestamp.clone(),
+                        size: entry.size,
+                        source: Some("paste".to_string()),
+                        file_path: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Add directory search results (if enabled and we have room)
+    if search_dirs {
+        let dir_remaining = limit.saturating_sub(results.len());
+        if dir_remaining > 0 {
+            let dir_results = search_directories(&search_q, dir_remaining, 20);
+            results.extend(dir_results);
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "query": &search_q,
+        "total": results.len(),
+        "limit": limit,
+        "results": results,
+    })))
+}
+
+/// GET /api/search-doc?path=<path> - View a doc file returned by search
+/// CLI: curl 'http://localhost:8090/api/search-doc?path=/home/mdupont/DOCS/search/README.md'
+pub async fn search_doc(req: HttpRequest) -> Result<HttpResponse> {
+    let uri = req.uri().to_string();
+    let path = match parse_query_param(&uri, "path") {
+        Some(p) if !p.is_empty() => p,
+        _ => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Missing path parameter",
+            "usage": "curl 'http://localhost:8090/api/search-doc?path=<filepath>'"
+        }))),
+    };
+
+    match fs::read_to_string(&path) {
+        Ok(content) => {
+            let ext = std::path::Path::new(&path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("txt")
+                .to_string();
+            let fname = std::path::Path::new(&path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("doc")
+                .to_string();
+            let html = format!(r#"<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>{} — Kant Pastebin</title>
+<style>
+body{{font-family:monospace;max-width:900px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
+a{{color:#0ff;text-decoration:none}}
+h1{{color:#0f0;border-bottom:1px solid #333}}
+pre{{background:#111;padding:15px;border:1px solid #333;overflow-x:auto;white-space:pre-wrap;word-wrap:break-word}}
+.nav{{background:#111;padding:10px;margin-bottom:20px;border:1px solid #0f0}}
+code{{font-family:monospace}}
+.meta{{color:#888;font-size:0.9em}}
+</style></head><body>
+<div class="nav"><a href="/">🏠 Home</a> <a href="/browse">📚 Browse</a> <a href="/api/search">🔍 Search</a></div>
+<h1>📄 {}</h1>
+<p class="meta">📁 {} <span style="float:right">{}</span></p>
+<hr><pre><code>{}</code></pre>
+</body></html>"#, fname, fname, path, ext, content);
+            Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+        }
+        Err(e) => Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": format!("Cannot read file: {}", e),
+            "path": path,
+        }))),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SimilarQuery {
+    limit: Option<usize>,
+}
+
+/// GET /api/similar/{id} - Find similar pastes by searching the content of the given paste
+/// CLI: curl 'http://localhost:8090/api/similar/20260514_143739'
+pub async fn api_similar(path: web::Path<String>, query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
+    let id = path.into_inner();
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let index_file = format!("{}/index.jsonl", uucp_dir);
+    let limit: usize = query.get("limit").and_then(|s| s.parse().ok()).unwrap_or(10);
+
+    // Get the content of the current paste
+    let content = read_paste_content(&format!("{}/{}.txt", uucp_dir, id));
+    let search_text = match content {
+        Some(c) => {
+            // Take first 200 chars for search (enough to find good matches)
+            let text: String = c.chars().take(200).collect();
+            text.to_lowercase()
+        }
+        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": format!("Paste {} not found or has no readable content", id)
+        }))),
+    };
+
+    // Search via same logic as api_search but against the extracted search text
+    let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
+        .collect();
+
+    // Extract significant terms from search text (words >= 4 chars)
+    let terms: Vec<String> = search_text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 4)
+        .map(|w| w.to_string())
+        .collect();
+
+    let mut results: Vec<SearchResult> = Vec::new();
+
+    for entry in entries.iter().rev() {
+        if results.len() >= limit { break; }
+        if entry.id == id { continue; }
+
+        let lower_title = entry.title.to_lowercase();
+        let lower_desc = entry.description.as_deref().unwrap_or("").to_lowercase();
+        let kw_match = entry.keywords.iter().any(|k| {
+            let kl = k.to_lowercase();
+            terms.iter().any(|t| kl.contains(t))
+        });
+        let title_match = terms.iter().any(|t| lower_title.contains(t) || lower_desc.contains(t));
+
+        if title_match || kw_match {
+            results.push(SearchResult {
+                id: entry.id.clone(),
+                title: entry.title.clone(),
+                description: entry.description.clone(),
+                keywords: entry.keywords.clone(),
+                match_type: "similarity".to_string(),
+                excerpt: String::new(),
+                url: format!("/paste/{}", entry.id),
+                timestamp: entry.timestamp.clone(),
+                size: entry.size,
+                source: Some("paste".to_string()),
+                file_path: None,
+            });
+            continue;
+        }
+
+        // Content search for deeper similarity
+        if let Some(content) = read_paste_content(&entry.uucp_path) {
+            let lower = content.to_lowercase();
+            let content_match = terms.iter().any(|t| lower.contains(t));
+            if content_match {
+                let excerpt = excerpt_around(&content, &terms[0], 60);
+                results.push(SearchResult {
+                    id: entry.id.clone(),
+                    title: entry.title.clone(),
+                    description: entry.description.clone(),
+                    keywords: entry.keywords.clone(),
+                    match_type: "similarity".to_string(),
+                    excerpt,
+                    url: format!("/paste/{}", entry.id),
+                    timestamp: entry.timestamp.clone(),
+                    size: entry.size,
+                    source: Some("paste".to_string()),
+                    file_path: None,
+                });
+            }
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "source_id": &id,
+        "total": results.len(),
+        "results": results,
+    })))
+}
+
+/// POST /api/bundle - Create a DAG-CBOR bundle from selected pastes
+/// Body: {"pastes": ["id1","id2",...]}
+/// CLI: curl -X POST http://localhost:8090/api/bundle -d '{"pastes":["id1","id2"]}' -H 'Content-Type: application/json'
+pub async fn api_bundle(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    let pastes = match body.get("pastes").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Missing 'pastes' array",
+            "usage": "curl -X POST ... -d '{\"pastes\":[\"id1\",\"id2\"]}'"
+        })))
+    };
+
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+
+    // Collect all paste data
+    let mut nodes: Vec<serde_json::Value> = Vec::new();
+    for paste_id in pastes {
+        let pid = paste_id.as_str().unwrap_or("");
+        if pid.is_empty() { continue; }
+
+        // Read from index
+        let index_file = format!("{}/index.jsonl", uucp_dir);
+        let entry: Option<PasteIndex> = fs::read_to_string(&index_file)
+            .ok()
+            .and_then(|s| s.lines()
+                .filter_map(|l| serde_json::from_str::<PasteIndex>(l).ok())
+                .find(|e: &PasteIndex| e.id == pid));
+
+        // Read content
+        let content = read_paste_content(&format!("{}/{}.txt", uucp_dir, pid));
+
+        let node = serde_json::json!({
+            "id": pid,
+            "title": entry.as_ref().map(|e| e.title.as_str()).unwrap_or(""),
+            "description": entry.as_ref().and_then(|e| e.description.as_deref()),
+            "keywords": entry.as_ref().map(|e| e.keywords.clone()).unwrap_or_default(),
+            "cid": entry.as_ref().map(|e| e.cid.as_str()).unwrap_or(""),
+            "witness": entry.as_ref().map(|e| e.witness.as_str()).unwrap_or(""),
+            "timestamp": entry.as_ref().map(|e| e.timestamp.as_str()).unwrap_or(""),
+            "content": content.unwrap_or_default(),
+            "url": format!("/paste/{}", pid),
+        });
+        nodes.push(node);
+    }
+
+    // Build the bundle as a graph
+    let graph = serde_json::json!({
+        "version": "1",
+        "type": "dag-bundle",
+        "created": Utc::now().format("%Y%m%d_%H%M%S").to_string(),
+        "total_nodes": nodes.len(),
+        "nodes": nodes,
+    });
+
+    // Serialize as CBOR
+    let mut cbor_bytes = Vec::new();
+    ciborium::ser::into_writer(&graph, &mut cbor_bytes)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(format!("CBOR error: {}", e)))?;
+
+    // Also keep JSON version
+    let json_str = serde_json::to_string_pretty(&graph)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(format!("JSON error: {}", e)))?;
+
+    // Store the bundle as a new paste
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let pastes_str: String = pastes.iter()
+        .filter_map(|v| v.as_str())
+        .collect::<Vec<_>>()
+        .join("_");
+    let title = format!("dag-bundle-{}", &pastes_str.chars().take(40).collect::<String>());
+    let filename = format!("{}_{}.cbor", ts, title.clone().chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect::<String>());
+    let id = filename.trim_end_matches(".cbor").to_string();
+    let uucp = format!("{}/{}", uucp_dir, filename);
+
+    let mut hasher = Sha256::new();
+    hasher.update(&json_str.as_bytes());
+    let hash = hasher.finalize();
+    let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
+    let witness = hex::encode(&hash);
+
+    // Write the CBOR file
+    fs::write(&uucp, &cbor_bytes).ok();
+
+    // Write a JSON sidecar (human-readable)
+    let json_path = format!("{}/{}.json", uucp_dir, id);
+    fs::write(&json_path, &json_str).ok();
+
+    // Also write the JSON as a .txt for viewing in the pastebin
+    let txt_uucp = format!("{}/{}.txt", uucp_dir, id);
+    let txt_content = format!(
+        "--- {} ---\nTitle: {}\nKeywords: dag-bundle, cbor, graph\nCID: {}\nWitness: {}\nSize: {}\n\n{}",
+        id, title, local_cid, witness, cbor_bytes.len(),
+        json_str
+    );
+    fs::write(&txt_uucp, &txt_content).ok();
+
+    // Write index entry
+    let keywords = vec!["dag-bundle".to_string(), "cbor".to_string(), "graph".to_string()];
+    let ngrams = tagging::extract_ngrams(&format!("{} {}", title, "dag-bundle cbor graph"), 3, 10);
+    let index_entry = PasteIndex {
+        id: id.clone(),
+        title,
+        description: Some(format!("DAG-CBOR bundle of {} pastes: {}", nodes.len(), pastes_str)),
+        keywords,
+        cid: local_cid.clone(),
+        witness: witness.clone(),
+        timestamp: ts,
+        filename: filename.clone(),
+        ngrams,
+        ipfs_cid: None,
+        reply_to: None,
+        size: cbor_bytes.len(),
+        uucp_path: uucp.clone(),
+        root: None,
+    };
+    let index_file = format!("{}/index.jsonl", uucp_dir);
+    let index_line = format!("{}\n", serde_json::to_string(&index_entry).unwrap());
+    fs::OpenOptions::new().create(true).append(true).open(&index_file)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, index_line.as_bytes())).ok();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "id": id,
+        "title": index_entry.title,
+        "cid": local_cid,
+        "witness": witness,
+        "total_nodes": nodes.len(),
+        "format": "dag-cbor",
+        "cbor_size": cbor_bytes.len(),
+        "url": format!("/paste/{}", id),
+        "download_url": format!("/file/{}", id),
+    })))
+}
+
 /// GET /ipfs/{cid} - Proxy IPFS content
 pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
     let cid = path.into_inner();
@@ -1055,7 +1742,6 @@ pub async fn run_plugin(
 
 /// Temporary in-memory storage for extracted archives keyed by session ID.
 use std::sync::Mutex;
-use std::collections::HashMap;
 
 lazy_static::lazy_static! {
     static ref ARCHIVE_STORE: Mutex<HashMap<String, crate::archive::ArchiveResult>> =
@@ -1113,11 +1799,53 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     let entry_count = result.entries.len();
     ARCHIVE_STORE.lock().unwrap().insert(session_id.clone(), result);
 
+    // ── Register the archive file itself in the spool + index ──────────
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let mut hasher2 = Sha256::new();
+    hasher2.update(&file_data);
+    let hash = hasher2.finalize();
+    let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
+    let witness = hex::encode(&hash);
+    let ipfs_cid = ipfs::ipfs_add_bytes(&file_data);
+    let slug = tagging::slugify(&title);
+    let ext = orig_name.rsplit('.').next().unwrap_or("bin");
+    let filename = format!("{}_{}.{}", ts, slug, ext);
+    let steam_id = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(&filename).to_string();
+    let uucp = format!("{}/{}", uucp_dir, filename);
+
+    // Write the raw archive file to spool
+    fs::write(&uucp, &file_data).ok();
+    // Write metadata sidecar
+    let meta = format!("--- {} ---\nTitle: {}\nMime: application/octet-stream\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\nEntries: {}\n",
+        steam_id, orig_name, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), file_data.len(), entry_count);
+    fs::write(format!("{}.meta", uucp), &meta).ok();
+    // CID dedup file
+    let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
+    fs::write(&cid_file, &steam_id).ok();
+    // Index entry
+    write_index_entry(
+        &uucp_dir,
+        &steam_id,
+        &format!("Archive: {}", orig_name),
+        Some(&format!("{} entries · {} bytes", entry_count, file_data.len())),
+        vec!["archive".to_string(), ext.to_string()],
+        &local_cid,
+        &witness,
+        &filename,
+        file_data.len(),
+        ipfs_cid,
+        None,
+        Some(session_id.clone()),
+    );
+
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "session_id": session_id,
         "filename": orig_name,
         "entry_count": entry_count,
+        "id": steam_id,
+        "cid": local_cid,
         "url": format!("/browse-archive/{}", session_id),
+        "paste_url": format!("/paste/{}", steam_id),
     })))
 }
 
@@ -1155,10 +1883,15 @@ pub async fn archive_viewer(path: web::Path<String>) -> Result<HttpResponse> {
             } else {
                 String::new()
             };
+            let post_btn = if has_preview {
+                format!(r#"<button class="post-btn" onclick="postFile({},'{}')">📤</button>"#, i, html_escape(&entry.path))
+            } else {
+                String::new()
+            };
             file_rows.push_str(&format!(
                 r#"<tr>
                   <td><input type="checkbox" class="file-select" value="{}" data-idx="{}" onchange="updateSelectAll()"></td>
-                  <td>📄 {} {}</td>
+                  <td>📄 {} {} {}</td>
                   <td>{}</td>
                   <td>{}</td>
                 </tr>"#,
@@ -1166,6 +1899,7 @@ pub async fn archive_viewer(path: web::Path<String>) -> Result<HttpResponse> {
                 i,
                 html_escape(&entry.path),
                 preview_btn,
+                post_btn,
                 size_str,
                 if entry.content.is_some() { "text" } else { "binary" },
             ));
@@ -1188,6 +1922,8 @@ th{{color:#0ff}}
 .actions{{background:#111;padding:15px;margin:15px 0;border:1px solid #0f0}}
 .actions button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;font-weight:bold;margin-right:10px}}
 .actions button:disabled{{background:#333;color:#666;cursor:not-allowed}}
+.post-btn,.preview-btn{{background:transparent;border:1px solid #0f0;color:#0f0;cursor:pointer;padding:2px 6px;margin-left:4px;font-size:12px;border-radius:3px}}
+.post-btn:hover,.preview-btn:hover{{background:#0f0;color:#000}}
 input[type="checkbox"]{{accent-color:#0f0}}
 .preview-modal{{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a0a;z-index:1000;overflow:auto;padding:40px;box-sizing:border-box}}
 .preview-modal pre{{background:#111;padding:20px;border:1px solid #0f0;white-space:pre-wrap;word-wrap:break-word;max-height:80vh;overflow:auto}}
@@ -1289,6 +2025,16 @@ function previewFile(idx, name) {{
 function closePreview() {{
   document.getElementById('previewModal').style.display = 'none';
 }}
+
+async function postFile(idx, name) {{
+  if (!confirm('Post "' + name + '" as a new paste?')) return;
+  try {{
+    const res = await fetch(base_path + '/archive-post-file/' + session_id + '/' + idx, {{ method: 'POST' }});
+    const data = await res.json();
+    if (data.error) {{ alert('Error: ' + data.error); return; }}
+    window.location = base_path + data.url;
+  }} catch(e) {{ alert('Error: ' + e.message); }}
+}}
 </script>
 </body></html>"#,
         result.filename,
@@ -1364,6 +2110,14 @@ pub async fn archive_generate(
     fs::write(&uucp, &paste_content).ok();
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
     fs::write(&cid_file, &id).ok();
+    // Index entry so the allm appears in browse
+    write_index_entry(
+        &uucp_dir, &id, "allm.txt",
+        Some(&format!("Concatenated {} files from {}", files.len(), result.filename)),
+        vec!["allm".to_string(), "archive".to_string()],
+        &local_cid, &witness, &filename, allm.len(), ipfs_cid,
+        None, None,
+    );
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "id": id,
@@ -1473,6 +2227,67 @@ pub async fn archive_preview(
         }))),
         None => Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Index out of range"}))),
     }
+}
+
+/// POST /archive-post-file/{session_id}/{idx} — post a single file from archive as a paste
+pub async fn archive_post_file(
+    path: web::Path<(String, usize)>,
+) -> Result<HttpResponse> {
+    let (session_id, idx) = path.into_inner();
+    let store = ARCHIVE_STORE.lock().unwrap();
+    let result = match store.get(&session_id) {
+        Some(r) => r,
+        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))),
+    };
+
+    let entry = match result.entries.get(idx) {
+        Some(e) => e,
+        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Index out of range"}))),
+    };
+
+    let content = match entry.content {
+        Some(ref c) => c,
+        None => return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "Binary file — cannot post as paste"}))),
+    };
+
+    // Build paste content
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let slug_title = tagging::slugify(&entry.path);
+    let filename = format!("{}_{}.txt", ts, slug_title);
+    let id = format!("{}_{}", ts, slug_title);
+    let uucp = format!("{}/{}", uucp_dir, filename);
+
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    let hash = hasher.finalize();
+    let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
+    let witness = hex::encode(&hash);
+    let ipfs_cid = ipfs::ipfs_add(content);
+
+    let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: archive, {}\nCID: {}\nWitness: {}\nIPFS: {}\n\n--- From archive: {} ---\n\n{}\n",
+        id, entry.path, result.filename, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), result.filename, content);
+
+    fs::write(&uucp, &paste_content).ok();
+    let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
+    fs::write(&cid_file, &id).ok();
+
+    // Index entry
+    write_index_entry(
+        &uucp_dir, &id, &entry.path,
+        Some(&format!("From archive: {}", result.filename)),
+        vec!["archive".to_string(), "paste".to_string()],
+        &local_cid, &witness, &filename, content.len(), ipfs_cid,
+        None, None,
+    );
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "id": id,
+        "cid": local_cid,
+        "witness": witness,
+        "url": format!("/paste/{}", id),
+        "size": content.len(),
+    })))
 }
 
 /// GET /splitter/ — text splitter page
@@ -1704,4 +2519,72 @@ fn format_size(size: u64) -> String {
     } else {
         format!("{} B", size)
     }
+}
+
+// ─── Nix Skill Handlers ────────────────────────────────────────────────
+
+/// POST /api/nix-skill/analyze — Analyze a flake.nix file
+/// Body: {"path": "/path/to/flake.nix"}
+pub async fn nix_skill_analyze(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    let path = match body.get("path").and_then(|v| v.as_str()) {
+        Some(p) => p.to_string(),
+        None => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Missing 'path' parameter"
+        }))),
+    };
+
+    match crate::nix_skill::analyze_flake(&path) {
+        Ok(analysis) => Ok(HttpResponse::Ok().json(serde_json::json!({
+            "status": "ok",
+            "analysis": analysis,
+        }))),
+        Err(e) => Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": e,
+            "path": path,
+        }))),
+    }
+}
+
+/// POST /api/nix-skill/find — Find and analyze all flake.nix files in a directory
+/// Body: {"directory": "~/dasl", "max_depth": 4}
+pub async fn nix_skill_find(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    let directory = body.get("directory")
+        .and_then(|v| v.as_str())
+        .unwrap_or("~/dasl")
+        .to_string();
+    let max_depth: usize = body.get("max_depth")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(4) as usize;
+
+    let dir = directory.replace("~", &env::var("HOME").unwrap_or_else(|_| "/home/mdupont".to_string()));
+
+    // Find all flake.nix files up to max_depth
+    let mut paths = Vec::new();
+    let mut dirs_to_check = vec![(dir.clone(), 0)];
+
+    while let Some((current_dir, depth)) = dirs_to_check.pop() {
+        if depth > max_depth { continue; }
+        let entries = match std::fs::read_dir(&current_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            if entry_path.is_dir() && depth < max_depth {
+                dirs_to_check.push((entry_path.display().to_string(), depth + 1));
+            } else if entry_path.is_file() && entry_path.file_name().map_or(false, |n| n == "flake.nix") {
+                paths.push(entry_path.display().to_string());
+            }
+        }
+    }
+
+    let analyses = crate::nix_skill::analyze_flakes(&paths);
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "status": "ok",
+        "directory": directory,
+        "max_depth": max_depth,
+        "total_flakes": analyses.len(),
+        "flakes": analyses,
+    })))
 }

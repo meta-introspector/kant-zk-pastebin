@@ -1,0 +1,211 @@
+# Kant Pastebin — Pipelight orchestration
+# Run: pipelight run build-and-deploy
+# Run: pipelight run build-pastebin
+# Run: pipelight run check-status
+# Auto-triggers: pre-push on main for deploy, full-deploy
+
+[[pipelines]]
+name = "build-pastebin"
+triggers = [
+  { branches = ["main"], actions = ["pre-push", "manual"] },
+]
+
+[[pipelines.steps]]
+name = "build-rust-package"
+commands = [
+  "echo '=== Building kant-pastebin Rust package ==='",
+  "cd /home/mdupont/pastebin && nix build .#kant-pastebin --no-link --print-build-logs",
+  "echo '  -> Build complete'"
+]
+
+[[pipelines.steps]]
+name = "build-system-config"
+commands = [
+  "echo '=== Building system-manager configuration ==='",
+  "cd /home/mdupont/pastebin && nix build .#systemConfigs.kant-pastebin --no-link --print-build-logs",
+  "echo '  -> System config ready'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "deploy"
+triggers = [
+  { branches = ["main"], actions = ["pre-push", "manual"] },
+]
+
+[[pipelines.steps]]
+name = "build-pastebin"
+commands = [
+  "echo '=== Step 1: Build pastebin package ==='",
+  "cd /home/mdupont/pastebin && nix build .#kant-pastebin --no-link --print-build-logs",
+  "echo '  -> Build complete'"
+]
+
+[[pipelines.steps]]
+name = "deploy-system-manager"
+commands = [
+  "echo '=== Step 2: Apply system-manager configuration ==='",
+  "cd /home/mdupont/pastebin && nix run github:numtide/system-manager -- switch --flake .#kant-pastebin",
+  "echo '  -> System config applied'"
+]
+
+[[pipelines.steps]]
+name = "verify"
+commands = [
+  "echo '=== Step 3: Verify ==='",
+  "echo '  - Service: '$(systemctl --user is-active kant-pastebin 2>/dev/null || echo 'inactive')",
+  "echo '  - HTTP: '$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/ 2>/dev/null || echo 'unreachable')",
+  "echo '  - Endpoint: https://solana.solfunmeme.com/pastebin/'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "check-status"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "service-status"
+commands = [
+  "echo '=== Kant Pastebin Status ==='",
+  "echo '--- systemd service ---'",
+  "systemctl --user status kant-pastebin 2>&1 || echo '(not running as user service)'",
+  "systemctl status kant-pastebin 2>&1 || echo '(not running as system service)'",
+  "echo ''",
+  "echo '--- HTTP check ---'",
+  "curl -s -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8090/ 2>/dev/null || echo 'unreachable'",
+  "echo ''",
+  "echo '--- Recent journal ---'",
+  "journalctl --user -u kant-pastebin -n 20 --no-pager 2>&1 || journalctl -u kant-pastebin -n 20 --no-pager 2>&1 || echo '(no journal)'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "reindex-docs"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "run-index-docs"
+commands = [
+  "echo '=== Re-indexing DOCS ==='",
+  "cd /home/mdupont/pastebin && nix run .#kant-pastebin -- --reindex 2>&1 || nix shell .#kant-pastebin -c multi-reindex 2>&1",
+  "echo '  -> Indexing complete'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "full-deploy"
+triggers = [
+  { branches = ["main"], actions = ["pre-push", "manual"] },
+]
+
+[[pipelines.steps]]
+name = "build"
+commands = [
+  "echo '=== Build all packages ==='",
+  "cd /home/mdupont/pastebin && nix build .#kant-pastebin .#index-docs --no-link --print-build-logs",
+  "echo '  -> All packages built'"
+]
+
+[[pipelines.steps]]
+name = "deploy-system"
+commands = [
+  "echo '=== Deploy via system-manager ==='",
+  "cd /home/mdupont/pastebin && nix run github:numtide/system-manager -- switch --flake .#kant-pastebin",
+  "echo '  -> System deployed'"
+]
+
+[[pipelines.steps]]
+name = "verify"
+commands = [
+  "echo '=== Verification ==='",
+  "echo '  Service: '$(systemctl --user is-active kant-pastebin 2>/dev/null || systemctl is-active kant-pastebin 2>/dev/null || echo 'checking...')",
+  "echo '  HTTP: '$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/ 2>/dev/null || echo 'unreachable')",
+  "echo '  Deployment complete at https://solana.solfunmeme.com/pastebin/'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "deploy-nora"
+triggers = [
+  { branches = ["main"], actions = ["manual"] },
+]
+
+[[pipelines.steps]]
+name = "build-nora-config"
+commands = [
+  "echo '=== Building nora system-manager configuration ==='",
+  "cd /home/mdupont/pastebin && nix build .#systemConfigs.nora --no-link --print-build-logs",
+  "echo '  -> Nora system config built'"
+]
+
+[[pipelines.steps]]
+name = "activate-nora"
+commands = [
+  "echo '=== Activating nora CI policy ==='",
+  "sudo $(nix build .#systemConfigs.nora --no-link --print-out-paths)/bin/activate",
+  "echo '  -> Nora CI pipeline activated'"
+]
+
+[[pipelines.steps]]
+name = "verify-nora-ci"
+commands = [
+  "echo '=== Verification ==='",
+  "systemctl status nora-ci-pipeline --no-pager 2>&1 | head -15",
+  "systemctl is-active nora 2>&1 && echo '  nora: active' || echo '  nora: inactive'",
+  "echo '  CI pipeline: '$(systemctl is-active nora-ci-pipeline.timer 2>/dev/null || echo 'inactive')",
+  "echo '  Dashboard: https://solana.solfunmeme.com/nora/ci-results/'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "git2nora"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "list-publishable"
+commands = [
+  "echo '=== Scanning pastebin spool for publishable crates ==='",
+  "SPOOL_DIR=$(systemctl show kant-pastebin -p Environment 2>/dev/null | tr ' ' '\\n' | grep UUCP_SPOOL | cut -d= -f2 || echo '/mnt/data1/spool/uucp/pastebin')",
+  "echo 'Spool: $SPOOL_DIR'",
+  "ls \"$SPOOL_DIR\"/*.txt 2>/dev/null | while read f; do",
+  "  NAME=$(basename \"$f\")",
+  "  if grep -q '\\[package\\]' \"$f\" 2>/dev/null && grep -q 'name\\s*=' \"$f\" 2>/dev/null && grep -q 'version\\s*=' \"$f\" 2>/dev/null; then",
+  "    TITLE=$(grep '^Title:' \"$f\" 2>/dev/null | head -1 | cut -d: -f2- | xargs || echo \"$NAME\")",
+  "    echo \"  📦 $TITLE → $NAME\"",
+  "  fi",
+  "done",
+  "echo '  -> Done scanning'"
+]
+
+[[pipelines.steps]]
+name = "publish-spool-to-nora"
+commands = [
+  "echo '=== Publishing pastebin spool crates to nora ==='",
+  "SPOOL_DIR=$(systemctl show kant-pastebin -p Environment 2>/dev/null | tr ' ' '\\n' | grep UUCP_SPOOL | cut -d= -f2 || echo '/mnt/data1/spool/uucp/pastebin')",
+  "ls \"$SPOOL_DIR\"/*.txt 2>/dev/null | while read f; do",
+  "  NAME=$(basename \"$f\")",
+  "  if grep -q '\\[package\\]' \"$f\" 2>/dev/null && grep -q 'name\\s*=' \"$f\" 2>/dev/null && grep -q 'version\\s*=' \"$f\" 2>/dev/null; then",
+  "    PASTE_ID=$(echo \"$NAME\" | sed 's/\\.txt$//')",
+  "    echo \"Publishing $PASTE_ID...\"",
+  "    curl -s -X POST \"http://127.0.0.1:8090/plugin/git2nora/$PASTE_ID\" \\",
+  "      -H 'Content-Type: application/json' \\",
+  "      -d '{\"action\":\"publish\"}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('status','?'), d.get('output','')[:80])\"",
+  "    echo ''",
+  "  fi",
+  "done",
+  "echo '  -> Batch publish complete'"
+]
+
+[[pipelines.steps]]
+name = "verify-nora-crates"
+commands = [
+  "echo '=== Verifying published crates on nora ==='",
+  "curl -s http://127.0.0.1:4000/cargo/api/v1/crates 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); print(f'  Total crates in nora: {len(d.get(\\\"crates\\\",[]))}'); [print(f'    - {c[\\\"name\\\"]} v{c[\\\"max_version\\\"]}') for c in d.get('crates',[])[:10]]\" 2>/dev/null || echo '  (nora response not JSON — may need different cargo endpoint)'",
+  "echo '  Done'"
+]

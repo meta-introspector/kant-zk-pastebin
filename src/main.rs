@@ -19,6 +19,9 @@ mod sheaf;
 
 mod archive;
 
+mod nix_skill;
+mod mcp_server;
+
 #[derive(OpenApi)]
 #[openapi(
     paths(handlers::create_paste, handlers::get_paste, handlers::browse),
@@ -40,6 +43,7 @@ async fn main() -> std::io::Result<()> {
     let mut registry = plugin::PluginRegistry::new();
     registry.register(Box::new(plugins::screenshot::ScreenshotPlugin::new()));
     registry.register(Box::new(plugins::pipelight::PipelightPlugin::new()));
+    registry.register(Box::new(plugins::git2nora::Git2NoraPlugin::new()));
 
     // Discover and register tile plugins from TILES_DIR
     let tiles_dir = env::var("TILES_DIR").unwrap_or_default();
@@ -92,11 +96,19 @@ async fn main() -> std::io::Result<()> {
             .route("/archive-generate/{session_id}", web::post().to(handlers::archive_generate))
             .route("/archive-split/{session_id}", web::post().to(handlers::archive_split))
             .route("/archive-preview/{session_id}/{idx}", web::get().to(handlers::archive_preview))
+            .route("/archive-post-file/{session_id}/{idx}", web::post().to(handlers::archive_post_file))
             .route("/splitter", web::get().to(handlers::splitter_page))
             .route("/api/split", web::post().to(handlers::api_split))
             .route("/api/split-upload", web::post().to(handlers::api_split_upload))
+            .route("/api/search", web::get().to(handlers::api_search))
+            .route("/api/search-doc", web::get().to(handlers::search_doc))
+            .route("/api/similar/{id}", web::get().to(handlers::api_similar))
+            .route("/api/bundle", web::post().to(handlers::api_bundle))
             .route("/plugin/{name}/{id}", web::post().to(handlers::run_plugin))
             .route("/plugins", web::get().to(handlers::list_plugins))
+            .route("/api/nix-skill/analyze", web::post().to(handlers::nix_skill_analyze))
+            .route("/api/nix-skill/find", web::post().to(handlers::nix_skill_find))
+            .route("/mcp", web::post().to(mcp_server::mcp_handler))
     })
     .bind(&bind)?
     .run()
