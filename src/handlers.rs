@@ -36,7 +36,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <form id="form">
 <input type="text" id="title" placeholder="Title" value=""><br><br>
 <textarea id="content" placeholder="Paste content here..."></textarea><br><br>
-<input type="file" id="file" accept="image/*,.html,.json,.svg"><br><br>
+<input type="file" id="file" accept="image/*,.html,.json,.svg,.tar.gz,.tar.bz2,.tar.xz,.zip,.gz,.bz2,.xz"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
 <input type="hidden" id="reply_to" value="{}">
 <button type="submit">📤 Share</button>
@@ -80,9 +80,11 @@ form.onsubmit = async (e) => {{
     
     if (fileInput.files.length > 0) {{
       const fd = new FormData();
+      const fn = fileInput.files[0].name;
       fd.append('file', fileInput.files[0]);
-      fd.append('title', document.getElementById('title').value || fileInput.files[0].name);
-      res = await fetch(basePath + '/upload', {{ method: 'POST', body: fd }});
+      fd.append('title', document.getElementById('title').value || fn);
+      const isArchive = fn.endsWith('.tar.gz') || fn.endsWith('.tar.bz2') || fn.endsWith('.tar.xz') || fn.endsWith('.zip') || fn.endsWith('.gz') || fn.endsWith('.bz2') || fn.endsWith('.xz');
+      res = await fetch(basePath + (isArchive ? '/upload-archive' : '/upload'), {{ method: 'POST', body: fd }});
     }} else {{
       const data = {{
         content: content.value,
@@ -1108,12 +1110,13 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     let session_id = hex::encode(&hasher.finalize())[..16].to_string();
 
     // Store for later access
+    let entry_count = result.entries.len();
     ARCHIVE_STORE.lock().unwrap().insert(session_id.clone(), result);
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "session_id": session_id,
         "filename": orig_name,
-        "entry_count": result.entries.len(),
+        "entry_count": entry_count,
         "url": format!("/browse-archive/{}", session_id),
     })))
 }
