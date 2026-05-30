@@ -40,83 +40,84 @@ pub struct JsonRpcError {
 
 // ─── MCP Tool Definitions ─────────────────────────────────────────────────
 
-const MCP_TOOLS: &[McpToolDef] = &[
-    McpToolDef {
-        name: "search_pastes",
-        description: "Search pastebin content and metadata. Searches both paste content and DOCS directories.",
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "query": { "type": "string", "description": "Search query" },
-                "limit": { "type": "integer", "description": "Max results (default 10)", "default": 10 },
-                "search_dirs": { "type": "boolean", "description": "Include DOCS directory search", "default": true }
-            },
-            "required": ["query"]
-        }),
-    },
-    McpToolDef {
-        name: "create_paste",
-        description: "Create a new paste. Content is posted to the pastebin for sharing or indexing.",
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "title": { "type": "string", "description": "Paste title" },
-                "content": { "type": "string", "description": "Paste content" },
-                "keywords": { "type": "string", "description": "Comma-separated keywords" }
-            },
-            "required": ["content"]
-        }),
-    },
-    McpToolDef {
-        name: "get_paste",
-        description: "Retrieve a paste by its ID. Returns content, metadata, and timestamps.",
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "paste_id": { "type": "string", "description": "Paste ID or filename" }
-            },
-            "required": ["paste_id"]
-        }),
-    },
-    McpToolDef {
-        name: "browse_pastes",
-        description: "Browse all pastes with optional search filter. Returns metadata listing.",
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "query": { "type": "string", "description": "Optional search filter" },
-                "limit": { "type": "integer", "description": "Max results (default 20)", "default": 20 }
-            }
-        }),
-    },
-    McpToolDef {
-        name: "analyze_flake",
-        description: "Analyze a flake.nix file and return structured data: inputs, outputs, packages, devShells, warnings.",
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string", "description": "Path to flake.nix file" }
-            },
-            "required": ["path"]
-        }),
-    },
-    McpToolDef {
-        name: "find_flakes",
-        description: "Find all flake.nix files in a directory tree and analyze them.",
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "directory": { "type": "string", "description": "Directory to scan (default: ~/dasl)", "default": "~/dasl" },
-                "max_depth": { "type": "integer", "description": "Max directory depth (default 4)", "default": 4 }
-            }
-        }),
-    },
-];
-
+fn mcp_tools() -> Vec<McpToolDef> {
+    vec![
+        McpToolDef {
+            name: "search_pastes".into(),
+            description: "Search pastebin content and metadata. Searches both paste content and DOCS directories.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Search query" },
+                    "limit": { "type": "integer", "description": "Max results (default 10)", "default": 10 },
+                    "search_dirs": { "type": "boolean", "description": "Include DOCS directory search", "default": true }
+                },
+                "required": ["query"]
+            }),
+        },
+        McpToolDef {
+            name: "create_paste".into(),
+            description: "Create a new paste. Content is posted to the pastebin for sharing or indexing.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Paste title" },
+                    "content": { "type": "string", "description": "Paste content" },
+                    "keywords": { "type": "string", "description": "Comma-separated keywords" }
+                },
+                "required": ["content"]
+            }),
+        },
+        McpToolDef {
+            name: "get_paste".into(),
+            description: "Retrieve a paste by its ID. Returns content, metadata, and timestamps.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "paste_id": { "type": "string", "description": "Paste ID or filename" }
+                },
+                "required": ["paste_id"]
+            }),
+        },
+        McpToolDef {
+            name: "browse_pastes".into(),
+            description: "Browse all pastes with optional search filter. Returns metadata listing.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Optional search filter" },
+                    "limit": { "type": "integer", "description": "Max results (default 20)", "default": 20 }
+                }
+            }),
+        },
+        McpToolDef {
+            name: "analyze_flake".into(),
+            description: "Analyze a flake.nix file and return structured data: inputs, outputs, packages, devShells, warnings.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to flake.nix file" }
+                },
+                "required": ["path"]
+            }),
+        },
+        McpToolDef {
+            name: "find_flakes".into(),
+            description: "Find and analyze all flake.nix files in a directory tree.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "directory": { "type": "string", "description": "Root directory to search (default ~/dasl)" },
+                    "max_depth": { "type": "integer", "description": "Max directory depth (default 4)" }
+                }
+            }),
+        },
+    ]
+}
 #[derive(Serialize)]
 struct McpToolDef {
-    name: &'static str,
-    description: &'static str,
+    name: String,
+    description: String,
     input_schema: Value,
 }
 
@@ -201,7 +202,7 @@ fn handle_initialize(_params: &Option<Value>) -> Result<Value, String> {
 
 fn handle_tools_list() -> Result<Value, String> {
     Ok(json!({
-        "tools": MCP_TOOLS
+        "tools": mcp_tools()
     }))
 }
 
@@ -210,10 +211,12 @@ async fn handle_tools_call(params: &Option<Value>) -> Result<Value, String> {
     let name = p.get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing tool name".to_string())?;
-    let args = p.get("arguments")
+    let args: HashMap<String, Value> = p.get("arguments")
         .and_then(|v| v.as_object())
         .cloned()
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     match name {
         "search_pastes" => handle_mcp_search(args).await,
