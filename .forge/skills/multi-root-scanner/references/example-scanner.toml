@@ -1,0 +1,14 @@
+# Example scanner.toml
+[[roots]]
+path = "/mnt/data1/time-2026/05-may/14"
+label = "2026-05-14"
+recursive = true
+file_pattern = "*.org"
+title_regex = "^#\\+TITLE:\\s*(.+)$"
+
+[[roots]]
+path = "/mnt/data1/time-2026/05-may/25"
+label = "2026-05-25"
+recursive = true
+file_pattern = "*.org"
+title_regex = "^#\\+TITLE:\\s*(.+)$"

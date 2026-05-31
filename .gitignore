@@ -13,3 +13,6 @@ docs/
 shards/
 shards/
 rust-ipfs
+/.pipelight/
+/build-output-2.log
+/build-output.log

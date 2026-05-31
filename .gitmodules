@@ -7,3 +7,15 @@
 [submodule "palletizer-rs"]
 	path = palletizer-rs
 	url = https://github.com/de-vri-es/palletizer-rs
+[submodule "erdfa-publish-investigation"]
+	path = erdfa-publish-investigation
+	url = ./erdfa-publish-investigation/
+[submodule "crate-vendor-work"]
+	path = crate-vendor-work
+	url = ./crate-vendor-work/
+[submodule "erdfa-clean"]
+	path = erdfa-clean
+	url = ./erdfa-clean/
+[submodule "erdfa-canonical"]
+	path = erdfa-canonical
+	url = ./erdfa-canonical/
