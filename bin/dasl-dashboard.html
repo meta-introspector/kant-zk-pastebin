@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DASL CI Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .pulsing { animation: pulse-dot 1.5s ease-in-out infinite; }
+  .status-ok { color: #4ade80; }
+  .status-fail { color: #f87171; }
+  .status-pending { color: #fb923c; }
+  .tile { transition: all 0.2s ease; }
+  .tile:hover { border-color: #60a5fa; transform: translateY(-1px); }
+</style>
+</head>
+<body class="bg-[#0f172a] text-slate-200 font-sans antialiased">
+  <div class="max-w-7xl mx-auto px-4 py-6">
+    <!-- Header -->
+    <header class="mb-8">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-bold text-slate-100 flex items-center gap-3">
+            <svg class="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+            </svg>
+            DASL CI Dashboard
+          </h1>
+          <p class="text-slate-400 text-sm mt-1">Build · Test · Fuzz · Perf · Coverage pipeline for ~dasl/rust/ crates</p>
+        </div>
+        <div class="flex items-center gap-4">
+          <span id="pipeline-timer" class="text-sm text-slate-500">Last run: loading...</span>
+          <button onclick="refreshData()" class="px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Pipeline bar -->
+      <div class="grid grid-cols-5 gap-3 mt-6">
+        <div id="phase-build" class="bg-[#1e293b] border border-slate-700 rounded-lg p-3 text-center tile cursor-pointer" onclick="scrollTo('build')">
+          <div class="text-xs text-slate-400 uppercase tracking-wider">Build</div>
+          <div id="phase-build-icon" class="text-2xl mt-1 pulsing">&#x23F3;</div>
+        </div>
+        <div id="phase-test" class="bg-[#1e293b] border border-slate-700 rounded-lg p-3 text-center tile cursor-pointer" onclick="scrollTo('tests')">
+          <div class="text-xs text-slate-400 uppercase tracking-wider">Tests</div>
+          <div id="phase-test-icon" class="text-2xl mt-1 pulsing">&#x23F3;</div>
+        </div>
+        <div id="phase-fuzz" class="bg-[#1e293b] border border-slate-700 rounded-lg p-3 text-center tile cursor-pointer" onclick="scrollTo('fuzz')">
+          <div class="text-xs text-slate-400 uppercase tracking-wider">Fuzz</div>
+          <div id="phase-fuzz-icon" class="text-2xl mt-1 pulsing">&#x23F3;</div>
+        </div>
+        <div id="phase-perf" class="bg-[#1e293b] border border-slate-700 rounded-lg p-3 text-center tile cursor-pointer" onclick="scrollTo('perf')">
+          <div class="text-xs text-slate-400 uppercase tracking-wider">Perf</div>
+          <div id="phase-perf-icon" class="text-2xl mt-1 pulsing">&#x23F3;</div>
+        </div>
+        <div id="phase-coverage" class="bg-[#1e293b] border border-slate-700 rounded-lg p-3 text-center tile cursor-pointer" onclick="scrollTo('coverage')">
+          <div class="text-xs text-slate-400 uppercase tracking-wider">Coverage</div>
+          <div id="phase-coverage-icon" class="text-2xl mt-1 pulsing">&#x23F3;</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Status summary cards -->
+    <div id="summary-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-slate-400 text-sm">Pipeline Status</span>
+          <span id="pipeline-status-badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-700">unknown</span>
+        </div>
+        <div id="pipeline-name" class="text-lg font-semibold text-slate-200">dasl-full-ci</div>
+      </div>
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-slate-400 text-sm">Crates</span>
+          <span class="text-xs text-slate-500">total</span>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span id="crates-built" class="text-2xl font-bold text-slate-200">-</span>
+          <span class="text-slate-400 text-sm">/ <span id="crates-total">13</span></span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1"><span id="crates-failed" class="text-red-400">0</span> failed</div>
+      </div>
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-slate-400 text-sm">Tests</span>
+          <span class="text-xs text-slate-500">PASS / FAIL</span>
+        </div>
+        <div class="flex items-baseline gap-3">
+          <span id="tests-pass" class="text-2xl font-bold text-green-400">-</span>
+          <span id="tests-fail" class="text-xl font-bold text-red-400">-</span>
+        </div>
+        <div class="w-full bg-slate-700 rounded-full h-1.5 mt-2">
+          <div id="tests-bar" class="bg-green-500 h-1.5 rounded-full" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-slate-400 text-sm">Coverage</span>
+          <span class="text-xs text-slate-500">lines</span>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span id="coverage-pct" class="text-2xl font-bold text-yellow-400">-</span>
+        </div>
+        <div class="w-full bg-slate-700 rounded-full h-1.5 mt-2">
+          <div id="coverage-bar" class="bg-yellow-500 h-1.5 rounded-full" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Build Tile -->
+    <section id="tile-build" class="mb-6">
+      <h2 class="text-lg font-semibold text-slate-200 mb-3 flex items-center gap-2">
+        <span class="w-3 h-3 rounded-full bg-slate-600" id="build-dot"></span>
+        Nix Build
+      </h2>
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-5">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <span class="text-xs text-slate-400">Status</span>
+            <div id="build-status" class="text-lg font-semibold">Pending</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Failures</span>
+            <div id="build-failures" class="text-lg font-semibold text-slate-400">none</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Log</span>
+            <div><a id="build-log-link" href="/nora/ci-results/build/nix-build.log" class="text-blue-400 hover:text-blue-300 text-sm">view full log &rarr;</a></div>
+          </div>
+        </div>
+        <pre id="build-log-tail" class="bg-[#0f172a] text-xs text-slate-400 p-3 rounded-lg overflow-x-auto max-h-48 font-mono">Loading...</pre>
+      </div>
+    </section>
+
+    <!-- Test Tile -->
+    <section id="tile-tests" class="mb-6">
+      <h2 class="text-lg font-semibold text-slate-200 mb-3 flex items-center gap-2">
+        <span class="w-3 h-3 rounded-full bg-slate-600" id="tests-dot"></span>
+        Test Results
+      </h2>
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-5">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <span class="text-xs text-slate-400">Pass</span>
+            <div id="tests-pass-big" class="text-3xl font-bold text-green-400">-</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Failed</span>
+            <div id="tests-fail-big" class="text-3xl font-bold text-red-400">-</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Log</span>
+            <div><a id="tests-log-link" href="/nora/ci-results/tests/cargo-test.log" class="text-blue-400 hover:text-blue-300 text-sm">view full log &rarr;</a></div>
+          </div>
+        </div>
+        <details class="mt-3">
+          <summary class="text-sm text-slate-400 cursor-pointer hover:text-slate-300">View failure details</summary>
+          <div id="test-failures-list" class="mt-2 space-y-1">
+            <div class="text-slate-500 text-sm italic">No failures</div>
+          </div>
+        </details>
+        <pre id="test-summary" class="bg-[#0f172a] text-xs text-slate-400 p-3 rounded-lg overflow-x-auto max-h-32 font-mono mt-3">Loading...</pre>
+      </div>
+    </section>
+
+    <!-- Fuzz Tile -->
+    <section id="tile-fuzz" class="mb-6">
+      <h2 class="text-lg font-semibold text-slate-200 mb-3 flex items-center gap-2">
+        <span class="w-3 h-3 rounded-full bg-slate-600" id="fuzz-dot"></span>
+        Fuzz Testing
+      </h2>
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-5">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div>
+            <span class="text-xs text-slate-400">Status</span>
+            <div id="fuzz-status-badge" class="text-lg font-semibold">Pending</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Crashes</span>
+            <div id="fuzz-crashes" class="text-3xl font-bold text-slate-400">-</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Targets</span>
+            <div id="fuzz-targets" class="text-3xl font-bold text-slate-400">-</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Log</span>
+            <div><a id="fuzz-log-link" href="/nora/ci-results/fuzz/fuzz-results.log" class="text-blue-400 hover:text-blue-300 text-sm">view full log &rarr;</a></div>
+          </div>
+        </div>
+        <div id="fuzz-target-grid" class="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Perf Tile -->
+    <section id="tile-perf" class="mb-6">
+      <h2 class="text-lg font-semibold text-slate-200 mb-3 flex items-center gap-2">
+        <span class="w-3 h-3 rounded-full bg-slate-600" id="perf-dot"></span>
+        Performance Benchmarks
+      </h2>
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-5">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <span class="text-xs text-slate-400">Status</span>
+            <div id="perf-status" class="text-lg font-semibold">Pending</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Crates measured</span>
+            <div id="perf-crates" class="text-2xl font-bold text-slate-300">-</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Results</span>
+            <div><a id="perf-log-link" href="/nora/ci-results/perf/criterion.log" class="text-blue-400 hover:text-blue-300 text-sm">view results &rarr;</a></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Coverage Tile -->
+    <section id="tile-coverage" class="mb-6">
+      <h2 class="text-lg font-semibold text-slate-200 mb-3 flex items-center gap-2">
+        <span class="w-3 h-3 rounded-full bg-slate-600" id="coverage-dot"></span>
+        Code Coverage
+      </h2>
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-5">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <span class="text-xs text-slate-400">Coverage</span>
+            <div class="flex items-baseline gap-2">
+              <span id="coverage-pct-big" class="text-3xl font-bold">-</span>
+              <span class="text-slate-400 text-sm">lines</span>
+            </div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Status</span>
+            <div id="coverage-status" class="text-lg font-semibold">Pending</div>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400">Report</span>
+            <div><a id="coverage-report-link" href="/nora/ci-results/coverage/" class="text-blue-400 hover:text-blue-300 text-sm">view html report &rarr;</a></div>
+          </div>
+        </div>
+        <div class="w-full bg-slate-700 rounded-full h-2.5 mt-4">
+          <div id="coverage-bar-big" class="h-2.5 rounded-full transition-all duration-500" style="width:0%"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="mt-8 pt-4 border-t border-slate-800 text-center text-xs text-slate-600">
+      DASL CI Dashboard &middot; Results from /mnt/data1/nora/ci-results/ &middot;
+      <a href="/nora/ci-results/" class="text-blue-500 hover:text-blue-400">browse raw files</a>
+    </footer>
+  </div>
+
+  <script>
+    // ── Data fetching ──────────────────────────────────────────────
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/nora/ci-results/status.json?' + Date.now());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return await res.json();
+      } catch (e) {
+        console.warn('Cannot fetch status.json:', e);
+        return null;
+      }
+    }
+
+    function setBadge(id, status, label) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (status === 'success' || status === 'pass' || status === 'completed') {
+        el.className = 'text-xs px-2 py-0.5 rounded-full bg-green-900/50 text-green-400';
+        el.textContent = label || status;
+      } else if (status === 'failure' || status === 'fail' || status === 'crashes') {
+        el.className = 'text-xs px-2 py-0.5 rounded-full bg-red-900/50 text-red-400';
+        el.textContent = label || status;
+      } else {
+        el.className = 'text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-400';
+        el.textContent = label || status || 'pending';
+      }
+    }
+
+    function setDot(id, status) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (status === 'success' || status === 'pass' || status === 'completed') {
+        el.className = 'w-3 h-3 rounded-full bg-green-500';
+      } else if (status === 'failure' || status === 'fail' || status === 'crashes') {
+        el.className = 'w-3 h-3 rounded-full bg-red-500';
+      } else {
+        el.className = 'w-3 h-3 pulsing rounded-full bg-orange-500';
+      }
+    }
+
+    function setPhaseIcon(id, status) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (status === 'success' || status === 'pass' || status === 'completed') {
+        el.innerHTML = '&#x2714;';
+        el.className = 'text-2xl mt-1 status-ok';
+      } else if (status === 'failure' || status === 'fail' || status === 'crashes') {
+        el.innerHTML = '&#x2716;';
+        el.className = 'text-2xl mt-1 status-fail';
+      } else {
+        el.innerHTML = '&#x23F3;';
+        el.className = 'text-2xl mt-1 pulsing';
+      }
+    }
+
+    function scrollTo(id) {
+      const el = document.getElementById('tile-' + id) || document.getElementById('tile-' + id.replace(/s$/, ''));
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ── Render dashboard ──────────────────────────────────────────
+    function renderDashboard(data) {
+      if (!data) {
+        document.getElementById('pipeline-name').textContent = 'No data available';
+        return;
+      }
+
+      // Timestamp
+      const ts = data.timestamp || 'unknown';
+      document.getElementById('pipeline-timer').textContent = 'Last run: ' + ts.replace('T', ' ').substring(0, 19);
+
+      // Pipeline name
+      document.getElementById('pipeline-name').textContent = data.pipeline || 'dasl-full-ci';
+
+      // Build section
+      const build = data.build || {};
+      setBadge('pipeline-status-badge', build.status, build.status);
+      setPhaseIcon('phase-build-icon', build.status);
+      setDot('build-dot', build.status);
+      document.getElementById('build-status').textContent = build.status || 'Pending';
+      document.getElementById('build-failures').textContent = build.failures || 'none';
+      document.getElementById('crates-built').textContent = build.crates_built ?? '-';
+      document.getElementById('crates-total').textContent = build.crates_total ?? '13';
+      document.getElementById('crates-failed').textContent = build.failures ? build.failures.split(' ').length - 1 : 0;
+
+      // Build log tail
+      const nixLog = data.metadata?.nix_log_tail;
+      if (nixLog) {
+        document.getElementById('build-log-tail').textContent = nixLog;
+      }
+
+      // Test section
+      const tests = data.tests || {};
+      setPhaseIcon('phase-test-icon', tests.status);
+      setDot('tests-dot', tests.status);
+      document.getElementById('tests-pass').textContent = tests.pass ?? '-';
+      document.getElementById('tests-fail').textContent = tests.fail ?? '-';
+      document.getElementById('tests-pass-big').textContent = tests.pass ?? '-';
+      document.getElementById('tests-fail-big').textContent = tests.fail ?? '-';
+
+      // Test pass rate bar
+      const totalTests = (tests.pass || 0) + (tests.fail || 0);
+      if (totalTests > 0) {
+        const pct = ((tests.pass || 0) / totalTests) * 100;
+        document.getElementById('tests-bar').style.width = pct + '%';
+      }
+
+      // Test failures list
+      const failuresList = document.getElementById('test-failures-list');
+      if (tests.failures && tests.failures.trim()) {
+        const failures = tests.failures.trim().split(/\s+/);
+        failuresList.innerHTML = failures.map(f =>
+          '<div class="flex items-center gap-2 text-sm text-red-400">' +
+          '<span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>' +
+          '<code>' + f + '</code></div>'
+        ).join('');
+      } else {
+        failuresList.innerHTML = '<div class="text-slate-500 text-sm italic">All tests passed</div>';
+      }
+
+      // Test summary
+      if (tests.summary) {
+        document.getElementById('test-summary').textContent = tests.summary;
+      }
+
+      // Fuzz section
+      const fuzz = data.fuzz || {};
+      setPhaseIcon('phase-fuzz-icon', fuzz.status);
+      setDot('fuzz-dot', fuzz.status);
+      setBadge('fuzz-status-badge', fuzz.status, fuzz.summary);
+      document.getElementById('fuzz-crashes').textContent = fuzz.crashes ?? '-';
+      document.getElementById('fuzz-targets').textContent = fuzz.targets_total ?? '-';
+
+      // Fuzz target grid
+      const targetGrid = document.getElementById('fuzz-target-grid');
+      if (fuzz.targets_total) {
+        const targets = [
+          'honggfuzz-rs/input', 'honggfuzz-rs/decode', 'honggfuzz-rs/encode',
+          'serde_ipld/cbor_roundtrip', 'serde_ipld/dagcbor_parse',
+          'ipld-core/cid', 'ipld-core/multihash', 'n0_dasl/validation'
+        ];
+        targetGrid.innerHTML = targets.slice(0, fuzz.targets_total).map(t =>
+          '<div class="bg-[#0f172a] border border-slate-700 rounded-lg p-2 text-xs">' +
+          '<code class="text-slate-300">' + t + '</code>' +
+          '<div class="text-green-400 mt-1">&#x2714; no crashes</div></div>'
+        ).join('');
+      }
+
+      // Perf section
+      const perf = data.perf || {};
+      setPhaseIcon('phase-perf-icon', perf.status);
+      setDot('perf-dot', perf.status);
+      document.getElementById('perf-status').textContent = perf.status || 'Pending';
+      document.getElementById('perf-crates').textContent = (perf.crates || []).length || '-';
+
+      // Coverage section
+      const coverage = data.coverage || 'N/A';
+      const covPct = parseFloat(coverage) || 0;
+      setPhaseIcon('phase-coverage-icon', coverage !== 'N/A' ? 'completed' : 'pending');
+      setDot('coverage-dot', coverage !== 'N/A' ? 'completed' : 'pending');
+      document.getElementById('coverage-pct').textContent = coverage;
+      document.getElementById('coverage-pct-big').textContent = coverage;
+      document.getElementById('coverage-bar').style.width = covPct + '%';
+      document.getElementById('coverage-bar-big').style.width = covPct + '%';
+
+      // Coverage bar color
+      const barColor = covPct >= 70 ? '#4ade80' : covPct >= 40 ? '#facc15' : '#f87171';
+      document.getElementById('coverage-bar-big').style.background = barColor;
+
+      if (coverage !== 'N/A') {
+        document.getElementById('coverage-status').textContent = 'completed';
+        document.getElementById('coverage-status').className = 'text-lg font-semibold text-green-400';
+      } else {
+        document.getElementById('coverage-status').textContent = 'Pending';
+      }
+    }
+
+    // ── Polling ───────────────────────────────────────────────────
+    async function refreshData() {
+      const data = await fetchStatus();
+      renderDashboard(data);
+    }
+
+    // Initial load + auto-poll
+    refreshData();
+    setInterval(refreshData, 15000); // every 15s
+  </script>
+</body>
+</html>

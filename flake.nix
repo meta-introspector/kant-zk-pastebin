@@ -13,6 +13,7 @@
 
     zos-circuit-tile = { url = "path:./tiles/zos-circuit-tile"; };
     org-tile = { url = "path:./tiles/org-tile"; };
+    nora-tile = { url = "path:/mnt/data1/time-2026/05-may/28/nora/tiles/nora-tile"; };
 
     crate-vendor = {
       url = "git+file:///mnt/data1/git/flat/crate-vendor.git?ref=main-clean";
@@ -41,7 +42,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, common-inputs, system-manager, pipelight, crate-vendor, zos-circuit-tile, org-tile, kellnr, nora }:
+  outputs = { self, nixpkgs, flake-utils, common-inputs, system-manager, pipelight, crate-vendor, zos-circuit-tile, org-tile, nora-tile, kellnr, nora }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -77,7 +78,7 @@
           buildInputs = with pkgs; [ openssl ];
 
           # Enrich pipeline: tell the binary where tiles live
-          TILES_DIR = "${zos-circuit-tile.packages.${system}.default}/lib:${org-tile.packages.${system}.default}/lib";
+          TILES_DIR = "${zos-circuit-tile.packages.${system}.default}/lib:${org-tile.packages.${system}.default}/lib:${nora-tile.packages.${system}.default}/lib";
 
           doCheck = false;
 
@@ -157,6 +158,11 @@
       }
     )
     // {
+      # Shared library: nora cargo registry injection for Rust builds
+      lib = {
+        nora-cargo-config = pkgs: import ./lib/nora-cargo-config.nix { inherit pkgs; };
+      };
+
       # System-manager configuration for declarative deployment
       # Usage: nix run github:numtide/system-manager -- switch --flake .#kant-pastebin
       systemConfigs.kant-pastebin = system-manager.lib.makeSystemConfig {
@@ -164,7 +170,7 @@
           ./system-manager-config.nix
           { nixpkgs.hostPlatform = "x86_64-linux"; }
         ];
-        specialArgs = { inherit self zos-circuit-tile org-tile; };
+        specialArgs = { inherit self zos-circuit-tile org-tile nora-tile; };
       };
 
       # Usage: nix run github:numtide/system-manager -- switch --flake .#kellnr
@@ -181,10 +187,11 @@
       systemConfigs.nora = system-manager.lib.makeSystemConfig {
         modules = [
           "${nora}/nora-system-manager.nix"
+          ./nora-ci-policy.nix
           { nixpkgs.hostPlatform = "x86_64-linux"; }
         ];
-        # Pass the nora flake as `self` so the module can find its packages
-        specialArgs = { self = nora; };
+        # Pass the nora flake as `self` + pastebin flake for access to kant-pastebin
+        specialArgs = { self = nora; pastebinFlake = self; };
       };
     };
 }

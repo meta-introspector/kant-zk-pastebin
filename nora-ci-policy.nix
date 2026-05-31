@@ -190,12 +190,33 @@ JSON
     };
 
     # ── Serve results directory via nginx ──────────────────────────
-    services.nginx.virtualHosts."solana.solfunmeme.com".locations."/nora/ci-results/" = {
-      alias = "/mnt/data1/nora/ci-results/";
-      extraConfig = ''
-        autoindex on;
-        add_header Cache-Control "no-store";
-      '';
+    services.nginx.virtualHosts."solana.solfunmeme.com" = {
+      forceSSL = true;
+      sslCertificate = "/etc/letsencrypt/live/solana.solfunmeme.com/fullchain.pem";
+      sslCertificateKey = "/etc/letsencrypt/live/solana.solfunmeme.com/privkey.pem";
+
+      locations."/nora/health" = {
+        proxyPass = "http://127.0.0.1:4000/health";
+      };
+
+      locations."/nora/ci-results/" = {
+        alias = "/mnt/data1/nora/ci-results/";
+        extraConfig = ''
+          autoindex on;
+          add_header Cache-Control "no-store";
+        '';
+      };
+
+      locations."/pastebin/" = {
+        proxyPass = "http://127.0.0.1:8090/";
+        proxyWebsockets = true;
+        extraConfig = ''
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        '';
+      };
     };
   };
 }
