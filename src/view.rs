@@ -2,12 +2,12 @@
 use crate::model::PasteIndex;
 
 /// Render paste view page
-pub fn render_paste(paste: &PasteIndex, content: &str) -> String {
+pub fn render_paste(paste: &PasteIndex, content: &str, base_path: &str) -> String {
     let reply_info = if let Some(ref reply_id) = paste.reply_to {
         format!(r#"
 <div style="background:#111;border-left:3px solid #00f;padding:10px;margin:10px 0;color:#00f">
-    ↩️ In reply to: <a href="/paste/{}" style="color:#0ff">{}</a>
-</div>"#, reply_id, reply_id)
+    ↩️ In reply to: <a href="{bp}/paste/{rid}" style="color:#0ff">{rid}</a>
+</div>"#, rid = reply_id, bp = base_path)
     } else {
         String::new()
     };
@@ -16,7 +16,7 @@ pub fn render_paste(paste: &PasteIndex, content: &str) -> String {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{} - kant-pastebin</title>
+    <title>{title} - kant-pastebin</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ background: #000; color: #0f0; font-family: monospace; padding: 20px; }}
@@ -27,13 +27,13 @@ pub fn render_paste(paste: &PasteIndex, content: &str) -> String {
     </style>
 </head>
 <body>
-    <div><a href="/">🏠 Home</a> <a href="/browse">← Browse</a> <a href="/raw/{}">📄 Raw</a></div>
-    <h1>{}</h1>
-    <p>ID: {} | {}</p>
-    {}
-    <a class="reply-btn" href="/?reply_to={}">💬 Reply</a>
+    <div><a href="{bp}/">🏠 Home</a> <a href="{bp}/browse">← Browse</a> <a href="{bp}/raw/{pid}">📄 Raw</a></div>
+    <h1>{title}</h1>
+    <p>ID: {pid} | {ts}</p>
+    {reply}
+    <a class="reply-btn" href="{bp}/?reply_to={pid}">💬 Reply</a>
     <button class="reply-btn" onclick="copyRaw()">📋 Copy HTML</button>
-    <pre id="src">{}</pre>
+    <pre id="src">{content}</pre>
     <script>
     function copyRaw(){{
       var t=document.getElementById('src').textContent;
@@ -43,17 +43,14 @@ pub fn render_paste(paste: &PasteIndex, content: &str) -> String {
       }});
     }}
     </script>
-    <script src="/static/a11y.js"></script>
 </body>
-</html>"#, 
-        paste.title, 
-        paste.id,
-        paste.title, 
-        paste.id, 
-        paste.timestamp,
-        reply_info,
-        paste.id,
-        html_escape(content)
+</html>"#,
+        title = paste.title,
+        bp = base_path,
+        pid = paste.id,
+        ts = paste.timestamp,
+        reply = reply_info,
+        content = html_escape(content)
     )
 }
 
@@ -63,17 +60,17 @@ pub fn render_preview(id: &str, content: &str) -> String {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Preview: {}</title>
+    <title>Preview: {id}</title>
     <style>
         body {{ background: #000; color: #0f0; font-family: monospace; padding: 20px; }}
         pre {{ background: #111; padding: 20px; border: 1px solid #0f0; }}
     </style>
 </head>
 <body>
-    <h1>Preview: {}</h1>
-    <pre>{}</pre>
+    <h1>Preview: {id}</h1>
+    <pre>{content}</pre>
 </body>
-</html>"#, id, id, html_escape(content))
+</html>"#, id = id, content = html_escape(content))
 }
 
 fn html_escape(s: &str) -> String {

@@ -1,4 +1,4 @@
-{ config, lib, pkgs, self, zos-circuit-tile, org-tile, nora-tile, ... }:
+{ config, lib, pkgs, self, zos-circuit-tile, org-tile, nora-tile, dasl-tiles-rust, ... }:
 
 let
   system = pkgs.stdenv.hostPlatform.system;
@@ -7,12 +7,13 @@ let
   pipelight-cmd = "${self.packages.${system}.pipelight}/bin/pipelight";
   tilesDir = "${zos-circuit-tile.packages.${system}.default}/lib:${org-tile.packages.${system}.default}/lib:${nora-tile.packages.${system}.default}/lib";
   nora = self.packages.${system}.nora;
+  daslTilesRust = dasl-tiles-rust.packages.${system}.default;
 
   # DASL onboarding script — pushes submodule artifacts to NORA
-  daslOnboardScript = pkgs.writeShellScript "dasl-onboard-to-nora" (builtins.readFile ./bin/dasl-onboard-to-nora.sh);
+  daslOnboardScript = pkgs.writeShellScriptBin "dasl-onboard-to-nora" (builtins.readFile ./bin/dasl-onboard-to-nora.sh);
 
   # DASL CI pipeline script — build, test, fuzz, publish all DASL crates
-  daslCiScript = pkgs.writeShellScript "dasl-ci" (builtins.readFile ./bin/dasl-ci.sh);
+  daslCiScript = pkgs.writeShellScriptBin "dasl-ci" (builtins.readFile ./bin/dasl-ci.sh);
 
   # DASL CI dashboard — interactive HTML with live tiles
   daslDashboardHtml = pkgs.writeTextDir "dasl-dashboard.html" (builtins.readFile ./bin/dasl-dashboard.html);
@@ -62,15 +63,21 @@ in
           proxy_set_header X-Real-IP $remote_addr;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
           proxy_set_header X-Forwarded-Proto $scheme;
+          client_max_body_size 0;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_connect_timeout 3600s;
+          proxy_buffering off;
+          proxy_request_buffering off;
         '';
       };
 
-      locations."/nora/health" = {
+locations."/nora/health" = {
         proxyPass = "http://127.0.0.1:4000/health";
       };
 
       # Serve CI pipeline results as static files (build, test, fuzz, perf, coverage)
-      locations."/nora/dashboard" = {
+      locations."=/nora/dashboard" = {
         alias = "${daslDashboardHtml}/dasl-dashboard.html";
         extraConfig = ''
           add_header Cache-Control "no-store";
@@ -112,10 +119,91 @@ in
                 <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 Results
               </a>
-            </div>
-          </nav>'
-        '';
-      };
+</div>
+           </nav>'
+         '';
+       };
+
+       # ─── DASL Tile Dashboard (test-result-tile :8081) ───────────────
+       locations."/tiles/" = {
+         proxyPass = "http://127.0.0.1:8081/";
+         proxyWebsockets = true;
+         extraConfig = ''
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           proxy_read_timeout 120s;
+         '';
+       };
+
+       locations."/dynamic" = {
+         proxyPass = "http://127.0.0.1:8081/dynamic";
+         extraConfig = ''
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+         '';
+       };
+
+       locations."/api/" = {
+         proxyPass = "http://127.0.0.1:8081/api/";
+         extraConfig = ''
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+         '';
+       };
+
+       locations."/tile/ebpf/" = {
+         proxyPass = "http://127.0.0.1:18090/ebpf/";
+         extraConfig = ''
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+         '';
+       };
+
+       locations."/tile/search/" = {
+         proxyPass = "http://127.0.0.1:18090/search/";
+         extraConfig = ''
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+         '';
+       };
+
+       locations."/dashboard/ebpf" = {
+         proxyPass = "http://127.0.0.1:18090/dashboard/ebpf";
+         extraConfig = ''
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+         '';
+       };
+
+       locations."/dashboard/search" = {
+         proxyPass = "http://127.0.0.1:18090/dashboard/search";
+         extraConfig = ''
+           proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+          '';
+        };
+
+        locations."/monitoring/check" = {
+          proxyPass = "http://127.0.0.1:18090/monitoring/check";
+          extraConfig = ''
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+          '';
+        };
+
+        locations."/dashboard/monitoring" = {
+          proxyPass = "http://127.0.0.1:18090/dashboard/monitoring";
+          extraConfig = ''
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+          '';
+        };
     };
 
     # ─── Generate self-signed fallback certs + symlink to LE path ─────
@@ -307,6 +395,10 @@ in
         Restart = "always";
         RestartSec = "10";
         WorkingDirectory = "/mnt/data1/kant/pastebin";
+        TimeoutStartSec = 0;
+        TimeoutStopSec = 0;
+        TimeoutAbortSec = 0;
+        TimeoutSec = 0;
       };
       environment = {
         BIND_ADDR = "127.0.0.1:8090";
@@ -492,5 +584,100 @@ in
       daslOnboardScript
       daslCiScript
     ];
-  };
-}
+
+    # ─── IPLD CAR-of-CARs shmem server ────────────────────────────────
+    # Content-addressed block store with token-level dedup.
+    # Runs as ipld-data user (not root). Non-sparse pages.car.
+    systemd.services.ipld-car-shmem = {
+      enable = true;
+      description = "IPLD CAR-of-CARs Shared Memory Server — content-addressed block store with token dedup";
+      after = [ "network.target" ];
+      wantedBy = [ "system-manager.target" ];
+
+      serviceConfig = {
+        Type = "simple";
+        User = "ipld-data";
+        Group = "ipld-data";
+        ExecStart = "/home/mdupont/dasl/ipld-car-ipc-shmem-linux/target/release/ipld-car-shmem-server";
+        Restart = "on-failure";
+        RestartSec = "5";
+        WorkingDirectory = "/mnt/data1/dasl-cache";
+
+        # Security hardening
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectControlGroups = true;
+      };
+
+      environment = {
+        IPLD_CAR_CACHE_PATH = "/mnt/data1/dasl-cache";
+        IPLD_CAR_CAPACITY = "2147483648"; # 2GB, non-sparse
+        RUST_LOG = "info";
+      };
+    };
+
+# ─── IPLD data directory setup (oneshot) ────────────────────────
+     systemd.services.ipld-car-shmem-dir = {
+       enable = true;
+       description = "Create IPLD CAR data directories";
+       before = [ "ipld-car-shmem.service" ];
+       wantedBy = [ "system-manager.target" ];
+       serviceConfig = {
+         Type = "oneshot";
+         RemainAfterExit = true;
+       };
+       script = ''
+         mkdir -p /mnt/data1/dasl-cache
+         chown -R ipld-data:ipld-data /mnt/data1/dasl-cache
+       '';
+     };
+
+# ─── DASL Tile Server (surface-pane + tile-server) ───────────────
+      systemd.services.dasl-tile-server = {
+        enable = true;
+        description = "DASL Tile Server — eBPF + search endpoints";
+        after = [ "network.target" ];
+        wantedBy = [ "system-manager.target" ];
+        serviceConfig = {
+          Type = "simple";
+          ExecStart = "${daslTilesRust}/bin/tile-server -d solana.solfunmeme.com -p 18090";
+          Restart = "always";
+          RestartSec = "10";
+          WorkingDirectory = "/home/mdupont/dasl-tiles-rust";
+          Environment = "DASL_TESTING_ROOT=/mnt/data1/time-2026/02-february/22/dasl/dasl-testing";
+          TimeoutStartSec = 0;
+          TimeoutStopSec = 0;
+        };
+      };
+
+      # ─── Test Result Tile Dashboard (port 8081) ────────────────────
+      systemd.services.test-result-tile = {
+        enable = true;
+        description = "DASL Test Result Tile — 247 tiles across harnesses + dynamic services";
+        after = [ "network.target" "ipld-car-shmem.service" ];
+        wantedBy = [ "system-manager.target" ];
+        serviceConfig = {
+          Type = "simple";
+          User = "dasl";
+          Group = "dasl";
+          ExecStart = "${daslTilesRust}/bin/tile-server serve --domain solana.solfunmeme.com --port 8081 --base-path /tiles";
+          Restart = "always";
+          RestartSec = "10s";
+          WorkingDirectory = "/var/lib/dasl-tiles/test-result-tile";
+          StandardOutput = "journal";
+          StandardError = "journal";
+          NoNewPrivileges = true;
+          PrivateTmp = true;
+        };
+        environment = {
+          RUST_LOG = "info";
+          DASL_TILES_DIR = "/var/lib/dasl-tiles/test-result-tile/public";
+          IPLD_CAR_SHMEM = "/run/ipld-car-shmem";
+          DASL_TESTING_ROOT = "/mnt/data1/time-2026/02-february/22/dasl/dasl-testing";
+        };
+      };
+    };
+  }

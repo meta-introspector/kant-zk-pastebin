@@ -1,6 +1,6 @@
 // Handlers - Request handlers for kant-pastebin microservice
 use actix_web::{web, HttpResponse, HttpRequest, Result};
-use crate::model::{Paste, Response, PasteIndex};
+use crate::model::{Paste, Response, PasteIndex, SplitProfile, SplitProfileRequest, SplitMode};
 use crate::plugins::pipelight;
 use crate::plugins;
 use crate::{view, storage, ipfs, tagging, plugin};
@@ -8,6 +8,7 @@ use chrono::Utc;
 use sha2::{Sha256, Digest};
 use ciborium;
 use std::{fs, env, collections::HashMap};
+use std::path::Path;
 
 // ─── Helper: append an entry to index.jsonl ──────────────────────────
 fn write_index_entry(
@@ -72,7 +73,8 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <a href="{}/">🏠 Home</a>
 <a href="{}/browse">📚 Browse</a>
 <a href="{}/gallery">🖼️ Gallery</a>
-<a href="/splitter/">✂️ Splitter</a>
+<a href="{}/git-browse">📁 Git</a>
+<a href="{}/splitter/">✂️ Splitter</a>
 <a href="{}/openapi.json">📖 API</a>
 </div>
 <h1>📋 Kant Pastebin</h1>
@@ -109,7 +111,7 @@ function preview() {{
 
 function sendToSplitter() {{
   localStorage.setItem('splitter-text', content.value);
-  window.open('/splitter/', '_blank');
+  window.open('{}/splitter/', '_blank');
 }}
 
 form.onsubmit = async (e) => {{
@@ -153,7 +155,7 @@ form.onsubmit = async (e) => {{
   }}
 }};
 </script>
-</body></html>"#, base_path, base_path, base_path, base_path, reply_to, base_path, base_path, base_path, base_path);
+</body></html>"#, base_path, base_path, base_path, base_path, base_path, base_path, reply_to, base_path, base_path, base_path, base_path, base_path);
     
     Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
 }
@@ -530,7 +532,7 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 <button class="reply-btn" onclick="showQR()">📱 QR Code</button>
 <button class="reply-btn" onclick="shareRDFa()">🔗 RDFa URL</button>
 <button class="reply-btn" onclick="showPreview()">👁️ Preview</button>
-<button class="reply-btn" onclick="localStorage.setItem('splitter-text',document.querySelector('pre').textContent);window.open('/splitter/','_blank')">✂️ Split</button>
+<button class="reply-btn" onclick="localStorage.setItem('splitter-text',document.querySelector('pre').textContent);window.open('{}/splitter/','_blank')">✂️ Split</button>
 
 <h3>Access Commands:</h3>
 <div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
@@ -617,7 +619,7 @@ function toggleSidebar() {{
     return;
   }}
   s.classList.add('open');
-  fetch('/api/similar/' + currentPasteId)
+  fetch('{}/api/similar/' + currentPasteId)
     .then(r => r.json())
     .then(d => {{
       const div = document.getElementById('similarResults');
@@ -645,7 +647,7 @@ function bundleSelected() {{
   if (checks.length === 0) {{ alert('Select at least one post.'); return; }}
   const pastes = [currentPasteId];
   checks.forEach(c => pastes.push(c.value));
-  fetch('/api/bundle', {{
+  fetch('{}/api/bundle', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{pastes: pastes}})
@@ -658,12 +660,13 @@ function bundleSelected() {{
     .catch(e => alert('Bundle error: ' + e));
 }}
 </script>
-<script src="/static/a11y.js"></script>
+<script src="{}/static/a11y.js"></script>
 </body></html>"#, 
-                title, 
+                title,
                 base_path, base_path, base_path, id, prev_link, next_link,
-                title, 
+                title,
                 base_path, id, title,
+                base_path,
                 ipfs_cmd, ipfs_cmd,
                 file_cmd, file_cmd,
                 curl_cmd, curl_cmd,
@@ -673,7 +676,10 @@ function bundleSelected() {{
                 related_html,
                 title,
                 ipfs_cid.unwrap_or(""),
-                title
+                title,
+                base_path,
+                base_path,
+                base_path
             );
             
             Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
@@ -1131,6 +1137,7 @@ pub async fn api_search(req: HttpRequest) -> Result<HttpResponse> {
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let index_file = format!("{}/index.jsonl", uucp_dir);
     
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
     let uri = req.uri().to_string();
     let search_q = match parse_query_param(&uri, "q") {
         Some(q) if !q.is_empty() => q.to_lowercase(),
@@ -1211,6 +1218,80 @@ pub async fn api_search(req: HttpRequest) -> Result<HttpResponse> {
         }
     }
 
+    // Add git mount search results (from cached files)
+    let git_remaining = limit.saturating_sub(results.len());
+    if git_remaining > 0 {
+        // Extract data from cache under lock, then do I/O outside
+        let (name_matches, content_candidates) = {
+            let cache = crate::git_mount::get_cache();
+            let name_matches: Vec<(String, String, String, String, usize)> = cache
+                .search_names(&search_q, git_remaining)
+                .iter()
+                .map(|e| (e.mount_id.clone(), e.rel_path.clone(), e.name.clone(), e.path.clone(), e.size as usize))
+                .collect();
+
+            // For content search, get the list of candidates to search
+            let content_candidates: Vec<(String, String, String, String, usize)> = cache
+                .files.values()
+                .filter(|e| {
+                    let text_exts = ["rs", "py", "js", "ts", "go", "java", "c", "h", "cpp", "hpp",
+                        "md", "txt", "org", "toml", "yaml", "yml", "json", "nix", "sh"];
+                    text_exts.contains(&e.ext.as_str())
+                })
+                .take(100) // limit I/O
+                .map(|e| (e.mount_id.clone(), e.rel_path.clone(), e.name.clone(), e.path.clone(), e.size as usize))
+                .collect();
+
+            (name_matches, content_candidates)
+        };
+
+        // Add filename matches
+        for (mount_id, rel_path, name, file_path, size) in name_matches {
+            results.push(SearchResult {
+                id: format!("git-{}", rel_path.replace('/', "_")),
+                title: name,
+                description: Some(format!("Git: {}/{}", mount_id, rel_path)),
+                keywords: vec![],
+                match_type: "git".to_string(),
+                excerpt: String::new(),
+                url: format!("/git-view/{}/{}", mount_id, rel_path),
+                timestamp: String::new(),
+                size,
+                source: Some("git".to_string()),
+                file_path: Some(file_path),
+            });
+        }
+
+        // Content matches — do I/O outside the lock
+        let git_remaining2 = limit.saturating_sub(results.len());
+        if git_remaining2 > 0 {
+            let q = search_q.to_lowercase();
+            let mut count = 0;
+            for (mount_id, rel_path, name, file_path, size) in content_candidates {
+                if count >= git_remaining2 { break; }
+                if let Ok(content) = fs::read_to_string(&file_path) {
+                    if content.to_lowercase().contains(&q) {
+                        let excerpt = excerpt_around(&content, &search_q, 80);
+                        results.push(SearchResult {
+                            id: format!("git-c-{}", rel_path.replace('/', "_")),
+                            title: name,
+                            description: Some(format!("Git content: {}/{}", mount_id, rel_path)),
+                            keywords: vec![],
+                            match_type: "git-content".to_string(),
+                            excerpt,
+                            url: format!("/git-view/{}/{}", mount_id, rel_path),
+                            timestamp: String::new(),
+                            size,
+                            source: Some("git".to_string()),
+                            file_path: Some(file_path),
+                        });
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "query": &search_q,
         "total": results.len(),
@@ -1222,6 +1303,7 @@ pub async fn api_search(req: HttpRequest) -> Result<HttpResponse> {
 /// GET /api/search-doc?path=<path> - View a doc file returned by search
 /// CLI: curl 'http://localhost:8090/api/search-doc?path=/home/mdupont/DOCS/search/README.md'
 pub async fn search_doc(req: HttpRequest) -> Result<HttpResponse> {
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
     let uri = req.uri().to_string();
     let path = match parse_query_param(&uri, "path") {
         Some(p) if !p.is_empty() => p,
@@ -1254,11 +1336,11 @@ pre{{background:#111;padding:15px;border:1px solid #333;overflow-x:auto;white-sp
 code{{font-family:monospace}}
 .meta{{color:#888;font-size:0.9em}}
 </style></head><body>
-<div class="nav"><a href="/">🏠 Home</a> <a href="/browse">📚 Browse</a> <a href="/api/search">🔍 Search</a></div>
+<div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/api/search">🔍 Search</a></div>
 <h1>📄 {}</h1>
 <p class="meta">📁 {} <span style="float:right">{}</span></p>
 <hr><pre><code>{}</code></pre>
-</body></html>"#, fname, fname, path, ext, content);
+</body></html>"#, base_path, base_path, base_path, fname, fname, path, ext, content);
             Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
         }
         Err(e) => Ok(HttpResponse::NotFound().json(serde_json::json!({
@@ -2311,6 +2393,10 @@ button:disabled{{background:#333;color:#666;cursor:not-allowed}}
 .result pre{{margin:5px 0;padding:10px;background:#0a0a0a;border-left:3px solid #0ff;white-space:pre-wrap;word-wrap:break-word}}
 .chunk-label{{color:#0ff;font-weight:bold;margin-top:10px}}
 .settings{{background:#111;padding:15px;margin:15px 0;border:1px solid #0f0}}
+.profile-card{{display:inline-block;background:#1a1a2e;border:1px solid #0f0;border-radius:4px;padding:8px 12px;margin:4px;cursor:pointer;font-size:13px}}
+.profile-card:hover{{background:#2a2a4e}}
+.profile-card.active{{background:#0f0;color:#000;font-weight:bold}}
+.profile-info{{font-size:11px;color:#888;margin-top:2px}}
 </style>
 </head><body>
 <div class="nav">
@@ -2319,25 +2405,24 @@ button:disabled{{background:#333;color:#666;cursor:not-allowed}}
 <a href="{bp}/gallery">🖼️ Gallery</a>
 </div>
 <h1>✂️ Text Splitter</h1>
-<p>Paste text below, choose chunk size, and split into pieces.</p>
+<p>Paste text below, pick a platform profile, and split into LLM-ready chunks.</p>
 
 <div class="settings">
-  <label>Chunk size: </label>
-  <select id="chunkSize">
-    <option value="1024">1 KB</option>
-    <option value="5120">5 KB</option>
-    <option value="10240">10 KB</option>
-    <option value="51200">50 KB</option>
-    <option value="102400" selected>100 KB</option>
-    <option value="512000">500 KB</option>
-    <option value="1048576">1 MB</option>
-  </select>
-  <label style="margin-left:15px">Split at: </label>
-  <select id="splitMode">
-    <option value="line">Newline</option>
-    <option value="word" selected>Word boundary</option>
-    <option value="exact">Exact byte</option>
-  </select>
+  <label>Platform profile: </label><br>
+  <div id="profileCards" style="margin:8px 0"></div>
+  <div style="margin-top:10px">
+    <label>Chunk size: </label>
+    <input id="chunkSize" type="number" value="100000" style="width:100px"> bytes
+    <label style="margin-left:15px">Overlap: </label>
+    <input id="overlap" type="number" value="0" style="width:80px"> bytes
+    <label style="margin-left:15px">Split at: </label>
+    <select id="splitMode">
+      <option value="line">Newline</option>
+      <option value="word" selected>Word boundary</option>
+      <option value="exact">Exact byte</option>
+    </select>
+  </div>
+  <p id="profileDesc" style="font-size:12px;color:#888;margin:5px 0"></p>
 </div>
 
 <textarea id="textInput" placeholder="Paste text to split here...">{prefill}</textarea><br>
@@ -2354,19 +2439,76 @@ button:disabled{{background:#333;color:#666;cursor:not-allowed}}
 </div>
 
 <script>
+let profiles = [];
+let activeProfile = null;
+
+async function loadProfiles() {{
+  try {{
+    const res = await fetch('api/split-profiles');
+    const data = await res.json();
+    profiles = data.profiles || [];
+    renderProfileCards();
+  }} catch(e) {{
+    console.error('Failed to load profiles:', e);
+  }}
+}}
+
+function renderProfileCards() {{
+  const container = document.getElementById('profileCards');
+  container.innerHTML = '';
+  profiles.forEach(p => {{
+    const card = document.createElement('div');
+    card.className = 'profile-card';
+    card.dataset.name = p.name;
+    const sizeLabel = p.chunk_size >= 1048576 ? (p.chunk_size/1048576).toFixed(0)+'MB' :
+                      p.chunk_size >= 1024 ? (p.chunk_size/1024).toFixed(0)+'KB' : p.chunk_size+'B';
+    card.innerHTML = p.label + '<div class="profile-info">' + sizeLabel + ' chunks · ' + p.overlap + 'B overlap · ' + p.max_output_tokens + ' out</div>';
+    card.onclick = () => selectProfile(p.name);
+    container.appendChild(card);
+  }});
+  // Add "Custom" card
+  const custom = document.createElement('div');
+  custom.className = 'profile-card';
+  custom.dataset.name = 'custom';
+  custom.innerHTML = '⚙️ Custom<div class="profile-info">Set your own chunk size</div>';
+  custom.onclick = () => selectProfile('custom');
+  container.appendChild(custom);
+}}
+
+function selectProfile(name) {{
+  activeProfile = name;
+  document.querySelectorAll('.profile-card').forEach(c => c.classList.remove('active'));
+  document.querySelector('.profile-card[data-name="'+name+'"]')?.classList.add('active');
+  if (name === 'custom') {{
+    document.getElementById('profileDesc').textContent = 'Custom — adjust chunk size and overlap manually';
+    return;
+  }}
+  const p = profiles.find(p => p.name === name);
+  if (p) {{
+    document.getElementById('chunkSize').value = p.chunk_size;
+    document.getElementById('overlap').value = p.overlap;
+    document.getElementById('splitMode').value = p.split_mode;
+    document.getElementById('profileDesc').textContent = p.description || (p.label + ': ' + p.context_window + 'B context, ' + p.max_output_tokens + ' output tokens');
+  }}
+}}
+
 async function splitText() {{
   const text = document.getElementById('textInput').value;
   if (!text.trim()) {{ alert('No text to split.'); return; }}
   const chunkSize = parseInt(document.getElementById('chunkSize').value);
-  const res = await fetch('{bp}/api/split', {{
+  const overlap = parseInt(document.getElementById('overlap').value) || 0;
+  const body = {{ content: text, chunk_size: chunkSize, overlap: overlap }};
+  if (activeProfile && activeProfile !== 'custom') body.profile = activeProfile;
+  const res = await fetch('api/split', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{ content: text, chunk_size: chunkSize }})
+    body: JSON.stringify(body)
   }});
   const data = await res.json();
   if (data.error) {{ alert('Error: ' + data.error); return; }}
   document.getElementById('result').style.display = 'block';
-  document.getElementById('summary').textContent = text.length + ' bytes split into ' + data.chunks + ' chunks (~' + chunkSize + ' B each)';
+  const profileLabel = activeProfile && activeProfile !== 'custom' ? ' [' + activeProfile + ']' : '';
+  document.getElementById('summary').textContent = text.length + ' bytes → ' + data.chunks + ' chunks (~' + chunkSize + ' B each, ' + overlap + ' B overlap)' + profileLabel;
   const chunksDiv = document.getElementById('chunks');
   chunksDiv.innerHTML = '';
   data.contents.forEach((c, i) => {{
@@ -2394,10 +2536,13 @@ async function uploadAllChunks() {{
   try {{
     const text = document.getElementById('textInput').value;
     const sz = parseInt(document.getElementById('chunkSize').value);
-    const res = await fetch('{bp}/api/split-upload', {{
+    const overlap = parseInt(document.getElementById('overlap').value) || 0;
+    const body = {{ content: text, chunk_size: sz, overlap: overlap, title: 'splitter_upload' }};
+    if (activeProfile && activeProfile !== 'custom') body.profile = activeProfile;
+    const res = await fetch('api/split-upload', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{ content: text, chunk_size: sz, title: 'splitter_upload' }})
+      body: JSON.stringify(body)
     }});
     const data = await res.json();
     if (data.error) {{ alert('Error: ' + data.error); return; }}
@@ -2409,10 +2554,13 @@ async function uploadAllChunks() {{
 async function downloadAllChunks() {{
   const text = document.getElementById('textInput').value;
   const sz = parseInt(document.getElementById('chunkSize').value);
-  const res = await fetch('{bp}/api/split', {{
+  const overlap = parseInt(document.getElementById('overlap').value) || 0;
+  const body = {{ content: text, chunk_size: sz, overlap: overlap }};
+  if (activeProfile && activeProfile !== 'custom') body.profile = activeProfile;
+  const res = await fetch('api/split', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{ content: text, chunk_size: sz }})
+    body: JSON.stringify(body)
   }});
   const data = await res.json();
   const zip = new JSZip();
@@ -2420,6 +2568,11 @@ async function downloadAllChunks() {{
   const blob = await zip.generateAsync({{type:'blob'}});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'chunks.zip'; a.click();
 }}
+
+// Load profiles on page load
+loadProfiles();
+// Select OpenAI by default
+setTimeout(() => selectProfile('openai'), 300);
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </body></html>"#, bp = base_path, prefill = prefill);
@@ -2431,18 +2584,57 @@ async function downloadAllChunks() {{
 pub async fn api_split(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
     let content = body.get("content").and_then(|v| v.as_str()).unwrap_or("");
     let chunk_size = body.get("chunk_size").and_then(|v| v.as_u64()).unwrap_or(102400) as usize;
+    let overlap = body.get("overlap").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let profile_name = body.get("profile").and_then(|v| v.as_str());
 
     if content.is_empty() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "empty content"})));
     }
 
-    let chunks = crate::archive::split_into_chunks(content, chunk_size);
+    // Resolve profile if provided
+    let (effective_chunk_size, effective_overlap) = if let Some(name) = profile_name {
+        if let Some(profile) = SplitProfile::find_preset(name) {
+            (profile.chunk_size, profile.overlap)
+        } else {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": format!("unknown profile: {}", name),
+                "available": SplitProfile::presets().iter().map(|p| p.name.clone()).collect::<Vec<_>>()
+            })));
+        }
+    } else {
+        (chunk_size, overlap)
+    };
+
+    let chunks = crate::archive::split_into_chunks(content, effective_chunk_size);
+
+    // Apply overlap: for each chunk after the first, prepend the tail of the previous chunk
+    let overlapped = if effective_overlap > 0 && chunks.len() > 1 {
+        let mut result = Vec::with_capacity(chunks.len());
+        for (i, chunk) in chunks.iter().enumerate() {
+            if i == 0 {
+                result.push(chunk.clone());
+            } else {
+                let prev = &chunks[i - 1];
+                let prev_tail = if prev.len() > effective_overlap {
+                    &prev[prev.len() - effective_overlap..]
+                } else {
+                    prev.as_str()
+                };
+                result.push(format!("{}{}", prev_tail, chunk));
+            }
+        }
+        result
+    } else {
+        chunks
+    };
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
-        "chunks": chunks.len(),
-        "chunk_size": chunk_size,
+        "chunks": overlapped.len(),
+        "chunk_size": effective_chunk_size,
+        "overlap": effective_overlap,
+        "profile": profile_name,
         "total_size": content.len(),
-        "contents": chunks,
+        "contents": overlapped,
     })))
 }
 
@@ -2586,5 +2778,383 @@ pub async fn nix_skill_find(body: web::Json<serde_json::Value>) -> Result<HttpRe
         "max_depth": max_depth,
         "total_flakes": analyses.len(),
         "flakes": analyses,
+    })))
+}
+
+// ─── Split Profile API ────────────────────────────────────────────────
+
+/// GET /api/split-profiles — list all split profiles (built-in + custom)
+pub async fn list_split_profiles() -> Result<HttpResponse> {
+    let presets = SplitProfile::presets();
+    // TODO: load custom profiles from a config file
+    let custom: Vec<SplitProfile> = Vec::new();
+    let all: Vec<&SplitProfile> = presets.iter().chain(custom.iter()).collect();
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "profiles": all,
+    })))
+}
+
+/// GET /api/split-profiles/{name} — get a specific profile
+pub async fn get_split_profile(path: web::Path<String>) -> Result<HttpResponse> {
+    let name = path.into_inner();
+    if let Some(profile) = SplitProfile::find_preset(&name) {
+        Ok(HttpResponse::Ok().json(profile))
+    } else {
+        Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": format!("profile '{}' not found", name),
+            "available": SplitProfile::presets().iter().map(|p| p.name.clone()).collect::<Vec<_>>()
+        })))
+    }
+}
+
+/// POST /api/split-profiles — create a custom profile
+pub async fn create_split_profile(body: web::Json<SplitProfileRequest>) -> Result<HttpResponse> {
+    // Don't allow overwriting built-in profiles
+    if SplitProfile::find_preset(&body.name).is_some() {
+        return Ok(HttpResponse::Conflict().json(serde_json::json!({
+            "error": format!("cannot overwrite built-in profile '{}'", body.name)
+        })));
+    }
+
+    let profile = SplitProfile {
+        name: body.name.clone(),
+        label: body.label.clone().unwrap_or_else(|| body.name.clone()),
+        context_window: body.context_window.unwrap_or(body.chunk_size * 2),
+        chunk_size: body.chunk_size,
+        overlap: body.overlap.unwrap_or(0),
+        max_output_tokens: body.max_output_tokens.unwrap_or(4096),
+        split_mode: body.split_mode.clone().unwrap_or(SplitMode::Word),
+        builtin: false,
+        description: body.description.clone(),
+    };
+
+    // TODO: persist custom profiles to a config file
+    Ok(HttpResponse::Created().json(profile))
+}
+
+// ─── Git Mount Handlers ──────────────────────────────────────────────
+
+/// GET /git-browse — list all mounted git repos
+pub async fn git_browse() -> Result<HttpResponse> {
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let mut cache = crate::git_mount::get_cache();
+
+    let mount_cards: String = cache.mounts.values().map(|m| {
+        let commit_short = m.head_commit.as_deref()
+            .map(|c| &c[..7.min(c.len())])
+            .unwrap_or("n/a");
+        let branch = m.branch.as_deref().unwrap_or("detached");
+
+        format!(r#"<div class="mount-card" style="background:#111;border:1px solid #0f0;border-radius:8px;padding:15px;margin:10px 0">
+<h3><a href="{}/git-browse/{}">📁 {}</a></h3>
+<p style="color:#666;font-size:12px">🔀 {} · {}</p>
+</div>"#, base_path, m.id, m.name, branch, commit_short)
+    }).collect();
+
+    let stats = cache.stats();
+
+    let html = format!(r##"<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Git Mounts — Kant Pastebin</title>
+<style>
+body{{font-family:monospace;max-width:900px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
+a{{color:#0ff;text-decoration:none}}
+h1{{color:#0f0;border-bottom:1px solid #333}}
+.nav{{background:#111;padding:10px;margin-bottom:20px;border:1px solid #0f0}}
+.mount-card:hover{{border-color:#0ff}}
+</style>
+</head><body>
+<div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/git-browse">📁 Git</a></div>
+<h1>📁 Git Mounts</h1>
+<p style="color:#888">Mounted git repositories — demand-cached, LRU-evicted</p>
+<p style="color:#666;font-size:12px">Cache: {} files · {} dirs · {} total accesses</p>
+<div>{}</div>
+</body></html>"##, base_path, base_path, base_path,
+        stats["cached_files"], stats["cached_dirs"], stats["total_accesses"],
+        mount_cards);
+
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// GET /git-browse/{mount_id} — browse a mounted repo
+pub async fn git_browse_mount(path: web::Path<String>, query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let mount_id = path.into_inner();
+    let sub_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+
+    let (entries, mount_name, commit_short, branch) = {
+        let mut cache = crate::git_mount::get_cache();
+        let entries = cache.list_dir(&mount_id, sub_path);
+
+        if entries.is_empty() && !sub_path.is_empty() {
+            // Maybe it's a file, not a directory — read and return view
+            if let Some(content) = cache.read_file(&mount_id, sub_path) {
+                // Drop lock before calling git_view_file_content (which acquires it)
+                drop(cache);
+                return git_view_file_content(&mount_id, sub_path, &content, &base_path);
+            }
+        }
+
+        let mount_info = cache.mounts.get(&mount_id);
+        let mount_name = mount_info.map(|m| m.name.clone()).unwrap_or_else(|| mount_id.clone());
+        let commit_short = mount_info.and_then(|m| m.head_commit.as_deref())
+            .map(|c| c[..7.min(c.len())].to_string())
+            .unwrap_or_else(|| "n/a".to_string());
+        let branch = mount_info.and_then(|m| m.branch.clone()).unwrap_or_else(|| "detached".to_string());
+
+        (entries, mount_name, commit_short, branch)
+    };
+
+    // Breadcrumb
+    let mut breadcrumb = format!(r#"<a href="{}/git-browse">📁 Mounts</a> / <a href="{}/git-browse/{}">{}</a>"#, base_path, base_path, mount_id, mount_name);
+    if !sub_path.is_empty() {
+        let parts: Vec<&str> = sub_path.split('/').filter(|s| !s.is_empty()).collect();
+        let mut accumulated = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 { accumulated.push('/'); }
+            accumulated.push_str(part);
+            if i < parts.len() - 1 {
+                breadcrumb.push_str(&format!(r#" / <a href="{}/git-browse/{}?path={}">{}</a>"#, base_path, mount_id, accumulated, part));
+            } else {
+                breadcrumb.push_str(&format!(" / {}", part));
+            }
+        }
+    }
+
+    let items: String = entries.iter().map(|e| {
+        let icon = if e.is_submodule { "🔗" } else if e.is_dir { "📁" } else { "📄" };
+        let link = if e.is_dir {
+            format!(r#"<a href="{}/git-browse/{}?path={}">{} {}</a>"#, base_path, mount_id, e.rel_path, icon, e.name)
+        } else {
+            format!(r#"<a href="{}/git-view/{}/{}">{} {}</a>"#, base_path, mount_id, e.rel_path, icon, e.name)
+        };
+        let size_str = if e.size > 0 {
+            if e.size > 1_000_000 { format!("{:.1}M", e.size as f64 / 1_000_000.0) }
+            else if e.size > 1_000 { format!("{:.0}K", e.size as f64 / 1_000.0) }
+            else { format!("{}B", e.size) }
+        } else { String::new() };
+        let badge = if e.is_submodule { r#"<span style="color:#f90;font-size:11px">submodule</span>"# } else { "" };
+        format!(r#"<div style="border-bottom:1px solid #222;padding:6px 0">{} {} <span style="color:#666;font-size:12px">{}</span></div>"#, link, badge, size_str)
+    }).collect();
+
+    let html = format!(r##"<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>{} — Git Browse</title>
+<style>
+body{{font-family:monospace;max-width:900px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
+a{{color:#0ff;text-decoration:none}}
+h1{{color:#0f0;border-bottom:1px solid #333}}
+.nav{{background:#111;padding:10px;margin-bottom:20px;border:1px solid #0f0}}
+.breadcrumb{{color:#888;font-size:13px;margin-bottom:10px}}
+</style>
+</head><body>
+<div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/git-browse">📁 Git</a></div>
+<div class="breadcrumb">{}</div>
+<h1>📁 {}</h1>
+<p style="color:#666;font-size:12px">🔀 {} · {}</p>
+<div style="margin-top:15px">{}</div>
+</body></html>"##, mount_name, base_path, base_path, base_path, breadcrumb, mount_name, branch, commit_short, items);
+
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// GET /git-view/{mount_id}/{path:.*} — view a file from a git mount
+pub async fn git_view_file(path: web::Path<(String, String)>) -> Result<HttpResponse> {
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let (mount_id, sub_path) = path.into_inner();
+
+    let content = {
+        let mut cache = crate::git_mount::get_cache();
+        match cache.read_file(&mount_id, &sub_path) {
+            Some(c) => c,
+            None => return Ok(HttpResponse::NotFound().body("File not found")),
+        }
+    };
+
+    git_view_file_content(&mount_id, &sub_path, &content, &base_path)
+}
+
+/// Render a file view page (shared between browse and direct view).
+fn git_view_file_content(mount_id: &str, sub_path: &str, content: &str, base_path: &str) -> Result<HttpResponse> {
+    let mount_name = {
+        let cache = crate::git_mount::get_cache();
+        cache.mounts.get(mount_id).map(|m| m.name.clone()).unwrap_or_else(|| mount_id.to_string())
+    };
+
+    let ext = Path::new(sub_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("txt")
+        .to_string();
+
+    let fname = Path::new(sub_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+
+    let commit_short = {
+        let cache = crate::git_mount::get_cache();
+        cache.get_file_entry(mount_id, sub_path)
+            .and_then(|f| f.head_commit.as_deref().map(|c| c[..7.min(c.len())].to_string()))
+            .unwrap_or_else(|| "n/a".to_string())
+    };
+
+    // Breadcrumb
+    let parts: Vec<&str> = sub_path.split('/').filter(|s| !s.is_empty()).collect();
+    let mut breadcrumb = format!(r#"<a href="{}/git-browse">📁 Mounts</a> / <a href="{}/git-browse/{}">{}</a>"#, base_path, base_path, mount_id, mount_name);
+    let mut accumulated = String::new();
+    for (i, part) in parts.iter().enumerate() {
+        if i > 0 { accumulated.push('/'); }
+        accumulated.push_str(part);
+        if i < parts.len() - 1 {
+            breadcrumb.push_str(&format!(r#" / <a href="{}/git-browse/{}?path={}">{}</a>"#, base_path, mount_id, accumulated, part));
+        } else {
+            breadcrumb.push_str(&format!(" / {}", part));
+        }
+    }
+
+    // Syntax class for common languages
+    let lang_class = match ext.as_str() {
+        "rs" => "language-rust",
+        "py" => "language-python",
+        "js" | "ts" => "language-javascript",
+        "go" => "language-go",
+        "java" => "language-java",
+        "c" | "h" => "language-c",
+        "cpp" | "hpp" => "language-cpp",
+        "html" => "language-html",
+        "css" => "language-css",
+        "json" => "language-json",
+        "toml" | "nix" => "language-toml",
+        "yaml" | "yml" => "language-yaml",
+        "md" => "language-markdown",
+        "sh" | "bash" => "language-bash",
+        "org" => "language-org",
+        "lean" => "language-lean",
+        _ => "",
+    };
+
+    // Escape HTML in content
+    let escaped = html_escape(content);
+
+    let html = format!(r##"<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>{} — Git View</title>
+<style>
+body{{font-family:monospace;max-width:1100px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
+a{{color:#0ff;text-decoration:none}}
+h1{{color:#0f0;border-bottom:1px solid #333}}
+pre{{background:#111;padding:20px;border:1px solid #333;overflow-x:auto;white-space:pre;tab-size:4}}
+.nav{{background:#111;padding:10px;margin-bottom:20px;border:1px solid #0f0}}
+.breadcrumb{{color:#888;font-size:13px;margin-bottom:10px}}
+.meta{{color:#888;font-size:0.9em}}
+.line-numbers{{color:#555;text-align:right;padding-right:10px;border-right:1px solid #333;user-select:none}}
+code{{font-family:monospace;font-size:13px}}
+</style>
+</head><body>
+<div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/git-browse">📁 Git</a></div>
+<div class="breadcrumb">{}</div>
+<h1>📄 {}</h1>
+<p class="meta">📁 {} · {} · 🔀 {}</p>
+<hr>
+<pre><code class="{}">{}</code></pre>
+</body></html>"##, fname, base_path, base_path, base_path, breadcrumb, fname, sub_path, ext, commit_short, lang_class, escaped);
+
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+
+
+/// GET /api/git-search?q=... — search git-mounted files
+pub async fn api_git_search(req: HttpRequest) -> Result<HttpResponse> {
+    let uri = req.uri().to_string();
+    let query = match parse_query_param(&uri, "q") {
+        Some(q) if !q.is_empty() => q,
+        _ => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Missing query parameter: q",
+            "usage": "curl 'http://localhost:8090/api/git-search?q=cbor'"
+        }))),
+    };
+
+    let limit: usize = parse_query_param(&uri, "limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20);
+
+    let search_content = parse_query_param(&uri, "content")
+        .map(|s| s != "0")
+        .unwrap_or(true);
+
+    let mut cache = crate::git_mount::get_cache();
+
+    // Filename/path matches
+    let file_results: Vec<serde_json::Value> = cache.search_names(&query, limit)
+        .iter()
+        .map(|e| serde_json::json!({
+            "type": "file",
+            "mount_id": e.mount_id,
+            "path": e.rel_path,
+            "name": e.name,
+            "ext": e.ext,
+            "size": e.size,
+            "url": format!("/git-view/{}/{}", e.mount_id, e.rel_path),
+            "is_submodule": e.is_submodule,
+            "head_commit": e.head_commit,
+        }))
+        .collect();
+
+    let mut results = file_results;
+
+    // Content matches
+    if search_content && results.len() < limit {
+        let remaining = limit - results.len();
+        let content_results = cache.search_content(&query, remaining);
+        for (entry, excerpt) in content_results {
+            results.push(serde_json::json!({
+                "type": "content",
+                "mount_id": entry.mount_id,
+                "path": entry.rel_path,
+                "name": entry.name,
+                "ext": entry.ext,
+                "size": entry.size,
+                "url": format!("/git-view/{}/{}", entry.mount_id, entry.rel_path),
+                "excerpt": excerpt,
+                "is_submodule": entry.is_submodule,
+                "head_commit": entry.head_commit,
+            }));
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "query": query,
+        "total": results.len(),
+        "results": results,
+    })))
+}
+
+/// GET /api/git-index — return cache info
+pub async fn api_git_index() -> Result<HttpResponse> {
+    let mut cache = crate::git_mount::get_cache();
+    let mounts: Vec<serde_json::Value> = cache.mounts.values().map(|m| {
+        serde_json::json!({
+            "id": m.id,
+            "root": m.root,
+            "name": m.name,
+            "head_commit": m.head_commit,
+            "branch": m.branch,
+        })
+    }).collect();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "mounts": mounts,
+        "stats": cache.stats(),
+    })))
+}
+
+/// POST /api/git-reindex — flush cache to disk
+pub async fn api_git_reindex() -> Result<HttpResponse> {
+    let mut cache = crate::git_mount::get_cache();
+    cache.flush_to_disk();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "status": "ok",
+        "stats": cache.stats(),
     })))
 }

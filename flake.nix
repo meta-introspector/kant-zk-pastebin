@@ -14,9 +14,15 @@
     zos-circuit-tile = { url = "path:./tiles/zos-circuit-tile"; };
     org-tile = { url = "path:./tiles/org-tile"; };
     nora-tile = { url = "path:/mnt/data1/time-2026/05-may/28/nora/tiles/nora-tile"; };
+    dasl-tiles-rust = { url = "path:/mnt/data1/dasl-tiles-rust"; };
 
     crate-vendor = {
       url = "git+file:///mnt/data1/git/flat/crate-vendor.git?ref=main-clean";
+      flake = false;
+    };
+
+    pastebin-src = {
+      url = "git+file:///mnt/data1/git/github.com/meta-introspector/kant-zk-pastebin?ref=main-clean";
       flake = false;
     };
 
@@ -36,13 +42,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    approval-graph-tile = {
+      url = "path:./tiles/approval-graph-tile";
+    };
     nora = {
       url = "path:/mnt/data1/time-2026/05-may/28/nora";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, common-inputs, system-manager, pipelight, crate-vendor, zos-circuit-tile, org-tile, nora-tile, kellnr, nora }:
+  outputs = { self, nixpkgs, flake-utils, common-inputs, system-manager, pipelight, crate-vendor, pastebin-src, zos-circuit-tile, org-tile, nora-tile, approval-graph-tile, kellnr, nora, dasl-tiles-rust }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -57,19 +66,17 @@
           src = pkgs.runCommand "kant-pastebin-src" {
             # Pass store paths with safe env var names (underscores, not dashes)
             _rust_ipfs = common-inputs.inputs.rust-ipfs;
-            _erdfa_publish = common-inputs.inputs.erdfa-publish;
             # crate-vendor passed as _crate_vendor (dash invalid in shell)
             _crate_vendor = crate-vendor;
             preferLocalBuild = true;
             allowSubstitutes = false;
           } ''
-            cp -r ${self} $out
+            cp -r ${pastebin-src} $out
             chmod -R u+w $out
-            rm -rf $out/erdfa-publish $out/rust-ipfs $out/result $out/result-1 $out/node_modules 2>/dev/null || true
+            rm -rf $out/rust-ipfs $out/vendor $out/result $out/result-1 $out/node_modules 2>/dev/null || true
             cp -r $(printenv _rust_ipfs) $out/rust-ipfs
-            cp -r $(printenv _erdfa_publish) $out/erdfa-publish
             cp -r $(printenv _crate_vendor) $out/vendor
-            chmod -R u+w $out/rust-ipfs $out/erdfa-publish $out/vendor
+            chmod -R u+w $out/rust-ipfs $out/vendor
           '';
 
           cargoVendorDir = "vendor";
@@ -78,7 +85,7 @@
           buildInputs = with pkgs; [ openssl ];
 
           # Enrich pipeline: tell the binary where tiles live
-          TILES_DIR = "${zos-circuit-tile.packages.${system}.default}/lib:${org-tile.packages.${system}.default}/lib:${nora-tile.packages.${system}.default}/lib";
+          TILES_DIR = "${zos-circuit-tile.packages.${system}.default}/lib:${org-tile.packages.${system}.default}/lib:${nora-tile.packages.${system}.default}/lib:${approval-graph-tile.packages.${system}.default}/lib";
 
           doCheck = false;
 
@@ -145,6 +152,9 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             cargo rustc rust-analyzer rustfmt clippy pkg-config openssl.dev
+            # Headless browser testing
+            chromium
+            chromedriver
           ] ++ [
             self.packages.${system}.pipelight
             self.packages.${system}.kellnr
@@ -152,7 +162,11 @@
           ];
           shellHook = ''
             export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
-            echo "Kant Pastebin dev shell — OpenSSL, pkg-config ready"
+            export CHROME_BIN="${pkgs.chromium}/bin/chromium"
+            export CHROME="${pkgs.chromium}/bin/chromium"
+            export CHROMEDRIVER="${pkgs.chromedriver}/bin/chromedriver"
+            echo "Kant Pastebin dev shell — OpenSSL, pkg-config, Chromium ready"
+            echo "  Headless tests: cargo test --test headless_ui -- --nocapture"
           '';
         };
       }
@@ -163,14 +177,25 @@
         nora-cargo-config = pkgs: import ./lib/nora-cargo-config.nix { inherit pkgs; };
       };
 
-      # System-manager configuration for declarative deployment
-      # Usage: nix run github:numtide/system-manager -- switch --flake .#kant-pastebin
-      systemConfigs.kant-pastebin = system-manager.lib.makeSystemConfig {
+# System-manager configuration for declarative deployment
+       # Usage: nix run github:numtide/system-manager -- switch --flake .#kant-pastebin
+       systemConfigs.kant-pastebin = system-manager.lib.makeSystemConfig {
+         modules = [
+           ./system-manager-config.nix
+           { nixpkgs.hostPlatform = "x86_64-linux"; }
+         ];
+         specialArgs = {
+           inherit self zos-circuit-tile org-tile nora-tile approval-graph-tile dasl-tiles-rust;
+         };
+      };
+
+      # Minimal pastebin-only profile. Nginx, certbot, Nora, and tile servers are standalone.
+      systemConfigs.kant-pastebin-only = system-manager.lib.makeSystemConfig {
         modules = [
-          ./system-manager-config.nix
+          ./pastebin-system-manager-only.nix
           { nixpkgs.hostPlatform = "x86_64-linux"; }
         ];
-        specialArgs = { inherit self zos-circuit-tile org-tile nora-tile; };
+        specialArgs = { inherit self; };
       };
 
       # Usage: nix run github:numtide/system-manager -- switch --flake .#kellnr

@@ -6,9 +6,9 @@
 
 [[pipelines]]
 name = "build-pastebin"
-triggers = [
-  { branches = ["main"], actions = ["pre-push", "manual"] },
-]
+#triggers = [
+#  { branches = ["main"], actions = ["pre-push", "manual"] },
+#]
 
 [[pipelines.steps]]
 name = "build-rust-package"
@@ -30,9 +30,10 @@ commands = [
 
 [[pipelines]]
 name = "deploy"
-triggers = [
-  { branches = ["main"], actions = ["pre-push", "manual"] },
-]
+triggers = [{ actions = ["manual"] }]
+#triggers = [
+#  { branches = ["main"], actions = ["pre-push", "manual"] },
+#]
 
 [[pipelines.steps]]
 name = "build-pastebin"
@@ -120,9 +121,10 @@ commands = [
 
 [[pipelines]]
 name = "full-deploy"
-triggers = [
-  { branches = ["main"], actions = ["pre-push", "manual"] },
-]
+triggers = [{ actions = ["manual"] }]
+#triggers = [
+#  { branches = ["main"], actions = ["pre-push", "manual"] },
+#]
 
 [[pipelines.steps]]
 name = "build"
@@ -175,9 +177,10 @@ commands = [
 
 [[pipelines]]
 name = "deploy-nora"
-triggers = [
-  { branches = ["main"], actions = ["manual"] },
-]
+triggers = [{ actions = ["manual"] }]
+#triggers = [
+#  { branches = ["main"], actions = ["manual"] },
+#]
 
 [[pipelines.steps]]
 name = "build-nora-config"

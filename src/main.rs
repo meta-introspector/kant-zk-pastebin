@@ -19,6 +19,8 @@ mod sheaf;
 
 mod archive;
 
+mod git_mount;
+
 mod nix_skill;
 mod mcp_server;
 
@@ -100,6 +102,9 @@ async fn main() -> std::io::Result<()> {
             .route("/splitter", web::get().to(handlers::splitter_page))
             .route("/api/split", web::post().to(handlers::api_split))
             .route("/api/split-upload", web::post().to(handlers::api_split_upload))
+            .route("/api/split-profiles", web::get().to(handlers::list_split_profiles))
+            .route("/api/split-profiles/{name}", web::get().to(handlers::get_split_profile))
+            .route("/api/split-profiles", web::post().to(handlers::create_split_profile))
             .route("/api/search", web::get().to(handlers::api_search))
             .route("/api/search-doc", web::get().to(handlers::search_doc))
             .route("/api/similar/{id}", web::get().to(handlers::api_similar))
@@ -109,6 +114,12 @@ async fn main() -> std::io::Result<()> {
             .route("/api/nix-skill/analyze", web::post().to(handlers::nix_skill_analyze))
             .route("/api/nix-skill/find", web::post().to(handlers::nix_skill_find))
             .route("/mcp", web::post().to(mcp_server::mcp_handler))
+            .route("/git-browse", web::get().to(handlers::git_browse))
+            .route("/git-browse/{mount_id}", web::get().to(handlers::git_browse_mount))
+            .route("/git-view/{mount_id}/{path:.*}", web::get().to(handlers::git_view_file))
+            .route("/api/git-search", web::get().to(handlers::api_git_search))
+            .route("/api/git-index", web::get().to(handlers::api_git_index))
+            .route("/api/git-reindex", web::post().to(handlers::api_git_reindex))
     })
     .bind(&bind)?
     .run()

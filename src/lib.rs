@@ -11,5 +11,6 @@ pub mod plugins;
 pub mod dasl;
 pub mod sheaf;
 pub mod archive;
+pub mod git_mount;
 pub mod nix_skill;
 pub mod mcp_server;
