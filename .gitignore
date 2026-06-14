@@ -16,3 +16,4 @@ rust-ipfs
 /.pipelight/
 /build-output-2.log
 /build-output.log
+/logs/
