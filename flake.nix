@@ -7,14 +7,14 @@
 
     # Shared inputs — all git repos declared centrally in ~/nix-common
     common-inputs = {
-      url = "path:/home/mdupont/nix-common";
+      url = "git+file:///home/mdupont/git/solana.solfunmeme.com/nix-common?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    zos-circuit-tile = { url = "path:./tiles/zos-circuit-tile"; };
-    org-tile = { url = "path:./tiles/org-tile"; };
-    nora-tile = { url = "path:/mnt/data1/time-2026/05-may/28/nora/tiles/nora-tile"; };
-    dasl-tiles-rust = { url = "path:/mnt/data1/dasl-tiles-rust"; };
+    zos-circuit-tile = { url = "git+file:///mnt/data1/git/github.com/meta-introspector/kant-zk-pastebin?ref=main-clean&dir=tiles/zos-circuit-tile"; };
+    org-tile = { url = "git+file:///mnt/data1/git/github.com/meta-introspector/kant-zk-pastebin?ref=main-clean&dir=tiles/org-tile"; };
+    nora-tile = { url = "git+file:///mnt/data1/git/github.com/getnora-io/nora.git?ref=main&dir=tiles/nora-tile"; };
+    dasl-tiles-rust = { url = "git+file:///mnt/data1/git/github.com/meta-introspector/dasl-tiles-rust.git?ref=fix/server-loader-borrows"; };
 
     crate-vendor = {
       url = "git+file:///mnt/data1/git/flat/crate-vendor.git?ref=main-clean";
@@ -38,15 +38,15 @@
     };
 
     pipelight = {
-      url = "path:/mnt/data1/nix-controller/he-lattice/pipelight";
+      url = "git+file:///mnt/data1/git/github.com/pipelight/pipelight.git?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     approval-graph-tile = {
-      url = "path:./tiles/approval-graph-tile";
+      url = "git+file:///mnt/data1/git/github.com/meta-introspector/kant-zk-pastebin?ref=main-clean&dir=tiles/approval-graph-tile";
     };
     nora = {
-      url = "path:/mnt/data1/time-2026/05-may/28/nora";
+      url = "git+file:///mnt/data1/git/github.com/getnora-io/nora.git?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
