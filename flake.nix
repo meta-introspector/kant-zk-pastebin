@@ -32,12 +32,14 @@
 
         noraCargoVendor = pkgs.runCommand "nora-cargo-vendor" {
           src = nora-cargo;
+          lock = pastebin-src + "/Cargo.lock";
         } ''
-          mkdir -p "$out"
-          cp -R "$src"/. "$out"/
-          chmod -R u+w "$out"
           mkdir -p "$out/.cargo"
+          cp -R "$src"/. "$out"/
+          cp "$lock" "$out/Cargo.lock"
+          chmod -R u+w "$out"
           cat > "$out/.cargo/config.toml" <<'NORA_VENDOR_EOF'
+
 [source.crates-io]
 replace-with = "nora"
 
