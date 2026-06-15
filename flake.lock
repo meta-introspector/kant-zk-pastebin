@@ -223,11 +223,11 @@
     "pastebin-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1781540007,
-        "narHash": "sha256-Pmboeoleep5730CLM4LDS+I7NkTMMlv6msQAFwCLkdI=",
+        "lastModified": 1781540125,
+        "narHash": "sha256-FYuZooIWmk6m1EyaLzoQXVyLX1YxVix+En9kJC1CARI=",
         "ref": "main-clean",
-        "rev": "5a6cb7b65642c45942e36a881e59c7fda05ea40b",
-        "revCount": 52,
+        "rev": "0a8fcda5ee9f620fb738b7d08dea7a45bd9bae01",
+        "revCount": 53,
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/meta-introspector/kant-zk-pastebin"
       },
