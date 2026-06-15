@@ -14,24 +14,24 @@
       flake = false;
     };
 
+    nora-cargo = {
+      url = "path:/mnt/data1/nora/storage/cargo";
+      flake = false;
+    };
+
     system-manager = {
       url = "git+file:///mnt/data1/git/github.com/numtide/system-manager.git";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, common-inputs, pastebin-src, system-manager }:
+  outputs = { self, nixpkgs, flake-utils, common-inputs, pastebin-src, nora-cargo, system-manager }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        noraCargoStorage = builtins.path {
-          path = /mnt/data1/nora/storage/cargo;
-          name = "nora-cargo-storage";
-        };
-
         noraCargoVendor = pkgs.runCommand "nora-cargo-vendor" {
-          src = noraCargoStorage;
+          src = nora-cargo;
         } ''
           mkdir -p "$out"
           cp -R "$src"/. "$out"/
