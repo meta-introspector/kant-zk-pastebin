@@ -1,7 +1,7 @@
-{ pkgs, noraUrl ? "http://127.0.0.1:4000", ... }:
+{ pkgs, noraUrl ? "http://127.0.0.1:4000", noraRegistryUrl ? noraUrl, ... }:
 
 let
-  noraIndex = "${noraUrl}/cargo/index";
+  noraIndex = "${noraRegistryUrl}/cargo/index";
 
   cargoConfigToml = ''
     [source.crates-io]
