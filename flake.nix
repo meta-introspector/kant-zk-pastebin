@@ -24,26 +24,17 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        noraCfg = import ./lib/nora-cargo-config.nix {
-          inherit pkgs;
-          noraRegistryUrl = "https://solana.solfunmeme.com/nora";
-        };
 
         cargoVendorDir = pkgs.runCommand "kant-pastebin-cargo-vendor" {
           nativeBuildInputs = [ pkgs.cargo ];
           src = pastebin-src;
-          CARGO_HOME = ".cargo-home";
         } ''
-          export CARGO_HOME="$PWD/.cargo-home"
-          mkdir -p "$CARGO_HOME"
-          mkdir -p .cargo
-          cat > .cargo/config.toml << 'NORA_VENDOR_EOF'
-${noraCfg.cargoConfigToml}
-NORA_VENDOR_EOF
-          cargo vendor --locked --manifest-path "$src/Cargo.toml" "$out"
+          cd "$src"
+          cargo vendor --locked "$out"
         '';
 
-        kant-pastebin = noraCfg.buildRustPackage {
+        kant-pastebin = pkgs.rustPlatform.buildRustPackage {
+
           pname = "kant-pastebin";
           version = "0.1.0";
 

@@ -1,5 +1,8 @@
 [source.crates-io]
-replace-with = "vendored-sources"
+replace-with = "nora"
 
-[source.vendored-sources]
-directory = "vendor"
+[source.nora]
+registry = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
+
+[registries.nora]
+index = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
