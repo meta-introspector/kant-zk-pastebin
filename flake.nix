@@ -30,7 +30,7 @@
           src = pastebin-src;
         } ''
           cd "$src"
-          cargo vendor --locked "$out"
+          cargo vendor --locked --respect-source-config "$out"
         '';
 
         kant-pastebin = pkgs.rustPlatform.buildRustPackage {
