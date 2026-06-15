@@ -25,12 +25,24 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        cargoVendorDir = pkgs.runCommand "kant-pastebin-cargo-vendor" {
-          nativeBuildInputs = [ pkgs.cargo ];
-          src = pastebin-src;
+        noraCargoStorage = builtins.path {
+          path = /mnt/data1/nora/storage/cargo;
+          name = "nora-cargo-storage";
+        };
+
+        noraCargoVendor = pkgs.runCommand "nora-cargo-vendor" {
+          src = noraCargoStorage;
         } ''
-          cd "$src"
-          cargo vendor --locked --respect-source-config "$out"
+          mkdir -p "$out"
+          cp -R "$src"/. "$out"/
+          chmod -R u+w "$out"
+          cat > "$out/config.toml" <<'NORA_VENDOR_EOF'
+[source.crates-io]
+replace-with = "nora"
+
+[source.nora]
+directory = "$out"
+NORA_VENDOR_EOF
         '';
 
         kant-pastebin = pkgs.rustPlatform.buildRustPackage {
@@ -40,7 +52,7 @@
 
           src = pastebin-src;
           cargoLock.lockFile = "${pastebin-src}/Cargo.lock";
-          cargoVendorDir = cargoVendorDir;
+          cargoVendorDir = noraCargoVendor;
 
           nativeBuildInputs = with pkgs; [ pkg-config ];
           buildInputs = with pkgs; [ openssl ];
