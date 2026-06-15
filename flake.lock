@@ -220,6 +220,19 @@
         "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
       }
     },
+    "nora-cargo": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1781551374,
+        "narHash": "sha256-3STGvz1MGo9Iv9D7KEYyMXzpyYFOAPPw5ckAA6KWmXk=",
+        "path": "/mnt/data1/nora/storage/cargo",
+        "type": "path"
+      },
+      "original": {
+        "path": "/mnt/data1/nora/storage/cargo",
+        "type": "path"
+      }
+    },
     "pastebin-src": {
       "flake": false,
       "locked": {
@@ -270,6 +283,7 @@
         "common-inputs": "common-inputs",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
+        "nora-cargo": "nora-cargo",
         "pastebin-src": "pastebin-src",
         "system-manager": "system-manager"
       }
