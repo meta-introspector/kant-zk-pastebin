@@ -51,7 +51,7 @@ NORA_VENDOR_EOF
           version = "0.1.0";
 
           src = pastebin-src;
-          cargoLock.lockFile = pastebin-src + "/Cargo.lock";
+          cargoLock.lockFile = "Cargo.lock";
           cargoVendorDir = noraCargoVendor;
 
           nativeBuildInputs = with pkgs; [ pkg-config ];
