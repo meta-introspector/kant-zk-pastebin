@@ -36,7 +36,8 @@
           mkdir -p "$out"
           cp -R "$src"/. "$out"/
           chmod -R u+w "$out"
-          cat > "$out/config.toml" <<'NORA_VENDOR_EOF'
+          mkdir -p "$out/.cargo"
+          cat > "$out/.cargo/config.toml" <<'NORA_VENDOR_EOF'
 [source.crates-io]
 replace-with = "nora"
 
@@ -52,7 +53,7 @@ NORA_VENDOR_EOF
 
           src = pastebin-src;
           cargoLock.lockFile = "Cargo.lock";
-          cargoVendorDir = noraCargoVendor;
+          cargoDeps = noraCargoVendor;
 
           nativeBuildInputs = with pkgs; [ pkg-config ];
           buildInputs = with pkgs; [ openssl ];
