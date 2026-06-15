@@ -3,7 +3,6 @@
 let
   system = pkgs.stdenv.hostPlatform.system;
   kant-pastebin = self.packages.${system}.kant-pastebin;
-  pipelight-cmd = "${self.packages.${system}.pipelight}/bin/pipelight";
   domain = "solana.solfunmeme.com";
 in {
   config = {
@@ -41,7 +40,6 @@ in {
         BASE_URL = "https://${domain}";
         NFT_DIR = "/mnt/data1/time-2026/03-march/13/nft_enriched";
         ENRICH_PIPELINE = "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh";
-        PIPELIGHT_CMD = pipelight-cmd;
         RUST_LOG = "info";
         TILES_DIR = "";
       };
