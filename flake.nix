@@ -33,9 +33,18 @@
         noraCargoVendor = pkgs.runCommand "nora-cargo-vendor" {
           src = nora-cargo;
           lock = pastebin-src + "/Cargo.lock";
+          nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
         } ''
           mkdir -p "$out/.cargo"
-          cp -R "$src"/. "$out"/
+          for crate in "$src"/*/*/*.crate; do
+            rel="$''{crate#"$src"/}"
+            name="$''{rel%%/*}"
+            rest="$''{rel#*/}"
+            version="$''{rest%%/*}"
+            dest="$out/$name-$version"
+            mkdir -p "$dest"
+            tar -xzf "$crate" -C "$dest" --strip-components=1
+          done
           cp "$lock" "$out/Cargo.lock"
           chmod -R u+w "$out"
           cat > "$out/.cargo/config.toml" <<NORA_VENDOR_EOF
@@ -45,8 +54,8 @@ replace-with = "nora"
 [source.nora]
 directory = "$out"
 NORA_VENDOR_EOF
-
         '';
+
 
         kant-pastebin = pkgs.rustPlatform.buildRustPackage {
 
