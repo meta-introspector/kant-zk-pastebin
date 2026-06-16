@@ -32,28 +32,22 @@
 
         noraCargoVendor = pkgs.runCommand "nora-cargo-vendor" {
           src = nora-cargo;
+          manifest = pastebin-src + "/Cargo.toml";
           lock = pastebin-src + "/Cargo.lock";
-          nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
+          nativeBuildInputs = [ pkgs.cargo ];
         } ''
           mkdir -p "$out/.cargo"
-          for crate in "$src"/*/*/*.crate; do
-            rel="$''${crate#"$src"/}"
-            name="$''${rel%%/*}"
-            rest="$''${rel#*/}"
-            version="$''${rest%%/*}"
-            dest="$out/$name-$version"
-            mkdir -p "$dest"
-            tar -xzf "$crate" -C "$dest" --strip-components=1
-          done
+          cp "$manifest" "$out/Cargo.toml"
           cp "$lock" "$out/Cargo.lock"
-          chmod -R u+w "$out"
           cat > "$out/.cargo/config.toml" <<NORA_VENDOR_EOF
 [source.crates-io]
 replace-with = "nora"
 
 [source.nora]
-directory = "$out"
+directory = "$src"
 NORA_VENDOR_EOF
+          cd "$out"
+          cargo vendor --offline --respect-source-config "$out"
         '';
 
 
