@@ -37,10 +37,10 @@
         } ''
           mkdir -p "$out/.cargo"
           for crate in "$src"/*/*/*.crate; do
-            rel="$''{crate#"$src"/}"
-            name="$''{rel%%/*}"
-            rest="$''{rel#*/}"
-            version="$''{rest%%/*}"
+            rel="$''${crate#"$src"/}"
+            name="$''${rel%%/*}"
+            rest="$''${rel#*/}"
+            version="$''${rest%%/*}"
             dest="$out/$name-$version"
             mkdir -p "$dest"
             tar -xzf "$crate" -C "$dest" --strip-components=1
