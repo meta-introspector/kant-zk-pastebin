@@ -26,6 +26,18 @@
         "url": "file:///home/mdupont/git/solana.solfunmeme.com/nix-common"
       }
     },
+    "crane": {
+      "locked": {
+        "lastModified": 1779279542,
+        "narHash": "sha256-bLXpWUr2IoXY8BRN0dsi3DvIVahEj/gwLDBPx44WExo=",
+        "path": "/mnt/data1/time-2026/05-may/19/crane",
+        "type": "path"
+      },
+      "original": {
+        "path": "/mnt/data1/time-2026/05-may/19/crane",
+        "type": "path"
+      }
+    },
     "crate2nix": {
       "flake": false,
       "locked": {
@@ -281,6 +293,7 @@
     "root": {
       "inputs": {
         "common-inputs": "common-inputs",
+        "crane": "crane",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "nora-cargo": "nora-cargo",
