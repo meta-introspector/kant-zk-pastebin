@@ -38,14 +38,14 @@
           cp -R "$src"/. "$out"/
           cp "$lock" "$out/Cargo.lock"
           chmod -R u+w "$out"
-          cat > "$out/.cargo/config.toml" <<'NORA_VENDOR_EOF'
-
+          cat > "$out/.cargo/config.toml" <<NORA_VENDOR_EOF
 [source.crates-io]
 replace-with = "nora"
 
 [source.nora]
 directory = "$out"
 NORA_VENDOR_EOF
+
         '';
 
         kant-pastebin = pkgs.rustPlatform.buildRustPackage {
