@@ -47,13 +47,42 @@ nginx_conf_path() {
   exec_start="$(svc_prop nginx.service ExecStart)"
   if [[ "$exec_start" =~ -c[[:space:]]+([^[:space:];]+) ]]; then
     printf '%s' "${BASH_REMATCH[1]}"
+  elif [ -f /etc/nginx/nginx.conf ]; then
+    printf '%s' /etc/nginx/nginx.conf
+  fi
+}
+
+nginx_conf_files() {
+  local conf
+  conf="$(nginx_conf_path)"
+  if [ -n "$conf" ] && [ -f "$conf" ]; then
+    printf '%s\n' "$conf"
+  fi
+
+  if [ -d /etc/nginx/conf.d ]; then
+    for f in /etc/nginx/conf.d/*.conf; do
+      [ -f "$f" ] && printf '%s\n' "$f"
+    done
+  fi
+
+  if [ -d /etc/nginx/sites-enabled ]; then
+    for f in /etc/nginx/sites-enabled/*; do
+      [ -f "$f" ] && printf '%s\n' "$f"
+    done
   fi
 }
 
 proxy_target() {
-  local conf="$1"
-  local pattern="$2"
-  grep -A12 "$pattern" "$conf" 2>/dev/null | grep -m1 'proxy_pass' | sed 's/.*proxy_pass[[:space:]]*//;s/;$//' || true
+  local pattern="$1"
+  local conf target
+  for conf in $(nginx_conf_files); do
+    target="$(grep -A12 "$pattern" "$conf" 2>/dev/null | grep -m1 'proxy_pass' | sed 's/.*proxy_pass[[:space:]]*//;s/;$//' || true)"
+    if [ -n "$target" ]; then
+      printf '%s' "$target"
+      return 0
+    fi
+  done
+  printf 'not configured'
 }
 
 print_service() {
@@ -103,8 +132,8 @@ section "nginx proxy"
 nginx_conf="$(nginx_conf_path)"
 if [ -n "$nginx_conf" ] && [ -f "$nginx_conf" ]; then
   echo "  config: $nginx_conf"
-  echo "  /pastebin/      -> $(proxy_target "$nginx_conf" 'location[[:space:]]\+/pastebin/' | sed 's/^$/not configured/')"
-  echo "  /pastebin/beta/ -> $(proxy_target "$nginx_conf" 'location[[:space:]]\+/pastebin/beta/' | sed 's/^$/not configured/')"
+  echo "  /pastebin/      -> $(proxy_target 'location[[:space:]]\+/pastebin/')"
+  echo "  /pastebin/beta/ -> $(proxy_target 'location[[:space:]]\+/pastebin/beta/')"
 else
   echo "  config: not found"
   failed=1

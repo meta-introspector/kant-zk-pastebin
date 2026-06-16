@@ -64,12 +64,6 @@
           buildInputs = with pkgs; [ openssl ];
 
           doInstallCargoArtifacts = false;
-          installPhase = ''
-            runHook preInstall
-            mkdir -p "$out/bin"
-            cp target/x86_64-unknown-linux-gnu/release/kant-pastebin "$out/bin/kant-pastebin"
-            runHook postInstall
-          '';
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -81,7 +75,7 @@
           installPhase = ''
             runHook preInstall
             mkdir -p "$out/bin"
-            cp target/x86_64-unknown-linux-gnu/release/kant-pastebin "$out/bin/kant-pastebin"
+            cp target/release/kant-pastebin "$out/bin/kant-pastebin"
             runHook postInstall
           '';
 
