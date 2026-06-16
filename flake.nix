@@ -74,8 +74,16 @@
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-        kant-pastebin = craneLib.buildPackage (commonArgs // {
+        kant-pastebin = craneLib.cargoBuild (commonArgs // {
           inherit cargoArtifacts;
+          pnameSuffix = "";
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out/bin"
+            cp target/x86_64-unknown-linux-gnu/release/kant-pastebin "$out/bin/kant-pastebin"
+            runHook postInstall
+          '';
 
           meta = with pkgs.lib; {
 
