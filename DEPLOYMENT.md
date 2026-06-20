@@ -10,13 +10,21 @@ The pastebin service has **unlimited upload sizes** configured:
 
 ## Deployment Methods
 
+```bash
+# Build the application binary from the flake
+nix build .#kant-pastebin --print-out-paths
+
+# Build system-manager config, activate it, restart the service, and diagnose
+./deploy.sh
+
+# Restart only the installed service, then diagnose
+./deploy.sh restart
+
+# Diagnose without rebuilding
+./diagnose.sh
 ```
-bash deploy.sh           # Interactive menu (options 1-5)
-bash deploy.sh           # Option 4: Diagnose
-bash deploy.sh           # Option 5: Live logs
-nix run .#pipelight -- run deploy      # Background orchestration
-nix run .#pipelight -- run full-deploy # Build + deploy via pipelight
-```
+
+`deploy.sh` resolves the repository path from the script location, so run it from the repo checkout. Do not deploy from the old `/home/mdupont/pastebin/target/release` path.
 
 ## System-Manager Configuration
 

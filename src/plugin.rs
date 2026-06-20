@@ -29,7 +29,9 @@ pub struct PluginRegistry {
 
 impl PluginRegistry {
     pub fn new() -> Self {
-        Self { plugins: HashMap::new() }
+        Self {
+            plugins: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, plugin: Box<dyn Plugin>) {
@@ -43,11 +45,15 @@ impl PluginRegistry {
     }
 
     pub fn list(&self) -> Vec<(&str, &str, &str)> {
-        self.plugins.values().map(|p| (p.name(), p.version(), p.description())).collect()
+        self.plugins
+            .values()
+            .map(|p| (p.name(), p.version(), p.description()))
+            .collect()
     }
 
     pub fn execute(&self, name: &str, input: &PluginInput) -> PluginResult {
-        self.plugins.get(name)
+        self.plugins
+            .get(name)
             .ok_or_else(|| format!("plugin '{}' not found", name))?
             .execute(input)
     }

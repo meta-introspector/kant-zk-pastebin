@@ -44,14 +44,14 @@ fn glob_to_pattern(glob: &str) -> String {
     // Simple glob → regex conversion for basic use cases
     // Supports: **/*.ext, *.ext, **/*, path/**/*.org
     let regex = regex_lite::Regex::new(r"\*\*|\*|\.|\\.").unwrap();
-    regex.replace_all(glob, |caps: &regex_lite::Captures| {
-        match &caps[0] {
+    regex
+        .replace_all(glob, |caps: &regex_lite::Captures| match &caps[0] {
             "**" => ".*".to_string(),
             "*" => "[^/]*".to_string(),
             "." | "\\." => "\\.".to_string(),
             _ => caps[0].to_string(),
-        }
-    }).to_string()
+        })
+        .to_string()
 }
 
 fn matches_glob(path: &str, glob: &str) -> bool {
@@ -73,39 +73,38 @@ fn matches_glob(path: &str, glob: &str) -> bool {
 }
 
 fn main() {
-    let config_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| {
-            // Try default config path
-            let spool = std::env::var("UUCP_SPOOL")
-                .unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
-            format!("{}/roots.json", spool)
-        });
+    let config_path = std::env::args().nth(1).unwrap_or_else(|| {
+        // Try default config path
+        let spool = std::env::var("UUCP_SPOOL")
+            .unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+        format!("{}/roots.json", spool)
+    });
 
     let uucp_dir = std::env::var("UUCP_SPOOL")
         .unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let index_path = format!("{}/index.jsonl", uucp_dir);
 
     // Read config
-    let config_str = fs::read_to_string(&config_path)
-        .unwrap_or_else(|e| {
-            eprintln!("ERROR: Could not read config at {}: {}", config_path, e);
-            eprintln!("Usage: multi-reindex [config.json]");
-            eprintln!();
-            eprintln!("Config format:");
-            eprintln!(r#"{{ "roots": ["#);
-            eprintln!(r#"  {{"path": "/path/to/root", "label": "my-root", "glob": "**/*.org"}}"#);
-            eprintln!(r#"]}}"#);
-            std::process::exit(1);
-        });
+    let config_str = fs::read_to_string(&config_path).unwrap_or_else(|e| {
+        eprintln!("ERROR: Could not read config at {}: {}", config_path, e);
+        eprintln!("Usage: multi-reindex [config.json]");
+        eprintln!();
+        eprintln!("Config format:");
+        eprintln!(r#"{{ "roots": ["#);
+        eprintln!(r#"  {{"path": "/path/to/root", "label": "my-root", "glob": "**/*.org"}}"#);
+        eprintln!(r#"]}}"#);
+        std::process::exit(1);
+    });
 
-    let config: Config = serde_json::from_str(&config_str)
-        .unwrap_or_else(|e| {
-            eprintln!("ERROR: Invalid config JSON: {}", e);
-            std::process::exit(1);
-        });
+    let config: Config = serde_json::from_str(&config_str).unwrap_or_else(|e| {
+        eprintln!("ERROR: Invalid config JSON: {}", e);
+        std::process::exit(1);
+    });
 
-    eprintln!("Multi-root scanner: {} root(s) configured", config.roots.len());
+    eprintln!(
+        "Multi-root scanner: {} root(s) configured",
+        config.roots.len()
+    );
 
     // Load existing index entries by filename to avoid duplicates
     let mut existing: HashSet<String> = HashSet::new();
@@ -168,7 +167,9 @@ fn main() {
             let base_id = hex::encode(&h.finalize()[..8]);
 
             // Timestamp from file metadata
-            let timestamp = entry.metadata().ok()
+            let timestamp = entry
+                .metadata()
+                .ok()
                 .and_then(|m| m.modified().ok())
                 .map(|t| {
                     let d = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();

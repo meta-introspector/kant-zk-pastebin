@@ -41,7 +41,15 @@ pub fn is_crate_cargo_toml(content: &str) -> bool {
 /// Returns true if `content` contains Rust source code that could be part of a crate.
 /// Matches on: `fn main()`, `use crate::`, `mod ` (module decls), `impl `, `struct `, `enum `.
 pub fn is_rust_source(content: &str) -> bool {
-    let keywords = ["fn main(", "use crate::", "mod ", "pub struct", "pub enum", "pub fn", "impl "];
+    let keywords = [
+        "fn main(",
+        "use crate::",
+        "mod ",
+        "pub struct",
+        "pub enum",
+        "pub fn",
+        "impl ",
+    ];
     let count = keywords.iter().filter(|k| content.contains(*k)).count();
     count >= 2
 }
@@ -135,18 +143,41 @@ fn inspect_paste(paste_id: &str) -> Result<String, String> {
 
     let mut report = String::new();
     report.push_str(&format!("Paste: {}\n", paste_id));
-    report.push_str(&format!("Title: {}\n", headers.get("Title").unwrap_or(&"N/A".to_string())));
+    report.push_str(&format!(
+        "Title: {}\n",
+        headers.get("Title").unwrap_or(&"N/A".to_string())
+    ));
     report.push_str(&format!("Size: {} lines, {} bytes\n", lines, bytes));
-    report.push_str(&format!("Has Cargo.toml: {}\n", if has_cargo_toml { "YES" } else { "no" }));
-    report.push_str(&format!("Is Rust source: {}\n", if is_rust { "YES" } else { "no" }));
-    report.push_str(&format!("Is Git URL: {}\n", if is_git { "YES" } else { "no" }));
-    report.push_str(&format!("Publishable: {}\n", if is_publishable_crate(body) { "YES" } else { "no" }));
+    report.push_str(&format!(
+        "Has Cargo.toml: {}\n",
+        if has_cargo_toml { "YES" } else { "no" }
+    ));
+    report.push_str(&format!(
+        "Is Rust source: {}\n",
+        if is_rust { "YES" } else { "no" }
+    ));
+    report.push_str(&format!(
+        "Is Git URL: {}\n",
+        if is_git { "YES" } else { "no" }
+    ));
+    report.push_str(&format!(
+        "Publishable: {}\n",
+        if is_publishable_crate(body) {
+            "YES"
+        } else {
+            "no"
+        }
+    ));
 
     if has_cargo_toml {
         report.push_str("\n--- Crate info ---\n");
         for line in body.lines() {
             let t = line.trim();
-            if t.starts_with("name") || t.starts_with("version") || t.starts_with("edition") || t.starts_with("authors") {
+            if t.starts_with("name")
+                || t.starts_with("version")
+                || t.starts_with("edition")
+                || t.starts_with("authors")
+            {
                 report.push_str(&format!("  {}\n", line));
             }
         }
@@ -189,27 +220,38 @@ fn publish_to_nora(paste_id: &str) -> Result<String, String> {
 
     // Determine crate name
     let crate_name = if is_crate_cargo_toml(body) {
-        let found = body.lines()
-            .find(|l| l.trim().starts_with("name"));
-        let name = found.and_then(|l| l.split_once('='))
+        let found = body.lines().find(|l| l.trim().starts_with("name"));
+        let name = found
+            .and_then(|l| l.split_once('='))
             .map(|(_, v)| {
                 let v = v.trim();
-                v.strip_prefix('"').and_then(|s| s.strip_suffix('"'))
-                    .or_else(|| v.strip_suffix(',').and_then(|s| s.trim().strip_prefix('"').and_then(|s2| s2.strip_suffix('"'))))
+                v.strip_prefix('"')
+                    .and_then(|s| s.strip_suffix('"'))
+                    .or_else(|| {
+                        v.strip_suffix(',').and_then(|s| {
+                            s.trim()
+                                .strip_prefix('"')
+                                .and_then(|s2| s2.strip_suffix('"'))
+                        })
+                    })
                     .unwrap_or(v.trim_matches('"').trim_matches(','))
             })
             .unwrap_or("unnamed")
             .to_string();
         name
     } else {
-        headers.get("Title").map(|s| s.replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_")).unwrap_or_else(|| paste_id.to_string())
+        headers
+            .get("Title")
+            .map(|s| s.replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_"))
+            .unwrap_or_else(|| paste_id.to_string())
     };
 
     // If body is a single Cargo.toml, use it directly
     // Otherwise, create Cargo.toml + src/lib.rs
     if is_crate_cargo_toml(body) {
         // Write the Cargo.toml
-        std::fs::write(work_dir.join("Cargo.toml"), body).map_err(|e| format!("write Cargo.toml: {}", e))?;
+        std::fs::write(work_dir.join("Cargo.toml"), body)
+            .map_err(|e| format!("write Cargo.toml: {}", e))?;
 
         // Ensure src/lib.rs exists (cargo package requires it)
         let src_dir = work_dir.join("src");
@@ -235,7 +277,8 @@ edition = "2021"
 "#,
             crate_name
         );
-        std::fs::write(work_dir.join("Cargo.toml"), &cargo_toml).map_err(|e| format!("write Cargo.toml: {}", e))?;
+        std::fs::write(work_dir.join("Cargo.toml"), &cargo_toml)
+            .map_err(|e| format!("write Cargo.toml: {}", e))?;
     }
 
     // Set up cargo config for nora registry
@@ -250,7 +293,8 @@ index = "{nora}/cargo/git"
 default = "nora"
 "#
     );
-    std::fs::write(cargo_dir.join("config.toml"), &cargo_config).map_err(|e| format!("write .cargo/config.toml: {}", e))?;
+    std::fs::write(cargo_dir.join("config.toml"), &cargo_config)
+        .map_err(|e| format!("write .cargo/config.toml: {}", e))?;
 
     // Run cargo package to verify
     let package_output = Command::new("cargo")
@@ -277,7 +321,10 @@ default = "nora"
     }
 
     let stdout = String::from_utf8_lossy(&publish_output.stdout);
-    Ok(format!("Successfully published {} to nora ({})\n{}", crate_name, nora, stdout))
+    Ok(format!(
+        "Successfully published {} to nora ({})\n{}",
+        crate_name, nora, stdout
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -316,15 +363,22 @@ impl Plugin for Git2NoraPlugin {
             "detect" => {
                 let is_publishable = is_publishable_crate(&content);
                 result.insert("is_publishable".into(), is_publishable.to_string());
-                result.insert("detected_type".into(), if is_crate_cargo_toml(&content) {
-                    "cargo_toml".to_string()
-                } else if is_rust_source(&content) {
-                    "rust_source".to_string()
-                } else {
-                    "unknown".to_string()
-                });
+                result.insert(
+                    "detected_type".into(),
+                    if is_crate_cargo_toml(&content) {
+                        "cargo_toml".to_string()
+                    } else if is_rust_source(&content) {
+                        "rust_source".to_string()
+                    } else {
+                        "unknown".to_string()
+                    },
+                );
                 if is_publishable {
-                    let bp = input.extra.get("base_path").map(|s| s.as_str()).unwrap_or("");
+                    let bp = input
+                        .extra
+                        .get("base_path")
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
                     result.insert("tile_html".into(), render_git2nora_tile_html(&input.id, bp));
                 }
             }

@@ -10,6 +10,8 @@ test-results/
 hf-deploy/
 chats/
 docs/
+!docs/
+!docs/large-post-split-workflow.md
 shards/
 shards/
 rust-ipfs

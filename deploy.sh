@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PASTEBIN_DIR="${PASTEBIN_DIR:-/home/mdupont/pastebin}"
-FLAKE="${PASTEBIN_FLAKE:-${PASTEBIN_DIR}#systemConfigs.kant-pastebin-only}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PASTEBIN_DIR="${PASTEBIN_DIR:-$SCRIPT_DIR}"
+PASTEBIN_REPO="${PASTEBIN_REPO:-$PASTEBIN_DIR}"
+PASTEBIN_BRANCH="${PASTEBIN_BRANCH:-$(git -C "$PASTEBIN_REPO" rev-parse --abbrev-ref HEAD)}"
+PASTEBIN_UPSTREAM="$(git -C "$PASTEBIN_REPO" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+if [ -n "$PASTEBIN_UPSTREAM" ]; then
+  PASTEBIN_BRANCH="${PASTEBIN_UPSTREAM#*/}"
+fi
+FLAKE="${PASTEBIN_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only}"
 LOG_DIR="${PASTEBIN_DIR}/logs"
 
 run_sudo() {

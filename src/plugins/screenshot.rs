@@ -19,7 +19,9 @@ impl ScreenshotPlugin {
             }
             "chromium".to_string()
         });
-        Self { chromium_path: path }
+        Self {
+            chromium_path: path,
+        }
     }
 
     fn capture(&self, url: &str, output_path: &str, format: &str) -> Result<(), String> {
@@ -47,19 +49,33 @@ impl ScreenshotPlugin {
             .map_err(|e| format!("chromium failed: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("chromium exit {}: {}", output.status, String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "chromium exit {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         Ok(())
     }
 }
 
 impl Plugin for ScreenshotPlugin {
-    fn name(&self) -> &str { "screenshot" }
-    fn version(&self) -> &str { "0.1.0" }
-    fn description(&self) -> &str { "Headless chromium PNG/PDF capture" }
+    fn name(&self) -> &str {
+        "screenshot"
+    }
+    fn version(&self) -> &str {
+        "0.1.0"
+    }
+    fn description(&self) -> &str {
+        "Headless chromium PNG/PDF capture"
+    }
 
     fn execute(&self, input: &PluginInput) -> PluginResult {
-        let format = input.extra.get("format").map(|s| s.as_str()).unwrap_or("png");
+        let format = input
+            .extra
+            .get("format")
+            .map(|s| s.as_str())
+            .unwrap_or("png");
         let ext = if format == "pdf" { "pdf" } else { "png" };
         let spool = std::env::var("UUCP_SPOOL").unwrap_or_else(|_| "/tmp".to_string());
         let output_path = format!("{}/{}_{}.{}", spool, input.id, self.name(), ext);

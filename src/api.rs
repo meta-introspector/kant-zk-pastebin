@@ -1,12 +1,18 @@
 // API - JSON endpoints for kant-pastebin
+use crate::model::{Paste, PasteIndex, Response};
 use actix_web::{web, HttpResponse};
-use crate::model::{Paste, Response, PasteIndex};
 use chrono::Utc;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 fn slugify(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .split('_')
         .filter(|s| !s.is_empty())
@@ -17,20 +23,24 @@ fn slugify(s: &str) -> String {
 /// POST /api/paste - Create new paste
 pub async fn create_paste(data: web::Json<Paste>) -> HttpResponse {
     let content = data.content.as_ref().map(|s| s.as_str()).unwrap_or("");
-    let title = data.title.as_ref().map(|s| s.as_str()).unwrap_or("untitled");
-    
+    let title = data
+        .title
+        .as_ref()
+        .map(|s| s.as_str())
+        .unwrap_or("untitled");
+
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    
+
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let hash = hasher.finalize();
     let cid = format!("bafk{}", hex::encode(&hash[..16]));
     let witness = hex::encode(&hash);
-    
+
     let slug_title = slugify(title);
     let filename = format!("{}_{}.txt", ts, slug_title);
     let id = filename.trim_end_matches(".txt").to_string();
-    
+
     HttpResponse::Ok().json(Response {
         id: id.clone(),
         cid,

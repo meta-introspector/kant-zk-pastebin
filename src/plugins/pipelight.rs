@@ -93,12 +93,7 @@ fn run_pipelight(args: &[&str]) -> Result<String, String> {
     let output = Command::new(&bin)
         .args(args)
         .output()
-        .map_err(|e| {
-            format!(
-                "cannot execute `{}`: {}. Is pipelight installed?",
-                bin, e
-            )
-        })?;
+        .map_err(|e| format!("cannot execute `{}`: {}. Is pipelight installed?", bin, e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -147,7 +142,11 @@ impl Plugin for PipelightPlugin {
                 let is_pipelight = is_pipelight_config(&content);
                 result.insert("is_pipelight".into(), is_pipelight.to_string());
                 if is_pipelight {
-                    let bp = input.extra.get("base_path").map(|s| s.as_str()).unwrap_or("");
+                    let bp = input
+                        .extra
+                        .get("base_path")
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
                     result.insert("tile_html".into(), render_tile_html(&input.id, bp));
                 }
             }
@@ -205,10 +204,7 @@ impl Plugin for PipelightPlugin {
                 }
             }
             other => {
-                result.insert(
-                    "error".into(),
-                    format!("unknown action: {}", other),
-                );
+                result.insert("error".into(), format!("unknown action: {}", other));
                 result.insert("status".into(), "error".into());
             }
         }

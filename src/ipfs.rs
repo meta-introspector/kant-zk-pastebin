@@ -28,10 +28,10 @@
 //! CID, DASL 0xDA51 Monster symmetry address, orbifold coordinates, and Bott
 //! periodicity index. This envelope is itself content-addressable.
 
-use sha2::{Sha256, Digest};
-use serde::{Serialize, Deserialize};
-use rust_unixfs::file::adder::FileAdder;
 use ipld_core::cid::Cid;
+use rust_unixfs::file::adder::FileAdder;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Pluggable content addressing backend.
 ///
@@ -49,9 +49,10 @@ pub trait ContentStore: Send + Sync {
 /// Resolve the IPFS repo path: `$IPFS_PATH` or `~/.ipfs`.
 /// Returns `None` if the directory doesn't exist.
 fn ipfs_repo() -> Option<String> {
-    std::env::var("IPFS_PATH").ok().or_else(|| {
-        dirs_next::home_dir().map(|h| format!("{}/.ipfs", h.display()))
-    }).filter(|p| std::path::Path::new(p).exists())
+    std::env::var("IPFS_PATH")
+        .ok()
+        .or_else(|| dirs_next::home_dir().map(|h| format!("{}/.ipfs", h.display())))
+        .filter(|p| std::path::Path::new(p).exists())
 }
 
 /// Write a raw block to go-ipfs flatfs.
@@ -63,7 +64,11 @@ fn write_block(cid: &Cid, block: &[u8]) {
     let Some(repo) = ipfs_repo() else { return };
     let mh_bytes = cid.hash().to_bytes();
     let key = data_encoding::BASE32_NOPAD.encode(&mh_bytes);
-    let shard = if key.len() >= 3 { &key[key.len()-3..key.len()-1] } else { "AA" };
+    let shard = if key.len() >= 3 {
+        &key[key.len() - 3..key.len() - 1]
+    } else {
+        "AA"
+    };
     let dir = format!("{}/blocks/{}", repo, shard);
     std::fs::create_dir_all(&dir).ok();
     let path = format!("{}/{}.data", dir, key);
@@ -114,7 +119,11 @@ pub fn ipfs_cat(cid_str: &str) -> Option<Vec<u8>> {
     let cid: Cid = cid_str.parse().ok()?;
     let mh_bytes = cid.hash().to_bytes();
     let key = data_encoding::BASE32_NOPAD.encode(&mh_bytes);
-    let shard = if key.len() >= 3 { &key[key.len()-3..key.len()-1] } else { "AA" };
+    let shard = if key.len() >= 3 {
+        &key[key.len() - 3..key.len() - 1]
+    } else {
+        "AA"
+    };
     let path = format!("{}/blocks/{}/{}.data", repo, shard, key);
     std::fs::read(&path).ok()
 }
@@ -130,7 +139,10 @@ pub fn cid_to_v1(cid_str: &str) -> String {
     if let Ok(cid) = cid_str.parse::<Cid>() {
         let v1 = Cid::new_v1(cid.codec(), cid.hash().to_owned());
         let bytes = v1.to_bytes();
-        format!("b{}", data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase())
+        format!(
+            "b{}",
+            data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase()
+        )
     } else {
         cid_str.to_string()
     }
@@ -193,8 +205,12 @@ pub fn wrap_dasl_cbor(data: &[u8]) -> (Vec<u8>, String) {
 /// Default backend. No external dependencies at runtime.
 pub struct RustStore;
 impl ContentStore for RustStore {
-    fn name(&self) -> &str { "rust-unixfs" }
-    fn add(&self, data: &[u8]) -> Option<String> { ipfs_add_bytes(data) }
+    fn name(&self) -> &str {
+        "rust-unixfs"
+    }
+    fn add(&self, data: &[u8]) -> Option<String> {
+        ipfs_add_bytes(data)
+    }
 }
 
 /// DASL/CBOR content store. Wraps content in a Monster symmetry envelope
@@ -202,7 +218,9 @@ impl ContentStore for RustStore {
 /// the raw content.
 pub struct DaslCborStore;
 impl ContentStore for DaslCborStore {
-    fn name(&self) -> &str { "dasl-cbor" }
+    fn name(&self) -> &str {
+        "dasl-cbor"
+    }
     fn add(&self, data: &[u8]) -> Option<String> {
         let (cbor, _) = wrap_dasl_cbor(data);
         ipfs_add_bytes(&cbor)
@@ -212,19 +230,28 @@ impl ContentStore for DaslCborStore {
 /// CLI fallback: shells out to `ipfs add`. Requires kubo/go-ipfs on PATH.
 pub struct IpfsCliStore;
 impl ContentStore for IpfsCliStore {
-    fn name(&self) -> &str { "ipfs-cli" }
+    fn name(&self) -> &str {
+        "ipfs-cli"
+    }
     fn add(&self, data: &[u8]) -> Option<String> {
-        use std::process::Command;
         use std::io::Write;
+        use std::process::Command;
         let mut child = Command::new("ipfs")
             .args(["add", "-Q", "--pin=false"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
-            .spawn().ok()?;
-        if let Some(mut stdin) = child.stdin.take() { stdin.write_all(data).ok()?; }
+            .spawn()
+            .ok()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(data).ok()?;
+        }
         let out = child.wait_with_output().ok()?;
         let cid = String::from_utf8(out.stdout).ok()?.trim().to_string();
-        if cid.is_empty() { None } else { Some(cid) }
+        if cid.is_empty() {
+            None
+        } else {
+            Some(cid)
+        }
     }
 }

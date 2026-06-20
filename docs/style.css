@@ -1,0 +1,14 @@
+
+body{font-family:monospace;max-width:900px;margin:0 auto;padding:20px;background:#0a0a0a;color:#0f0}
+a{color:#0ff}nav{margin-bottom:20px}h1{font-size:1.2em}
+.meta{color:#888;font-size:0.85em}
+.chat{display:flex;flex-direction:column;gap:8px}
+.msg{padding:8px 12px;border-radius:6px;max-width:90%;overflow:auto}
+.msg pre{white-space:pre-wrap;word-break:break-word;margin:4px 0;font-size:0.9em}
+.user{background:#001a00;border:1px solid #0f03;align-self:flex-end}
+.asst{background:#0a0a15;border:1px solid #00f3;align-self:flex-start}
+.role{font-size:0.75em;color:#888;text-transform:uppercase}
+details{margin:12px 0;padding:8px;border:1px solid #333;border-radius:4px}
+summary{cursor:pointer;color:#0ff}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #222}
+th{color:#0ff}

@@ -1,9 +1,7 @@
 // Archive — extract and list contents of compressed archives
 // Supports: .tar.gz, .tar.bz2, .tar.xz, .zip, .gz, .bz2, .xz
 
-use std::collections::HashMap;
 use std::io::Read;
-use std::path::Path;
 
 /// Info about a single file within an archive
 #[derive(serde::Serialize, Clone)]
@@ -114,7 +112,8 @@ fn extract_single_compressed<D: Decoder>(
             if base.ends_with(".tar") {
                 base.to_string()
             } else {
-                filename.trim_end_matches(".gz")
+                filename
+                    .trim_end_matches(".gz")
                     .trim_end_matches(".bz2")
                     .trim_end_matches(".xz")
                     .to_string()
@@ -124,7 +123,8 @@ fn extract_single_compressed<D: Decoder>(
 
     let is_text = content.windows(4).all(|w| {
         // Very simple heuristic: if first 4 bytes are all ASCII printable
-        w.iter().all(|&b| b.is_ascii_graphic() || b == b'\n' || b == b'\r' || b == b'\t' || b == b' ')
+        w.iter()
+            .all(|&b| b.is_ascii_graphic() || b == b'\n' || b == b'\r' || b == b'\t' || b == b' ')
     }) || content.is_empty();
 
     let entry_content = if is_text {
@@ -172,10 +172,7 @@ fn extract_tar_xz(data: &[u8], filename: &str) -> Result<ArchiveResult, String> 
     extract_tar_from_reader(dec, filename)
 }
 
-fn extract_tar_from_reader<R: Read>(
-    reader: R,
-    filename: &str,
-) -> Result<ArchiveResult, String> {
+fn extract_tar_from_reader<R: Read>(reader: R, filename: &str) -> Result<ArchiveResult, String> {
     let mut archive = tar::Archive::new(reader);
     let mut entries = Vec::new();
     let mut total_size = 0u64;
@@ -235,8 +232,8 @@ fn extract_tar_from_reader<R: Read>(
 // ── Zip extraction ─────────────────────────────────────────────────────
 
 fn extract_zip(data: &[u8], filename: &str) -> Result<ArchiveResult, String> {
-    let mut archive =
-        zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| format!("Zip error: {}", e))?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(data))
+        .map_err(|e| format!("Zip error: {}", e))?;
 
     let mut entries = Vec::new();
     let mut total_size = 0u64;
@@ -303,48 +300,4 @@ fn guess_is_text(buf: &[u8]) -> bool {
         .filter(|&&b| b.is_ascii_graphic() || b == b'\n' || b == b'\r' || b == b'\t' || b == b' ')
         .count();
     printable > (buf.len() * 9 / 10)
-}
-
-/// Split content into chunks of approx `chunk_size` bytes.
-/// Tries to break on newlines first, then word boundaries, then exact.
-pub fn split_into_chunks(content: &str, chunk_size: usize) -> Vec<String> {
-    if content.len() <= chunk_size {
-        return vec![content.to_string()];
-    }
-
-    let mut chunks = Vec::new();
-    let mut start = 0;
-    let bytes = content.as_bytes();
-    let len = bytes.len();
-
-    while start < len {
-        let end = if start + chunk_size >= len {
-            len
-        } else {
-            // Try to find a newline within the last 20% of the chunk
-            let search_start = start + chunk_size * 4 / 5;
-            let search_end = (start + chunk_size).min(len);
-
-            let mut break_at = search_end;
-            if let Some(pos) = bytes[search_start..search_end]
-                .iter()
-                .rposition(|&b| b == b'\n')
-            {
-                break_at = search_start + pos + 1; // include the newline
-            } else if let Some(pos) = bytes[search_start..search_end]
-                .iter()
-                .rposition(|&b| b == b' ')
-            {
-                break_at = search_start + pos + 1;
-            }
-            break_at
-        };
-
-        chunks.push(
-            String::from_utf8_lossy(&bytes[start..end]).to_string(),
-        );
-        start = end;
-    }
-
-    chunks
 }

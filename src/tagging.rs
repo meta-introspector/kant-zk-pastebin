@@ -3,7 +3,13 @@ use std::collections::HashMap;
 
 pub fn slugify(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .split('_')
         .filter(|s| !s.is_empty())
@@ -38,15 +44,33 @@ pub fn auto_tag(content: &str) -> Vec<String> {
         }
     }
 
-    if lower.contains("rust") || lower.contains("cargo") { tags.push("rust".to_string()); }
-    if lower.contains("python") || lower.contains("pip") { tags.push("python".to_string()); }
-    if lower.contains("javascript") || lower.contains("npm") { tags.push("javascript".to_string()); }
-    if lower.contains("fn ") || lower.contains("impl ") { tags.push("code".to_string()); }
-    if lower.contains("error") || lower.contains("exception") { tags.push("error".to_string()); }
-    if lower.contains("todo") || lower.contains("fixme") { tags.push("todo".to_string()); }
-    if lower.contains("http") || lower.contains("api") { tags.push("api".to_string()); }
-    if lower.contains("docker") || lower.contains("kubernetes") { tags.push("devops".to_string()); }
-    if lower.contains("http://") || lower.contains("https://") { tags.push("url".to_string()); }
+    if lower.contains("rust") || lower.contains("cargo") {
+        tags.push("rust".to_string());
+    }
+    if lower.contains("python") || lower.contains("pip") {
+        tags.push("python".to_string());
+    }
+    if lower.contains("javascript") || lower.contains("npm") {
+        tags.push("javascript".to_string());
+    }
+    if lower.contains("fn ") || lower.contains("impl ") {
+        tags.push("code".to_string());
+    }
+    if lower.contains("error") || lower.contains("exception") {
+        tags.push("error".to_string());
+    }
+    if lower.contains("todo") || lower.contains("fixme") {
+        tags.push("todo".to_string());
+    }
+    if lower.contains("http") || lower.contains("api") {
+        tags.push("api".to_string());
+    }
+    if lower.contains("docker") || lower.contains("kubernetes") {
+        tags.push("devops".to_string());
+    }
+    if lower.contains("http://") || lower.contains("https://") {
+        tags.push("url".to_string());
+    }
 
     if lower.contains("github.com") || lower.contains("gitlab.com") || lower.contains("git@") {
         tags.push("git".to_string());
@@ -88,18 +112,28 @@ fn extract_attr(line: &str, attr: &str) -> Option<String> {
 }
 
 fn extract_repo_name(line: &str) -> Option<String> {
-    if let Some(start) = line.find("github.com/").or_else(|| line.find("gitlab.com/")) {
+    if let Some(start) = line
+        .find("github.com/")
+        .or_else(|| line.find("gitlab.com/"))
+    {
         let after = &line[start..];
         let parts: Vec<&str> = after.split('/').collect();
         if parts.len() >= 3 {
-            return Some(format!("{}/{}", parts[1], parts[2].split_whitespace().next()?));
+            return Some(format!(
+                "{}/{}",
+                parts[1],
+                parts[2].split_whitespace().next()?
+            ));
         }
     }
     if let Some(start) = line.find("git@") {
         let after = &line[start..];
         if let Some(colon_pos) = after.find(':') {
             let repo_part = &after[colon_pos + 1..];
-            let repo = repo_part.split_whitespace().next()?.trim_end_matches(".git");
+            let repo = repo_part
+                .split_whitespace()
+                .next()?
+                .trim_end_matches(".git");
             return Some(repo.to_string());
         }
     }
@@ -109,5 +143,9 @@ fn extract_repo_name(line: &str) -> Option<String> {
 pub fn auto_describe(content: &str) -> String {
     let lines: Vec<&str> = content.lines().take(3).collect();
     let preview = lines.join(" ").chars().take(100).collect::<String>();
-    if preview.len() < content.len() { format!("{}...", preview) } else { preview }
+    if preview.len() < content.len() {
+        format!("{}...", preview)
+    } else {
+        preview
+    }
 }

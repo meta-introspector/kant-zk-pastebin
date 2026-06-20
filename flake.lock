@@ -245,23 +245,6 @@
         "type": "path"
       }
     },
-    "pastebin-src": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1781635812,
-        "narHash": "sha256-r/mXw4M4ew5DpUFGi1CzlN26VHb5ZM5raw5SAjmMBTg=",
-        "ref": "main-clean",
-        "rev": "38ba0952667f8e4d58f93b26702054a368966091",
-        "revCount": 89,
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/meta-introspector/kant-zk-pastebin"
-      },
-      "original": {
-        "ref": "main-clean",
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/meta-introspector/kant-zk-pastebin"
-      }
-    },
     "pre-commit-hooks-nix": {
       "inputs": {
         "flake-compat": [
@@ -297,7 +280,6 @@
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "nora-cargo": "nora-cargo",
-        "pastebin-src": "pastebin-src",
         "system-manager": "system-manager"
       }
     },

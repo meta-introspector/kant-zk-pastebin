@@ -18,27 +18,37 @@ Internet → nginx (443) → /pastebin/ → kant-pastebin (:8090)
 ## Quick Commands
 
 ```bash
-# Full diagnostic report
-cd ~/pastebin && bash deploy.sh   # choose 4
+# Build the application binary from the flake
+nix build .#kant-pastebin --print-out-paths
 
-# Follow live logs
-cd ~/pastebin && bash deploy.sh   # choose 5
+# Build system-manager config, activate it, restart the service, and diagnose
+./deploy.sh
 
-# Direct deploy (build + apply + verify)
-cd ~/pastebin && bash deploy.sh   # choose 2
+# Restart only the installed service, then diagnose
+./deploy.sh restart
 
-# Pipelight deploy
-cd ~/pastebin && bash deploy.sh   # choose 1
+# Full diagnostic report without rebuilding
+./diagnose.sh
 ```
 
-## Deploy (Option 2)
+## Deploy
 
-The direct deploy does:
+`deploy.sh` resolves the physical repository directory with `pwd -P` and defaults to that path. Do not deploy from the old home symlink path or from `/home/mdupont/pastebin/target/release`.
 
-1. `nix build .#systemConfigs.kant-pastebin` — pure build, no network
-2. Copies unit file from nix store to `/etc/systemd/system/`
-3. `systemctl daemon-reload && systemctl restart kant-pastebin`
-4. Runs diagnose automatically for post-deploy verification
+The deploy flow does:
+
+1. `nix build "$PASTEBIN_FLAKE" --no-link --json`
+   - default `PASTEBIN_FLAKE` is `$PASTEBIN_DIR#systemConfigs.kant-pastebin-only`
+2. Runs the generated `activate` script from the nix store
+3. `sudo systemctl daemon-reload`
+4. `sudo systemctl restart kant-pastebin.service`
+5. Runs `./diagnose.sh` for post-deploy verification
+
+If nix-daemon was killed by OOM during a build, restart it before retrying:
+
+```bash
+sudo -n systemctl start nix-daemon.service
+```
 
 ## Diagnose (Option 4)
 
@@ -58,28 +68,23 @@ The diagnose command checks 8 areas:
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | HTTP 502 from public | Nothing on :8090 | `sudo systemctl restart kant-pastebin` |
-| Exit code 203/EXEC | Binary garbage collected | Rebuild: `nix build .#systemConfigs.kant-pastebin` then re-apply |
-| Service not found | Unit file deleted | Copy from nix store: see deploy option 2 |
+| Exit code 203/EXEC | Binary garbage collected | Rebuild with `./deploy.sh` |
+| Service not found | Unit file deleted | Rebuild and apply with `./deploy.sh` |
 | `pastebin-wasm/static` errors | WASM dir missing | Non-fatal, cosmetic only |
 | Port 8090 empty, 8081 active | Old beta running, main dead | Deploy main service |
 
 ## Recovery from Garbage Collection
 
-If the nix store binary was GC'd:
+If the nix store binary was GC'd, rebuild and re-apply through the repo deploy script:
 
 ```bash
-cd ~/pastebin
-nix build ".#systemConfigs.kant-pastebin" --no-link --print-out-paths
-# Get the unit path from services.json
-STORE_PATH=$(nix build ".#systemConfigs.kant-pastebin" --no-link --print-out-paths 2>/dev/null)
-UNIT_PATH=$(python3 -c "
-import json
-with open('$STORE_PATH/services/services.json') as f:
-    print(json.load(f)['kant-pastebin.service']['storePath'])
-")
-sudo cp "$UNIT_PATH" /etc/systemd/system/kant-pastebin.service
-sudo systemctl daemon-reload
-sudo systemctl restart kant-pastebin
+./deploy.sh
+```
+
+For a manual binary check:
+
+```bash
+nix build .#kant-pastebin --no-link --print-out-paths
 ```
 
 ## Environment Variables
@@ -100,5 +105,12 @@ sudo systemctl restart kant-pastebin
 
 - **Cause**: Unit file deleted from `/etc/systemd/system/` on May 30 during system-manager activation. Old binary was garbage collected.
 - **Symptoms**: HTTP 502 on `/pastebin/`, nothing listening on :8090
-- **Fix**: Rebuilt `.#systemConfigs.kant-pastebin`, re-applied unit file, restarted service
-- **Prevention**: Added `diagnose` command to `deploy.sh` for quick triage
+- **Fix**: Rebuilt the system-manager config, re-applied the unit file, restarted service
+- **Prevention**: Added `diagnose.sh` to `deploy.sh` for quick triage
+
+### 2026-06-20: Large Post Split/Share Hardening
+
+- **Cause**: Post split loaded the full raw paste into the browser, returned every chunk body as JSON, and rendered chunk previews in the DOM. This could hang the server/browser for ~10MB posts.
+- **Symptoms**: Split page stalled or returned oversized responses; Share failed in browsers without `navigator.share`.
+- **Fix**: Added server-side `POST /api/split-paste`, made `split-download` and `split-upload` accept `paste_id`, limited split previews to metadata plus a small excerpt, and added `sharePost()` fallback URL copying.
+- **Prevention**: Post split page now keeps raw content server-side, exposes chunk-size and boundary dropdowns, and downloads a ZIP containing only `part_*.txt` files.

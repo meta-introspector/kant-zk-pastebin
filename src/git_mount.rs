@@ -100,8 +100,8 @@ pub struct GitMountCache {
 
 impl GitMountCache {
     pub fn new() -> Self {
-        let uucp_dir = env::var("UUCP_SPOOL")
-            .unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+        let uucp_dir =
+            env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
         let cache_path = env::var("GIT_MOUNT_CACHE")
             .unwrap_or_else(|_| format!("{}/git_mount_cache.jsonl", uucp_dir));
 
@@ -140,7 +140,9 @@ impl GitMountCache {
 
         for mount_path in mounts_config.split(':') {
             let mount_path = mount_path.trim();
-            if mount_path.is_empty() { continue; }
+            if mount_path.is_empty() {
+                continue;
+            }
 
             let real_path = match fs::canonicalize(mount_path) {
                 Ok(p) => p,
@@ -156,13 +158,16 @@ impl GitMountCache {
             let head_commit = git_head_commit(&real_path);
             let branch = git_branch(&real_path);
 
-            self.mounts.insert(mount_id.clone(), GitMountInfo {
-                id: mount_id.clone(),
-                root: real_path.display().to_string(),
-                name: mount_id,
-                head_commit,
-                branch,
-            });
+            self.mounts.insert(
+                mount_id.clone(),
+                GitMountInfo {
+                    id: mount_id.clone(),
+                    root: real_path.display().to_string(),
+                    name: mount_id,
+                    head_commit,
+                    branch,
+                },
+            );
         }
     }
 
@@ -170,7 +175,9 @@ impl GitMountCache {
     fn load_from_disk(&mut self) {
         if let Ok(content) = fs::read_to_string(&self.cache_path) {
             for line in content.lines() {
-                if line.starts_with('#') || line.trim().is_empty() { continue; }
+                if line.starts_with('#') || line.trim().is_empty() {
+                    continue;
+                }
 
                 // Try to parse as a file entry
                 if let Ok(entry) = serde_json::from_str::<GitFileEntry>(line) {
@@ -183,8 +190,11 @@ impl GitMountCache {
                     self.dirs.insert(key, entry);
                 }
             }
-            eprintln!("[git_mount] Loaded {} file entries, {} dir listings from disk",
-                self.files.len(), self.dirs.len());
+            eprintln!(
+                "[git_mount] Loaded {} file entries, {} dir listings from disk",
+                self.files.len(),
+                self.dirs.len()
+            );
         }
 
         // Evict if we loaded more than the limit
@@ -199,12 +209,15 @@ impl GitMountCache {
         if self.files.len() > self.max_files {
             let evict_count = self.files.len() - self.max_files;
             // Collect keys sorted by (last_accessed, access_count) ascending
-            let mut ranked: Vec<(u64, u64, String)> = self.files.iter()
+            let mut ranked: Vec<(u64, u64, String)> = self
+                .files
+                .iter()
                 .map(|(k, v)| (v.last_accessed, v.access_count, k.clone()))
                 .collect();
             ranked.sort_by_key(|(t, c, _)| (*t, *c));
 
-            let keys_to_evict: Vec<String> = ranked.iter()
+            let keys_to_evict: Vec<String> = ranked
+                .iter()
                 .take(evict_count)
                 .map(|(_, _, k)| k.clone())
                 .collect();
@@ -212,20 +225,26 @@ impl GitMountCache {
             for key in keys_to_evict {
                 self.files.remove(&key);
             }
-            eprintln!("[git_mount] LRU evicted {} file entries ({} remaining)",
-                evict_count, self.files.len());
+            eprintln!(
+                "[git_mount] LRU evicted {} file entries ({} remaining)",
+                evict_count,
+                self.files.len()
+            );
             self.dirty = true;
         }
 
         // Evict dirs
         if self.dirs.len() > self.max_dirs {
             let evict_count = self.dirs.len() - self.max_dirs;
-            let mut ranked: Vec<(u64, String)> = self.dirs.iter()
+            let mut ranked: Vec<(u64, String)> = self
+                .dirs
+                .iter()
                 .map(|(k, v)| (v.cached_at, k.clone()))
                 .collect();
             ranked.sort_by_key(|(t, _)| *t);
 
-            let keys_to_evict: Vec<String> = ranked.iter()
+            let keys_to_evict: Vec<String> = ranked
+                .iter()
                 .take(evict_count)
                 .map(|(_, k)| k.clone())
                 .collect();
@@ -233,15 +252,20 @@ impl GitMountCache {
             for key in keys_to_evict {
                 self.dirs.remove(&key);
             }
-            eprintln!("[git_mount] LRU evicted {} dir entries ({} remaining)",
-                evict_count, self.dirs.len());
+            eprintln!(
+                "[git_mount] LRU evicted {} dir entries ({} remaining)",
+                evict_count,
+                self.dirs.len()
+            );
             self.dirty = true;
         }
     }
 
     /// Flush cache to disk.
     pub fn flush_to_disk(&mut self) {
-        if !self.dirty { return; }
+        if !self.dirty {
+            return;
+        }
 
         let mut lines = Vec::new();
 
@@ -263,8 +287,11 @@ impl GitMountCache {
         if let Err(e) = fs::write(&self.cache_path, content) {
             eprintln!("[git_mount] Failed to write cache: {}", e);
         } else {
-            eprintln!("[git_mount] Flushed {} file entries, {} dir listings to disk",
-                self.files.len(), self.dirs.len());
+            eprintln!(
+                "[git_mount] Flushed {} file entries, {} dir listings to disk",
+                self.files.len(),
+                self.dirs.len()
+            );
         }
 
         self.dirty = false;
@@ -312,22 +339,31 @@ impl GitMountCache {
                 let path = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
 
-                if name.starts_with('.') { continue; }
-                if name == "target" || name == "build" || name == "node_modules" { continue; }
+                if name.starts_with('.') {
+                    continue;
+                }
+                if name == "target" || name == "build" || name == "node_modules" {
+                    continue;
+                }
 
                 let is_dir = path.is_dir();
                 let is_submodule = is_dir && path.join(".git").exists();
 
-                let rel_path = path.strip_prefix(&mount_info.root)
+                let rel_path = path
+                    .strip_prefix(&mount_info.root)
                     .unwrap_or(&path)
                     .display()
                     .to_string();
 
-                let size = if is_dir { 0 } else {
+                let size = if is_dir {
+                    0
+                } else {
                     fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
                 };
 
-                let ext = if is_dir { String::new() } else {
+                let ext = if is_dir {
+                    String::new()
+                } else {
                     path.extension()
                         .and_then(|e| e.to_str())
                         .unwrap_or("")
@@ -346,12 +382,10 @@ impl GitMountCache {
         }
 
         // Sort: dirs first, then files
-        entries.sort_by(|a, b| {
-            match (a.is_dir, b.is_dir) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            }
+        entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
 
         // Cache it
@@ -360,12 +394,15 @@ impl GitMountCache {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        self.dirs.insert(cache_key, DirCacheEntry {
-            mount_id: mount_id.to_string(),
-            rel_path: sub_path.trim_end_matches('/').to_string(),
-            entries: entries.clone(),
-            cached_at: now,
-        });
+        self.dirs.insert(
+            cache_key,
+            DirCacheEntry {
+                mount_id: mount_id.to_string(),
+                rel_path: sub_path.trim_end_matches('/').to_string(),
+                entries: entries.clone(),
+                cached_at: now,
+            },
+        );
         self.dirty = true;
         self.evict_lru();
         self.maybe_flush();
@@ -411,22 +448,25 @@ impl GitMountCache {
                 .unwrap_or(0);
             let (head_commit, branch) = git_info_for_path(&full_path);
 
-            self.files.insert(cache_key, GitFileEntry {
-                path,
-                repo_root: mount_info.root.clone(),
-                rel_path: sub_path.trim_start_matches('/').to_string(),
-                name,
-                ext,
-                size,
-                head_commit,
-                branch,
-                is_submodule: false, // updated below
-                submodule_chain: Vec::new(),
-                mtime,
-                mount_id: mount_id.to_string(),
-                last_accessed: now,
-                access_count: 1,
-            });
+            self.files.insert(
+                cache_key,
+                GitFileEntry {
+                    path,
+                    repo_root: mount_info.root.clone(),
+                    rel_path: sub_path.trim_start_matches('/').to_string(),
+                    name,
+                    ext,
+                    size,
+                    head_commit,
+                    branch,
+                    is_submodule: false, // updated below
+                    submodule_chain: Vec::new(),
+                    mtime,
+                    mount_id: mount_id.to_string(),
+                    last_accessed: now,
+                    access_count: 1,
+                },
+            );
         }
 
         self.dirty = true;
@@ -452,8 +492,11 @@ impl GitMountCache {
         entries.sort_by(|a, b| b.access_count.cmp(&a.access_count));
 
         for entry in entries {
-            if results.len() >= limit { break; }
-            if entry.name.to_lowercase().contains(&q) || entry.rel_path.to_lowercase().contains(&q) {
+            if results.len() >= limit {
+                break;
+            }
+            if entry.name.to_lowercase().contains(&q) || entry.rel_path.to_lowercase().contains(&q)
+            {
                 results.push(entry);
             }
         }
@@ -466,9 +509,9 @@ impl GitMountCache {
         let mut results = Vec::new();
 
         let text_exts = [
-            "rs", "py", "js", "ts", "go", "java", "c", "h", "cpp", "hpp",
-            "md", "txt", "org", "toml", "yaml", "yml", "json", "nix", "sh",
-            "html", "css", "xml", "rb", "hs", "lean", "zig", "nim",
+            "rs", "py", "js", "ts", "go", "java", "c", "h", "cpp", "hpp", "md", "txt", "org",
+            "toml", "yaml", "yml", "json", "nix", "sh", "html", "css", "xml", "rb", "hs", "lean",
+            "zig", "nim",
         ];
 
         // Sort by access count
@@ -476,8 +519,12 @@ impl GitMountCache {
         entries.sort_by(|a, b| b.access_count.cmp(&a.access_count));
 
         for entry in entries {
-            if results.len() >= limit { break; }
-            if !text_exts.contains(&entry.ext.as_str()) { continue; }
+            if results.len() >= limit {
+                break;
+            }
+            if !text_exts.contains(&entry.ext.as_str()) {
+                continue;
+            }
 
             if let Ok(content) = fs::read_to_string(&entry.path) {
                 if content.to_lowercase().contains(&q) {
@@ -506,7 +553,9 @@ impl GitMountCache {
 
         for entry in entries.iter().filter(|e| !e.is_dir) {
             let cache_key = format!("{}:{}", mount_id, entry.rel_path);
-            if self.files.contains_key(&cache_key) { continue; }
+            if self.files.contains_key(&cache_key) {
+                continue;
+            }
 
             let full_path = PathBuf::from(&mount_info.root).join(&entry.rel_path);
             let mtime = fs::metadata(&full_path)
@@ -517,22 +566,25 @@ impl GitMountCache {
                 .unwrap_or(0);
             let (head_commit, branch) = git_info_for_path(&full_path);
 
-            self.files.insert(cache_key, GitFileEntry {
-                path: full_path.display().to_string(),
-                repo_root: mount_info.root.clone(),
-                rel_path: entry.rel_path.clone(),
-                name: entry.name.clone(),
-                ext: entry.ext.clone(),
-                size: entry.size,
-                head_commit,
-                branch,
-                is_submodule: entry.is_submodule,
-                submodule_chain: Vec::new(),
-                mtime,
-                mount_id: mount_id.to_string(),
-                last_accessed: now,
-                access_count: 0, // not yet accessed, just warmed
-            });
+            self.files.insert(
+                cache_key,
+                GitFileEntry {
+                    path: full_path.display().to_string(),
+                    repo_root: mount_info.root.clone(),
+                    rel_path: entry.rel_path.clone(),
+                    name: entry.name.clone(),
+                    ext: entry.ext.clone(),
+                    size: entry.size,
+                    head_commit,
+                    branch,
+                    is_submodule: entry.is_submodule,
+                    submodule_chain: Vec::new(),
+                    mtime,
+                    mount_id: mount_id.to_string(),
+                    last_accessed: now,
+                    access_count: 0, // not yet accessed, just warmed
+                },
+            );
         }
 
         self.dirty = true;
@@ -565,7 +617,9 @@ fn git_head_commit(repo_path: &Path) -> Option<String> {
     if head_content.starts_with("ref:") {
         let ref_path = head_content.trim().strip_prefix("ref: ")?;
         let full_ref = repo_path.join(".git").join(ref_path);
-        fs::read_to_string(&full_ref).ok().map(|s| s.trim().to_string())
+        fs::read_to_string(&full_ref)
+            .ok()
+            .map(|s| s.trim().to_string())
     } else {
         Some(head_content.trim().to_string())
     }
@@ -601,9 +655,13 @@ fn excerpt_around(text: &str, query: &str, context_chars: usize) -> String {
         let start = pos.saturating_sub(context_chars / 2);
         let end = (pos + q.len() + context_chars / 2).min(text.len());
         let mut excerpt = String::new();
-        if start > 0 { excerpt.push_str("..."); }
+        if start > 0 {
+            excerpt.push_str("...");
+        }
         excerpt.push_str(&text[start..end]);
-        if end < text.len() { excerpt.push_str("..."); }
+        if end < text.len() {
+            excerpt.push_str("...");
+        }
         excerpt
     } else {
         String::new()

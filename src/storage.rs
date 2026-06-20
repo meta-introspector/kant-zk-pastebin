@@ -1,28 +1,28 @@
 // Storage - Load/save pastes from UUCP/IPFS/Kafka-like API
-use std::fs;
 use std::env;
+use std::fs;
 
 pub fn load_content(id: &str) -> Option<String> {
     if let Some(content) = load_from_api(id) {
         return Some(content);
     }
-    
+
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let filename = format!("{}/{}.txt", uucp_dir, id);
-    
+
     if let Ok(content) = fs::read_to_string(&filename) {
         return Some(content);
     }
-    
+
     load_from_ipfs(id)
 }
 
 pub fn save_content(id: &str, content: &str) -> Result<(), std::io::Error> {
     save_to_api(id, content);
-    
+
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let filename = format!("{}/{}.txt", uucp_dir, id);
-    
+
     fs::write(&filename, content)?;
     save_to_ipfs(content);
     Ok(())

@@ -1,14 +1,16 @@
 // Handlers - Request handlers for kant-pastebin microservice
-use actix_web::{web, HttpResponse, HttpRequest, Result};
-use crate::model::{Paste, Response, PasteIndex, SplitProfile, SplitProfileRequest, SplitMode};
-use crate::plugins::pipelight;
+use crate::model::{
+    Paste, PasteIndex, Response, SplitMode, SplitProfile, SplitProfileRequest, SplitUnit,
+};
 use crate::plugins;
-use crate::{view, storage, ipfs, tagging, plugin};
+use crate::plugins::pipelight;
+use crate::{ipfs, plugin, storage, tagging, view};
+use actix_web::{web, HttpRequest, HttpResponse, Result};
 use chrono::Utc;
-use sha2::{Sha256, Digest};
 use ciborium;
-use std::{fs, env, collections::HashMap};
+use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::{collections::HashMap, env, fs};
 
 // ─── Helper: append an entry to index.jsonl ──────────────────────────
 fn write_index_entry(
@@ -53,11 +55,14 @@ fn write_index_entry(
 }
 
 /// GET / - Home page
-pub async fn index(query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
+pub async fn index(
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
     let reply_to = query.get("reply_to").map(|s| s.as_str()).unwrap_or("");
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
-    
-    let html = format!(r#"<!DOCTYPE html>
+
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Kant Pastebin</title>
 <style>
 body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
@@ -155,9 +160,24 @@ form.onsubmit = async (e) => {{
   }}
 }};
 </script>
-</body></html>"#, base_path, base_path, base_path, base_path, base_path, base_path, reply_to, base_path, base_path, base_path, base_path, base_path);
-    
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+</body></html>"#,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        reply_to,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path
+    );
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// POST /paste - Create paste
@@ -175,31 +195,40 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
 
     // Detect Wikidata QID — trigger enrichment pipeline
     let trimmed = content.trim();
-    if trimmed.starts_with('Q') && trimmed[1..].chars().all(|c| c.is_ascii_digit()) && trimmed.len() >= 2 {
+    if trimmed.starts_with('Q')
+        && trimmed[1..].chars().all(|c| c.is_ascii_digit())
+        && trimmed.len() >= 2
+    {
         return enrich_qid(trimmed).await;
     }
 
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    
+
     // Auto-generate title and tags
     let auto_tags = tagging::auto_tag(content);
     let html_title = tagging::extract_html_title(content);
     let auto_desc = tagging::auto_describe(content);
     let title_owned = paste.title.clone().unwrap_or_else(|| {
-        html_title.unwrap_or_else(|| if !auto_tags.is_empty() { auto_desc } else { "untitled".to_string() })
+        html_title.unwrap_or_else(|| {
+            if !auto_tags.is_empty() {
+                auto_desc
+            } else {
+                "untitled".to_string()
+            }
+        })
     });
     let title = title_owned.as_str();
     let keywords = paste.keywords.clone().unwrap_or_else(|| auto_tags);
-    
+
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let hash = hasher.finalize();
     let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
     let witness = hex::encode(&hash);
-    
+
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
-    
+
     if std::path::Path::new(&cid_file).exists() {
         let existing_id = fs::read_to_string(&cid_file).unwrap_or_else(|_| format!("paste_{}", ts));
         return Ok(HttpResponse::Ok().json(Response {
@@ -213,36 +242,44 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
             reply_to: paste.reply_to.clone(),
         }));
     }
-    
+
     let slug_title = tagging::slugify(title);
-    let slug_keywords = keywords.iter().map(|k| tagging::slugify(k)).collect::<Vec<_>>().join("_");
+    let slug_keywords = keywords
+        .iter()
+        .map(|k| tagging::slugify(k))
+        .collect::<Vec<_>>()
+        .join("_");
     let filename = if slug_keywords.is_empty() {
         format!("{}_{}.txt", ts, slug_title)
     } else {
         format!("{}_{}_{}.txt", ts, slug_title, slug_keywords)
     };
-    
+
     let id = filename.trim_end_matches(".txt").to_string();
     let uucp = format!("{}/{}", uucp_dir, filename);
-    
+
     // Push to IPFS
     let ipfs_cid = ipfs::ipfs_add(content);
     let dasl_cid = crate::dasl::dasl_cid(content.as_bytes());
-    
+
     let reply_to_str = paste.reply_to.as_deref().unwrap_or("");
-    let section = crate::sheaf::Section::new(content.as_bytes(), crate::sheaf::Encoding::Raw);
+    let section = erdfa_publish::sheaf::Section::new(content.as_bytes(), erdfa_publish::sheaf::Encoding::Raw);
     let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: {}\n{}\n\n{}\n\n{}\n",
         id, title, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), dasl_cid, reply_to_str,
-        crate::sheaf::sheaf_header(&section),
+        erdfa_publish::sheaf::sheaf_header(&section),
         content, section.to_rdfa());
     fs::write(&uucp, paste_content).ok();
     fs::write(&cid_file, &id).ok();
-    
+
     let ngrams = tagging::extract_ngrams(content, 3, 10);
-    
+
     let index_entry = PasteIndex {
         id: id.clone(),
-        title: if title == "untitled" { tagging::auto_describe(content) } else { title.to_string() },
+        title: if title == "untitled" {
+            tagging::auto_describe(content)
+        } else {
+            title.to_string()
+        },
         description: Some(tagging::auto_describe(content)),
         keywords,
         cid: local_cid.clone(),
@@ -256,7 +293,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         uucp_path: uucp.clone(),
         root: None,
     };
-    
+
     let index_file = format!("{}/index.jsonl", uucp_dir);
     let index_line = format!("{}\n", serde_json::to_string(&index_entry).unwrap());
     fs::OpenOptions::new()
@@ -265,7 +302,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         .open(&index_file)
         .and_then(|mut f| std::io::Write::write_all(&mut f, index_line.as_bytes()))
         .ok();
-    
+
     Ok(HttpResponse::Ok().json(Response {
         id: id.clone(),
         cid: local_cid,
@@ -299,12 +336,15 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
         }
         match field_name.as_str() {
             "file" => {
-                orig_name = field.content_disposition()
+                orig_name = field
+                    .content_disposition()
                     .and_then(|cd| cd.get_filename().map(|s| s.to_string()))
                     .unwrap_or_else(|| "upload".to_string());
                 file_data = buf;
             }
-            "title" => { title = String::from_utf8_lossy(&buf).to_string(); }
+            "title" => {
+                title = String::from_utf8_lossy(&buf).to_string();
+            }
             _ => {}
         }
     }
@@ -315,7 +355,9 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
 
     let ext = orig_name.rsplit('.').next().unwrap_or("bin");
     let mime = mime_guess::from_ext(ext).first_or_octet_stream();
-    if title.is_empty() { title = orig_name.clone(); }
+    if title.is_empty() {
+        title = orig_name.clone();
+    }
     let slug = tagging::slugify(&title);
 
     let mut hasher = Sha256::new();
@@ -326,14 +368,26 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     let ipfs_cid = ipfs::ipfs_add_bytes(&file_data);
 
     let filename = format!("{}_{}.{}", ts, slug, ext);
-    let id = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(&filename).to_string();
+    let id = filename
+        .rsplit_once('.')
+        .map(|(s, _)| s)
+        .unwrap_or(&filename)
+        .to_string();
     let uucp = format!("{}/{}", uucp_dir, filename);
 
     fs::write(&uucp, &file_data).ok();
 
     // Write metadata sidecar
-    let meta = format!("--- {} ---\nTitle: {}\nMime: {}\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\n",
-        id, title, mime, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), file_data.len());
+    let meta = format!(
+        "--- {} ---\nTitle: {}\nMime: {}\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\n",
+        id,
+        title,
+        mime,
+        local_cid,
+        witness,
+        ipfs_cid.as_deref().unwrap_or(""),
+        file_data.len()
+    );
     fs::write(format!("{}.meta", uucp), &meta).ok();
 
     // CID dedup file
@@ -358,19 +412,24 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
 
     // Find file with any extension matching the id
-    let file = fs::read_dir(&uucp_dir).ok()
-        .and_then(|entries| entries
-            .filter_map(|e| e.ok())
-            .find(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
-                stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
-            }));
+    let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
+        entries.filter_map(|e| e.ok()).find(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+            stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
+        })
+    });
 
     match file {
         Some(entry) => {
-            let data = fs::read(entry.path()).map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
-            let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("bin").to_string();
+            let data = fs::read(entry.path())
+                .map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
+            let ext = entry
+                .path()
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("bin")
+                .to_string();
             let mime = mime_guess::from_ext(&ext).first_or_octet_stream();
             Ok(HttpResponse::Ok().content_type(mime.to_string()).body(data))
         }
@@ -389,12 +448,15 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
         (status = 200, description = "Paste HTML")
     )
 )]
-pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> Result<HttpResponse> {
+pub async fn get_paste(
+    path: web::Path<String>,
+    req: actix_web::HttpRequest,
+) -> Result<HttpResponse> {
     let id = path.into_inner();
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
     let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
-    
+
     // Load index for prev/next/related
     let index_file = format!("{}/index.jsonl", uucp_dir);
     let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
@@ -402,11 +464,17 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
         .lines()
         .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
         .collect();
-    
+
     let current_idx = entries.iter().position(|e| e.id == id);
-    let prev_id = current_idx.and_then(|i| if i > 0 { entries.get(i - 1).map(|e| &e.id) } else { None });
+    let prev_id = current_idx.and_then(|i| {
+        if i > 0 {
+            entries.get(i - 1).map(|e| &e.id)
+        } else {
+            None
+        }
+    });
     let next_id = current_idx.and_then(|i| entries.get(i + 1).map(|e| &e.id));
-    
+
     let content = if let Ok(dir_entries) = fs::read_dir(&uucp_dir) {
         dir_entries
             .filter_map(std::result::Result::ok)
@@ -419,26 +487,36 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
     } else {
         None
     };
-    
+
     // Check for uploaded file with .meta sidecar
     let is_file = content.is_none();
     let meta_content = if is_file {
-        fs::read_dir(&uucp_dir).ok().and_then(|entries| entries
-            .filter_map(|e| e.ok())
-            .find(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                let stem = name.rsplit_once('.').and_then(|(s, ext)| if ext == "meta" { s.rsplit_once('.').map(|(s2, _)| s2) } else { None });
-                stem == Some(id.as_str())
-            })
-            .and_then(|e| fs::read_to_string(e.path()).ok()))
-    } else { None };
-    
+        fs::read_dir(&uucp_dir).ok().and_then(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .find(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    let stem = name.rsplit_once('.').and_then(|(s, ext)| {
+                        if ext == "meta" {
+                            s.rsplit_once('.').map(|(s2, _)| s2)
+                        } else {
+                            None
+                        }
+                    });
+                    stem == Some(id.as_str())
+                })
+                .and_then(|e| fs::read_to_string(e.path()).ok())
+        })
+    } else {
+        None
+    };
+
     match content {
         Some(content) => {
             // Parse structured header
             let mut headers = std::collections::HashMap::new();
             let mut body_start = 0;
-            
+
             for (i, line) in content.lines().enumerate() {
                 if line.is_empty() && i > 0 {
                     body_start = content.lines().take(i + 1).map(|l| l.len() + 1).sum();
@@ -448,49 +526,69 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
                     headers.insert(key.trim(), value.trim());
                 }
             }
-            
+
             let title = headers.get("Title").map(|s| *s).unwrap_or(&id);
             let cid = headers.get("CID").map(|s| *s).unwrap_or("");
-            let ipfs_cid = headers.get("IPFS").or(headers.get("ipfs_cid")).map(|s| *s)
+            let ipfs_cid = headers
+                .get("IPFS")
+                .or(headers.get("ipfs_cid"))
+                .map(|s| *s)
                 .or_else(|| {
                     // Fallback to index if not in file header
-                    entries.iter().find(|e| e.id == id).and_then(|e| e.ipfs_cid.as_deref())
+                    entries
+                        .iter()
+                        .find(|e| e.id == id)
+                        .and_then(|e| e.ipfs_cid.as_deref())
                 });
             let body = &content[body_start..];
-            
+
             let ipfs_cmd = if let Some(ipfs) = ipfs_cid {
                 format!("ipfs cat {}", ipfs)
             } else {
                 "# No IPFS CID available".to_string()
             };
-            
+
             let file_cmd = format!("cat {}/{}.txt", uucp_dir, id);
             let curl_cmd = format!("curl {}/raw/{}", base_url, id);
             let reply_cmd = format!("curl -X POST {}/paste -H 'Content-Type: application/json' -d '{{\"content\":\"...\",\"reply_to\":\"{}\"}}'", base_url, id);
-            
+
             // Find related posts by keywords
             let current_entry = entries.iter().find(|e| e.id == id);
             let related: Vec<&PasteIndex> = if let Some(curr) = current_entry {
-                entries.iter()
+                entries
+                    .iter()
                     .filter(|e| e.id != id && e.keywords.iter().any(|k| curr.keywords.contains(k)))
                     .take(5)
                     .collect()
             } else {
                 vec![]
             };
-            
-            let prev_link = prev_id.map(|pid| format!(r#"<a href="{}/paste/{}">← Prev</a>"#, base_path, pid)).unwrap_or_else(|| "".to_string());
-            let next_link = next_id.map(|nid| format!(r#"<a href="{}/paste/{}">Next →</a>"#, base_path, nid)).unwrap_or_else(|| "".to_string());
-            
+
+            let prev_link = prev_id
+                .map(|pid| format!(r#"<a href="{}/paste/{}">← Prev</a>"#, base_path, pid))
+                .unwrap_or_else(|| "".to_string());
+            let next_link = next_id
+                .map(|nid| format!(r#"<a href="{}/paste/{}">Next →</a>"#, base_path, nid))
+                .unwrap_or_else(|| "".to_string());
+
             let related_html = if !related.is_empty() {
-                let items: String = related.iter().map(|e| {
-                    format!(r#"<div style="padding:5px"><a href="{}/paste/{}">{}</a></div>"#, base_path, e.id, e.title)
-                }).collect();
-                format!(r#"<h3>Related Posts:</h3><div style="background:#111;padding:10px;margin:10px 0">{}</div>"#, items)
+                let items: String = related
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            r#"<div style="padding:5px"><a href="{}/paste/{}">{}</a></div>"#,
+                            base_path, e.id, e.title
+                        )
+                    })
+                    .collect();
+                format!(
+                    r#"<h3>Related Posts:</h3><div style="background:#111;padding:10px;margin:10px 0">{}</div>"#,
+                    items
+                )
             } else {
                 "".to_string()
             };
-            
+
             let pipelight_tile = if pipelight::is_pipelight_config(body) {
                 pipelight::render_tile_html(&id, &base_path)
             } else {
@@ -502,8 +600,9 @@ pub async fn get_paste(path: web::Path<String>, req: actix_web::HttpRequest) -> 
             } else {
                 String::new()
             };
-            
-            let html = format!(r#"<!DOCTYPE html>
+
+            let html = format!(
+                r#"<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
 <title>{}</title>
@@ -514,6 +613,11 @@ a{{color:#0ff;text-decoration:none}}
 .nav{{background:#111;padding:10px;margin:10px 0;border:1px solid #0f0}}
 pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height:600px;word-wrap:break-word;white-space:pre-wrap}}
 .reply-btn{{background:#0f0;color:#000;border:none;padding:5px 10px;cursor:pointer;margin:5px;display:inline-block}}
+.share-wrap{{position:relative;display:inline-block;margin:5px}}
+.share-menu{{position:absolute;left:0;top:100%;z-index:1000;background:#111;border:1px solid #0f0;padding:8px;min-width:230px;display:none}}
+.share-menu.open{{display:block}}
+.share-menu button{{display:block;width:100%;text-align:left;background:#0a0a0a;color:#0f0;border:1px solid #0f0;padding:6px 8px;margin:4px 0;cursor:pointer}}
+.share-menu button:hover{{background:#0f0;color:#000}}
 .cmd{{background:#111;padding:10px;margin:5px 0;border-left:3px solid #ff0;cursor:pointer;font-size:12px}}
 .cmd:hover{{background:#222}}
 .qr-modal{{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:20px;border:3px solid #0f0;z-index:1000;display:none}}
@@ -526,13 +630,13 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 </head><body>
 <div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/raw/{}">📄 Raw</a> | {} {}</div>
 <h1>{}</h1>
-<a class="reply-btn" href="{}/?reply_to={}">💬 Reply</a>
-<button class="reply-btn" onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent);this.textContent='✅ Copied'">📋 Copy</button>
-<button class="reply-btn" onclick="navigator.share({{title:'{}',text:document.querySelector('pre').textContent,url:window.location.href}})">🔗 Share</button>
-<button class="reply-btn" onclick="showQR()">📱 QR Code</button>
-<button class="reply-btn" onclick="shareRDFa()">🔗 RDFa URL</button>
-<button class="reply-btn" onclick="showPreview()">👁️ Preview</button>
-<button class="reply-btn" onclick="localStorage.setItem('splitter-text',document.querySelector('pre').textContent);window.open('{}/splitter/','_blank')">✂️ Split</button>
+<a class="reply-btn" href="{}/?reply_to={}">Reply</a>
+<button class="reply-btn" onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent);this.textContent='Copied'">Copy</button>
+{share_menu}
+<button class="reply-btn" onclick="showQR()">QR Code</button>
+<button class="reply-btn" onclick="shareRDFa()">RDFa URL</button>
+<button class="reply-btn" onclick="showPreview()">Preview</button>
+<a class="reply-btn" href="{}/paste/{}/split">Split</a>
 
 <h3>Access Commands:</h3>
 <div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
@@ -560,8 +664,10 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 <script>
 const ipfsCid = '{}';
 const pasteUrl = window.location.href;
+const currentPasteId = '{}';
 const title = '{}';
 
+{share_script}
 function showQR() {{
   const modal = document.getElementById('qrModal');
   modal.style.display = 'block';
@@ -661,28 +767,43 @@ function bundleSelected() {{
 }}
 </script>
 <script src="{}/static/a11y.js"></script>
-</body></html>"#, 
+</body></html>"#,
                 title,
-                base_path, base_path, base_path, id, prev_link, next_link,
-                title,
-                base_path, id, title,
                 base_path,
-                ipfs_cmd, ipfs_cmd,
-                file_cmd, file_cmd,
-                curl_cmd, curl_cmd,
+                base_path,
+                base_path,
+                id,
+                prev_link,
+                next_link,
+                title,
+                base_path,
+                id,
+                base_path,
+                id,
+                ipfs_cmd,
+                ipfs_cmd,
+                file_cmd,
+                file_cmd,
+                curl_cmd,
+                curl_cmd,
                 body,
                 pipelight_tile,
                 git2nora_tile,
                 related_html,
                 title,
                 ipfs_cid.unwrap_or(""),
+                id,
                 title,
                 base_path,
                 base_path,
-                base_path
+                base_path,
+                share_menu = crate::share::render_share_menu(),
+                share_script = crate::share::render_share_script()
             );
-            
-            Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+
+            Ok(HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(html))
         }
         None if meta_content.is_some() => {
             // File upload - parse meta and show image/file view
@@ -694,18 +815,28 @@ function bundleSelected() {{
                 }
             }
             let title = headers.get("Title").cloned().unwrap_or_else(|| id.clone());
-            let mime = headers.get("Mime").cloned().unwrap_or_else(|| "application/octet-stream".to_string());
+            let mime = headers
+                .get("Mime")
+                .cloned()
+                .unwrap_or_else(|| "application/octet-stream".to_string());
             let ipfs_cid = headers.get("IPFS").cloned().unwrap_or_default();
             let cid = headers.get("CID").cloned().unwrap_or_default();
             let size = headers.get("Size").cloned().unwrap_or_default();
 
             let content_html = if mime.starts_with("image/") {
-                format!(r#"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#, base_path, id, title)
+                format!(
+                    r#"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#,
+                    base_path, id, title
+                )
             } else {
-                format!(r#"<p>📎 <a href="{}/file/{}">{}</a> ({}, {} bytes)</p>"#, base_path, id, title, mime, size)
+                format!(
+                    r#"<p>📎 <a href="{}/file/{}">{}</a> ({}, {} bytes)</p>"#,
+                    base_path, id, title, mime, size
+                )
             };
 
-            let html = format!(r#"<!DOCTYPE html>
+            let html = format!(
+                r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>{}</title>
 <style>body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}a{{color:#0ff}}</style>
 </head><body>
@@ -713,19 +844,89 @@ function bundleSelected() {{
 <h1>{}</h1>
 <p>CID: {} | IPFS: {}</p>
 {}
-</body></html>"#, title, base_path, base_path, base_path, id, title, cid, ipfs_cid, content_html);
+</body></html>"#,
+                title, base_path, base_path, base_path, id, title, cid, ipfs_cid, content_html
+            );
 
-            Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+            Ok(HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(html))
         }
         None => Ok(HttpResponse::NotFound().body("Paste not found")),
     }
+}
+
+/// GET /paste/{id}/split - Split paste content
+pub async fn get_paste_split(path: web::Path<String>) -> Result<HttpResponse> {
+    let id = path.into_inner();
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let entries: Vec<PasteIndex> = fs::read_to_string(format!("{}/index.jsonl", uucp_dir))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
+        .collect();
+
+    let content = fs::read_dir(&uucp_dir).ok().and_then(|dir_entries| {
+        dir_entries
+            .filter_map(std::result::Result::ok)
+            .find(|e| {
+                let name = e.file_name();
+                let name_str = name.to_string_lossy();
+                name_str.contains(&id) && name_str.ends_with(".txt")
+            })
+            .and_then(|e| fs::read_to_string(e.path()).ok())
+    });
+
+    let Some(content) = content else {
+        return Ok(HttpResponse::NotFound().body("Paste not found"));
+    };
+
+    let mut headers = std::collections::HashMap::new();
+    let mut body_start = 0;
+    for (i, line) in content.lines().enumerate() {
+        if line.is_empty() && i > 0 {
+            body_start = content.lines().take(i + 1).map(|l| l.len() + 1).sum();
+            break;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            headers.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+
+    let title = headers
+        .get("Title")
+        .cloned()
+        .or_else(|| entries.iter().find(|e| e.id == id).map(|e| e.title.clone()))
+        .unwrap_or_else(|| id.clone());
+    let timestamp = entries
+        .iter()
+        .find(|e| e.id == id)
+        .map(|e| e.timestamp.clone())
+        .unwrap_or_default();
+    let paste = PasteIndex {
+        id,
+        title,
+        timestamp,
+        ..PasteIndex::default()
+    };
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view::render_split_paste(
+            &paste,
+            &content[body_start..],
+            &base_path,
+        )))
 }
 
 /// GET /preview/{id} - Preview paste with rendering
 pub async fn preview_paste(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
     let content = storage::load_content(&id).unwrap_or_else(|| "Paste not found".to_string());
-    Ok(HttpResponse::Ok().content_type("text/html").body(view::render_preview(&id, &content)))
+    Ok(HttpResponse::Ok()
+        .content_type("text/html")
+        .body(view::render_preview(&id, &content)))
 }
 
 /// GET /raw/{id} - Raw text
@@ -737,46 +938,50 @@ pub async fn get_raw(path: web::Path<String>) -> Result<HttpResponse> {
 
 /// POST /upgrade - Upgrade all pastes with auto-tags
 pub async fn upgrade_pastes() -> Result<HttpResponse> {
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let index_file = format!("{}/index.jsonl", uucp_dir);
-    
+
     let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
         .unwrap_or_default()
         .lines()
         .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
         .collect();
-    
+
     let mut upgraded = 0;
     let mut new_entries = Vec::new();
-    
+
     for entry in entries {
         let file_path = format!("{}/{}", uucp_dir, entry.filename);
         if let Ok(content) = fs::read_to_string(&file_path) {
-            let body = content.lines()
+            let body = content
+                .lines()
                 .skip_while(|line| !line.is_empty())
                 .skip(1)
                 .collect::<Vec<_>>()
                 .join("\n");
-            
+
             let auto_tags = tagging::auto_tag(&body);
             let description = tagging::auto_describe(&body);
-            
+
             // Extract HTML title if present
-            let new_title = if body.to_lowercase().contains("<html") || body.to_lowercase().contains("<!doctype") {
+            let new_title = if body.to_lowercase().contains("<html")
+                || body.to_lowercase().contains("<!doctype")
+            {
                 tagging::extract_html_title(&body).unwrap_or_else(|| entry.title.clone())
             } else if entry.title == "untitled" || entry.title.is_empty() {
                 description.clone()
             } else {
                 entry.title.clone()
             };
-            
+
             // Add IPFS CID if missing
             let ipfs_cid = if entry.ipfs_cid.is_none() || entry.ipfs_cid.as_deref() == Some("") {
                 ipfs::ipfs_add(&body)
             } else {
                 entry.ipfs_cid.clone()
             };
-            
+
             let mut new_entry = entry.clone();
             new_entry.title = new_title;
             new_entry.ipfs_cid = ipfs_cid;
@@ -784,21 +989,23 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
             new_entry.keywords.sort();
             new_entry.keywords.dedup();
             new_entry.description = Some(description);
-            
+
             new_entries.push(new_entry);
             upgraded += 1;
         } else {
             new_entries.push(entry);
         }
     }
-    
-    let new_index: String = new_entries.iter()
+
+    let new_index: String = new_entries
+        .iter()
         .map(|e| serde_json::to_string(e).unwrap())
         .collect::<Vec<_>>()
-        .join("\n") + "\n";
-    
+        .join("\n")
+        + "\n";
+
     fs::write(&index_file, new_index).ok();
-    
+
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "upgraded": upgraded,
         "total": new_entries.len()
@@ -808,33 +1015,49 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
 /// GET /thread/{id} - Get paste and all replies
 pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
     let parent_id = path.into_inner();
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
-    
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+
     let mut thread = Vec::new();
-    
+
     if let Ok(entries) = fs::read_dir(&uucp_dir) {
         for entry in entries.flatten() {
             let fname = entry.file_name().to_string_lossy().to_string();
-            if !fname.ends_with(".txt") { continue; }
+            if !fname.ends_with(".txt") {
+                continue;
+            }
             if let Ok(content) = fs::read_to_string(entry.path()) {
                 let lines: Vec<&str> = content.lines().collect();
-                if lines.is_empty() { continue; }
-                
+                if lines.is_empty() {
+                    continue;
+                }
+
                 // Parse header
                 let file_id = fname.trim_end_matches(".txt");
                 let mut title = String::new();
                 let mut reply_to = String::new();
                 let mut body_start = 0;
-                
+
                 for (i, line) in lines.iter().enumerate() {
-                    if line.is_empty() && i > 0 { body_start = i + 1; break; }
-                    if let Some(t) = line.strip_prefix("Title: ") { title = t.to_string(); }
-                    if let Some(r) = line.strip_prefix("Reply-To: ") { reply_to = r.to_string(); }
+                    if line.is_empty() && i > 0 {
+                        body_start = i + 1;
+                        break;
+                    }
+                    if let Some(t) = line.strip_prefix("Title: ") {
+                        title = t.to_string();
+                    }
+                    if let Some(r) = line.strip_prefix("Reply-To: ") {
+                        reply_to = r.to_string();
+                    }
                 }
-                
+
                 // Include if this IS the parent or replies TO the parent
                 if file_id == parent_id || reply_to == parent_id {
-                    let body = if body_start < lines.len() { lines[body_start..].join("\n") } else { String::new() };
+                    let body = if body_start < lines.len() {
+                        lines[body_start..].join("\n")
+                    } else {
+                        String::new()
+                    };
                     thread.push(serde_json::json!({
                         "id": file_id,
                         "title": title,
@@ -845,16 +1068,20 @@ pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
             }
         }
     }
-    
+
     // Sort: parent first, then replies by id (chronological)
     thread.sort_by(|a, b| {
         let a_id = a["id"].as_str().unwrap_or("");
         let b_id = b["id"].as_str().unwrap_or("");
-        if a_id == parent_id { std::cmp::Ordering::Less }
-        else if b_id == parent_id { std::cmp::Ordering::Greater }
-        else { a_id.cmp(b_id) }
+        if a_id == parent_id {
+            std::cmp::Ordering::Less
+        } else if b_id == parent_id {
+            std::cmp::Ordering::Greater
+        } else {
+            a_id.cmp(b_id)
+        }
     });
-    
+
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "thread_id": parent_id,
         "count": thread.len(),
@@ -873,64 +1100,208 @@ pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
         (status = 200, description = "Browse HTML")
     )
 )]
-pub async fn browse(query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+pub async fn browse(
+    req: HttpRequest,
+    _query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+
+    let items = match paste_search_results(&req, 200, true)? {
+        Some((_search_q, _mode, _scope, _limit, results)) => {
+            let items: String = results.iter().map(|r| render_search_result_entry(r, &base_path)).collect();
+            render_browse_page(&base_path, &_search_q, &items, "Full-text search", true)
+        }
+        None => {
+            let uucp_dir =
+                env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+            let entries = read_index_entries(&uucp_dir);
+            let items: String = entries.iter().rev().take(50).map(|e| render_paste_entry(e, &base_path)).collect();
+            render_browse_page(&base_path, "", &items, "", false)
+        }
+    };
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(items))
+}
+
+fn read_index_entries(uucp_dir: &str) -> Vec<PasteIndex> {
     let index_file = format!("{}/index.jsonl", uucp_dir);
-    
-    let search = query.get("q").map(|s| s.to_lowercase());
-    
-    let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
+    fs::read_to_string(&index_file)
         .unwrap_or_default()
         .lines()
         .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
-        .filter(|entry| {
-            if let Some(ref q) = search {
-                entry.title.to_lowercase().contains(q) || 
-                entry.keywords.iter().any(|k| k.to_lowercase().contains(q))
-            } else {
-                true
-            }
-        })
-        .collect();
-    
-    let search_box = if let Some(q) = search {
-        format!(r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#, q)
+        .collect()
+}
+
+fn render_paste_entry(e: &PasteIndex, base_path: &str) -> String {
+    let display_title = if e.title == "untitled" || e.title.is_empty() {
+        e.description.as_deref().unwrap_or("untitled")
     } else {
-        r#"<form method="get"><input type="text" name="q" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#.to_string()
+        &e.title
     };
-    
-    let items: String = entries.iter().rev().take(50).map(|e| {
-        let display_title = if e.title == "untitled" || e.title.is_empty() {
-            e.description.as_deref().unwrap_or("untitled")
-        } else {
-            &e.title
-        };
-        let tags = if !e.keywords.is_empty() {
-            format!(" <span style=\"color:#666;font-size:11px\">[{}]</span>", e.keywords.join(", "))
-        } else {
-            String::new()
-        };
-        format!(r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a>{} <span style="color:#666">{}</span></div>"#, 
-            base_path, e.id, display_title, tags, e.timestamp)
-    }).collect();
-    
-    let html = format!(r#"<!DOCTYPE html>
+    let tags = if !e.keywords.is_empty() {
+        format!(
+            " <span style=\"color:#666;font-size:11px\">[{}]</span>",
+            e.keywords
+                .iter()
+                .map(|k| html_escape(k))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a>{} <span style="color:#666">{}</span></div>"#,
+        base_path,
+        html_escape(&e.id),
+        html_escape(display_title),
+        tags,
+        html_escape(&e.timestamp)
+    )
+}
+
+fn render_search_result_entry(r: &SearchResult, base_path: &str) -> String {
+    let display_title = if r.title.is_empty() {
+        r.description.as_deref().unwrap_or(&r.id)
+    } else {
+        &r.title
+    };
+    let excerpt = if r.excerpt.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"<div class="excerpt">{}</div>"#,
+            html_escape(&r.excerpt)
+        )
+    };
+    format!(
+        r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a> <span style="color:#666">{} · {} · {}</span>{}</div>"#,
+        base_path,
+        html_escape(&r.id),
+        html_escape(display_title),
+        html_escape(&r.timestamp),
+        format_size(r.size as u64),
+        html_escape(&r.match_type),
+        excerpt
+    )
+}
+
+fn render_browse_page(base_path: &str, q: &str, items: &str, note: &str, export_visible: bool) -> String {
+    let search_box = format!(
+        r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#,
+        html_escape(q)
+    );
+    let title_json = serde_json::to_string(q).unwrap_or_else(|_| "\"browse results\"".to_string());
+    let export_button = if export_visible {
+        format!(
+            r#"<button type="button" id="exportVisible" style="background:#0f0;color:#000;border:none;padding:8px 12px;cursor:pointer;margin:10px 5px 10px 0">📤 Export visible as paste</button><button type="button" id="exportChunkedVisible" style="background:#0f0;color:#000;border:none;padding:8px 12px;cursor:pointer;margin:10px 0">🧩 Export chunked</button>"#
+        )
+    } else {
+        String::new()
+    };
+    let note = if note.is_empty() {
+        String::new()
+    } else {
+        format!(r#"<p style="color:#666">{}</p>"#, html_escape(note))
+    };
+    let title = title_json.clone();
+    format!(
+        r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Browse Pastes</title>
 <style>body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
-a{{color:#0ff;text-decoration:none}}</style>
+a{{color:#0ff;text-decoration:none}}.excerpt{{color:#0a0;white-space:pre-wrap}}</style>
 </head><body>
 <div><a href="{}/">🏠 Home</a></div>
 <h1>Browse Pastes</h1>
 {}
-<div style="margin-top:20px">{}</div>
-</body></html>"#, base_path, search_box, items);
-    
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+{}
+{}
+<div id="exportStatus" style="color:#0f0;margin:10px 0"></div>
+<div id="results" style="margin-top:20px">{}</div>
+<script>
+async function exportVisible() {{
+  const ids = Array.from(document.querySelectorAll('#results a[href*="/paste/"]')).map(a => a.getAttribute('href').split('/').pop()).filter(Boolean);
+  if (!ids.length) {{ alert('No visible results'); return; }}
+  const btn = document.getElementById('exportVisible');
+  const status = document.getElementById('exportStatus');
+  btn.disabled = true;
+  status.textContent = 'Exporting...';
+  const res = await fetch('{}/api/search-results-bundle', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ results: ids.map(id => ({{ id: id }})), title: {} }})
+  }});
+  const data = await res.json();
+  if (!res.ok || data.error) {{ status.textContent = 'Export failed: ' + (data.error || 'unknown'); btn.disabled = false; btn.textContent = '📤 Export visible as paste'; return; }}
+  status.textContent = 'Opening paste...';
+  const url = (data.url && data.url.startsWith('/paste/')) ? '{}/' + data.url.slice(1) : (data.url || '{}/paste/' + data.id);
+  window.location = url;
+}}
+async function exportChunkedVisible() {{
+  const ids = Array.from(document.querySelectorAll('#results a[href*="/paste/"]')).map(a => a.getAttribute('href').split('/').pop()).filter(Boolean);
+  if (!ids.length) {{ alert('No visible results'); return; }}
+  const btn = document.getElementById('exportChunkedVisible');
+  const status = document.getElementById('exportStatus');
+  const chunkSize = Number(prompt('Chunk bytes per paste', '250000'));
+  btn.disabled = true;
+  status.textContent = 'Deduplicating lines and chunking...';
+  const res = await fetch('{}/api/search-results-chunks', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ results: ids.map(id => ({{ id: id }})), title: {}, chunk_size: Number.isFinite(chunkSize) && chunkSize > 0 ? chunkSize : 250000, overlap: 0 }})
+  }});
+  const data = await res.json();
+  if (!res.ok || data.error) {{ status.textContent = 'Chunk export failed: ' + (data.error || 'unknown'); btn.disabled = false; btn.textContent = '🧩 Export chunked'; return; }}
+  status.textContent = 'Opening chunk manifest...';
+  const url = (data.url && data.url.startsWith('/paste/')) ? '{}/' + data.url.slice(1) : (data.url || '{}/paste/' + data.id);
+  window.location = url;
+}}
+const exportBtn = document.getElementById('exportVisible');
+const exportChunkedBtn = document.getElementById('exportChunkedVisible');
+if (exportBtn) exportBtn.onclick = exportVisible;
+if (exportChunkedBtn) exportChunkedBtn.onclick = exportChunkedVisible;
+</script>
+</body></html>"#,
+        base_path, search_box, note, export_button, items, base_path, title, base_path, base_path, base_path, base_path, base_path, base_path
+    )
 }
 
 /// Helper: extract raw paste content from a stored paste file
 /// The stored format wraps content with metadata headers and sheaf RDFa.
+fn read_paste_content_by_id(paste_id: &str) -> Option<String> {
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    read_index_entries(&uucp_dir)
+        .into_iter()
+        .find(|e| e.id == paste_id)
+        .and_then(|e| read_paste_content(&e.uucp_path))
+        .or_else(|| read_paste_content(&format!("{}/{}.txt", uucp_dir, paste_id)))
+}
+
+fn resolve_split_content(body: &serde_json::Value) -> std::result::Result<String, HttpResponse> {
+    let paste_id = body
+        .get("paste_id")
+        .and_then(|v| v.as_str())
+        .or_else(|| body.get("id").and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    if let Some(paste_id) = paste_id {
+        return read_paste_content_by_id(paste_id).ok_or_else(|| {
+            HttpResponse::BadRequest().json(serde_json::json!({
+                "error": format!("paste content unavailable for id: {}", paste_id)
+            }))
+        });
+    }
+
+    body.get("content")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| HttpResponse::BadRequest().json(serde_json::json!({"error": "missing content or paste_id"})))
+}
+
 fn read_paste_content(uucp_path: &str) -> Option<String> {
     let raw = fs::read_to_string(uucp_path).ok()?;
     // The format is:
@@ -945,23 +1316,34 @@ fn read_paste_content(uucp_path: &str) -> Option<String> {
     // {sheaf_header}\n\n
     // {content}\n\n
     // {sheaf_rdfa}\n
-    // Find the content between the sheaf header and the RDFa section
     if let Some(body_start) = raw.find("\n\n") {
-        if let Some(body_start2) = raw[body_start+2..].find("\n\n") {
-            let content_start = body_start + 2 + body_start2 + 2;
-            // Find RDFa section start
-            if let Some(rdfa_start) = raw[content_start..].find("<div") {
-                Some(raw[content_start..content_start + rdfa_start].trim().to_string())
-            } else {
-                // No RDFa — return everything after the metadata
-                Some(raw[content_start..].trim().to_string())
+        let header = &raw[..body_start];
+        if let Some(sheaf_rel) = header.find("Sheaf:") {
+            let sheaf_start = sheaf_rel;
+            let mut content_start = raw[sheaf_start..]
+                .find('\n')
+                .map(|line_end| sheaf_start + line_end + 1)
+                .unwrap_or(raw.len());
+            if raw[content_start..].starts_with('\n') {
+                content_start += 1;
             }
-        } else {
-            Some(raw[body_start+2..].trim().to_string())
+            if let Some(rdfa_start) = raw[content_start..].find("<div") {
+                return Some(raw[content_start..content_start + rdfa_start].trim().to_string());
+            }
+            return Some(raw[content_start..].trim().to_string());
         }
-    } else {
-        Some(raw.trim().to_string())
+
+        if let Some(body_start2) = raw[body_start + 2..].find("\n\n") {
+            let content_start = body_start + 2 + body_start2 + 2;
+            if let Some(rdfa_start) = raw[content_start..].find("<div") {
+                return Some(raw[content_start..content_start + rdfa_start].trim().to_string());
+            }
+            return Some(raw[content_start..].trim().to_string());
+        }
+        return Some(raw[body_start + 2..].trim().to_string());
     }
+
+    Some(raw.trim().to_string())
 }
 
 /// Helper: create a content excerpt around a search match (byte-safe)
@@ -990,7 +1372,11 @@ fn excerpt_around(content: &str, query: &str, context: usize) -> String {
         let byte_start = chars[start_char].0;
         let byte_end = chars[end_char].0 + chars[end_char].1.len_utf8();
         let prefix = if start_char > 0 { "…" } else { "" };
-        let suffix = if end_char < chars.len() - 1 { "…" } else { "" };
+        let suffix = if end_char < chars.len() - 1 {
+            "…"
+        } else {
+            ""
+        };
         format!("{}{}{}", prefix, &content[byte_start..byte_end], suffix)
     } else {
         // No match — return first N characters (char-safe)
@@ -1004,13 +1390,13 @@ struct SearchResult {
     title: String,
     description: Option<String>,
     keywords: Vec<String>,
-    match_type: String,       // "metadata" | "content" | "doc"
+    match_type: String, // "metadata" | "content" | "doc"
     excerpt: String,
     url: String,
     timestamp: String,
     size: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    source: Option<String>,   // "paste" or "doc"
+    source: Option<String>, // "paste" or "doc"
     #[serde(skip_serializing_if = "Option::is_none")]
     file_path: Option<String>, // for doc results, the filesystem path
 }
@@ -1020,16 +1406,23 @@ struct SearchResult {
 /// Optional: &content=0 to skip content search (metadata only, faster)
 /// Optional: &limit=N to control result count (default: 50)
 /// Parse query string manually from the raw URI (handles `(`, `)`, etc.)
+/// Parse query string manually from the raw URI (handles `(`, `)`, etc.)
 fn parse_query_param(uri: &str, key: &str) -> Option<String> {
-    let qs = uri.split('?').nth(1).unwrap_or("");
-    for pair in qs.split('&') {
+    let uri = if let Some(idx) = uri.find('?') { &uri[idx + 1..] } else { uri };
+    for pair in uri.split('&') {
         let mut parts = pair.splitn(2, '=');
         let k = parts.next().unwrap_or("").trim();
         if k == key {
             let v = parts.next().unwrap_or("").trim().to_string();
-            // Simple percent-decode: only decode %20 -> ' '
             if v.contains('%') {
-                return Some(v.replace("%20", " ").replace("%28", "(").replace("%29", ")").replace("%2C", ","));
+                return Some(
+                    v.replace("+", " ")
+                        .replace("%20", " ")
+                        .replace("%28", "(")
+                        .replace("%29", ")")
+                        .replace("%2C", ",")
+                        .replace("%2F", "/"),
+                );
             }
             return Some(v);
         }
@@ -1037,9 +1430,190 @@ fn parse_query_param(uri: &str, key: &str) -> Option<String> {
     None
 }
 
+fn search_terms(query: &str) -> Vec<String> {
+    query
+        .split(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == '|')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn terms_match(content: &str, terms: &[String], mode: &str) -> bool {
+    if terms.is_empty() {
+        return false;
+    }
+    match mode {
+        "all" => terms.iter().all(|term| content.contains(term)),
+        "any" => terms.iter().any(|term| content.contains(term)),
+        _ => content.contains(&terms.join(" ")),
+    }
+}
+
+fn best_excerpt(content: &str, terms: &[String], context: usize) -> String {
+    if terms.is_empty() {
+        return content.chars().take(context * 2).collect();
+    }
+    let lower = content.to_lowercase();
+    let mut best_start = None;
+    let mut best_len = 0usize;
+    for term in terms {
+        let mut offset = 0usize;
+        while let Some(rel) = lower[offset..].find(term) {
+            let start = offset + rel;
+            let len = term.len();
+            if best_start.map_or(true, |old: usize| start < old) {
+                best_start = Some(start);
+                best_len = len;
+            }
+            offset = start + len.max(1);
+        }
+    }
+    if let Some(start) = best_start {
+        let char_start = content[..start].chars().count().saturating_sub(context);
+        let char_end = char_start + content[start..start + best_len].chars().count() + context;
+        let byte_start = content.char_indices().nth(char_start).map(|(i, _)| i).unwrap_or(0);
+        let byte_end = content.char_indices().nth(char_end).map(|(i, _)| i).unwrap_or(content.len());
+        let prefix = if char_start > 0 { "…" } else { "" };
+        let suffix = if byte_end < content.len() { "…" } else { "" };
+        format!("{}{}{}", prefix, &content[byte_start..byte_end], suffix)
+    } else {
+        content.chars().take(context * 2).collect()
+    }
+}
+
+/// GET /api/search?q=... - JSON search API, searches both metadata and paste content
+/// CLI usage: curl 'http://localhost:8090/api/search?q=CL(15,0,0)'
+/// Optional: &mode=phrase|all|any
+/// Optional: &scope=all|metadata|content
+/// Optional: &limit=N to control result count (default: 50)
+pub async fn api_search(req: HttpRequest) -> Result<HttpResponse> {
+    let Some((search_q, mode, scope, limit, results)) = paste_search_results(&req, 50, true)? else {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Missing query parameter: q",
+            "usage": "curl 'http://localhost:8090/api/search?q=<query>'"
+        })))
+    };
+    let terms = search_terms(&search_q);
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "query": &search_q,
+        "terms": terms,
+        "mode": mode,
+        "scope": scope,
+        "total": results.len(),
+        "limit": limit,
+        "results": results,
+    })))
+}
+
+fn paste_search_results(
+    req: &HttpRequest,
+    default_limit: usize,
+    require_q: bool,
+) -> Result<Option<(String, String, String, usize, Vec<SearchResult>)>> {
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let uri = req.uri().to_string();
+    let Some((raw_query, mode, scope, limit)) = parse_search_query(&uri, default_limit, require_q) else {
+        return Ok(None);
+    };
+    let search_q = raw_query.to_lowercase();
+    let terms = search_terms(&search_q);
+    let entries = read_index_entries(&uucp_dir);
+    let mut results: Vec<SearchResult> = Vec::new();
+
+    for entry in entries.iter().rev() {
+        if results.len() >= limit {
+            break;
+        }
+        let metadata = format!(
+            "{} {} {}",
+            entry.title,
+            entry.description.as_deref().unwrap_or(""),
+            entry.keywords.join(" ")
+        )
+        .to_lowercase();
+        let metadata_match = terms_match(&metadata, &terms, &mode);
+        if scope == "metadata" && metadata_match {
+            results.push(SearchResult {
+                id: entry.id.clone(),
+                title: entry.title.clone(),
+                description: entry.description.clone(),
+                keywords: entry.keywords.clone(),
+                match_type: "metadata".to_string(),
+                excerpt: String::new(),
+                url: format!("/paste/{}", entry.id),
+                timestamp: entry.timestamp.clone(),
+                size: entry.size,
+                source: Some("paste".to_string()),
+                file_path: None,
+            });
+            continue;
+        }
+        if scope == "metadata" {
+            continue;
+        }
+        if let Some(content) = read_paste_content(&entry.uucp_path) {
+            let lower_content = content.to_lowercase();
+            let content_match = terms_match(&lower_content, &terms, &mode);
+            if metadata_match || content_match {
+                let excerpt = if content_match {
+                    best_excerpt(&content, &terms, 80)
+                } else {
+                    String::new()
+                };
+                results.push(SearchResult {
+                    id: entry.id.clone(),
+                    title: entry.title.clone(),
+                    description: entry.description.clone(),
+                    keywords: entry.keywords.clone(),
+                    match_type: if metadata_match && content_match {
+                        "metadata+content".to_string()
+                    } else if metadata_match {
+                        "metadata".to_string()
+                    } else {
+                        "content".to_string()
+                    },
+                    excerpt,
+                    url: format!("/paste/{}", entry.id),
+                    timestamp: entry.timestamp.clone(),
+                    size: entry.size,
+                    source: Some("paste".to_string()),
+                    file_path: None,
+                });
+            }
+        }
+    }
+
+    Ok(Some((search_q, mode, scope, limit, results)))
+}
+
+fn parse_search_query(
+    uri: &str,
+    default_limit: usize,
+    require_q: bool,
+) -> Option<(String, String, String, usize)> {
+    let raw_query = parse_query_param(uri, "q").unwrap_or_default();
+    if require_q && raw_query.is_empty() {
+        return None;
+    }
+    let mode = parse_query_param(uri, "mode").unwrap_or_else(|| "phrase".to_string());
+    let scope = parse_query_param(uri, "scope").unwrap_or_else(|| "all".to_string());
+    let limit = parse_query_param(uri, "limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default_limit)
+        .min(200);
+    Some((raw_query, mode, scope, limit))
+}
+
+pub async fn search_page() -> Result<HttpResponse> {
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(crate::view::render_search(&base_path)))
+}
+
 /// Search files in configured doc directories for matching content.
-/// Directories are specified via the SEARCH_DIRS env var (colon-separated).
-/// Default: ~/DOCS/search
 fn search_directories(query: &str, limit: usize, max_per_dir: usize) -> Vec<SearchResult> {
     let dirs = env::var("SEARCH_DIRS").unwrap_or_else(|_| {
         let home = env::var("HOME").unwrap_or_else(|_| "/home/mdupont".to_string());
@@ -1050,9 +1624,13 @@ fn search_directories(query: &str, limit: usize, max_per_dir: usize) -> Vec<Sear
     let mut results = Vec::new();
 
     for dir in dirs.split(':') {
-        if results.len() >= limit { break; }
+        if results.len() >= limit {
+            break;
+        }
         let dir = dir.trim();
-        if dir.is_empty() { continue; }
+        if dir.is_empty() {
+            continue;
+        }
 
         let entries = match fs::read_dir(dir) {
             Ok(e) => e,
@@ -1061,12 +1639,17 @@ fn search_directories(query: &str, limit: usize, max_per_dir: usize) -> Vec<Sear
 
         let mut dir_count = 0;
         for entry in entries.flatten() {
-            if dir_count >= max_per_dir { break; }
+            if dir_count >= max_per_dir {
+                break;
+            }
             let path = entry.path();
-            if !path.is_file() { continue; }
+            if !path.is_file() {
+                continue;
+            }
 
             // Check file name match first
-            let fname = path.file_name()
+            let fname = path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_lowercase();
@@ -1087,18 +1670,18 @@ fn search_directories(query: &str, limit: usize, max_per_dir: usize) -> Vec<Sear
                     file_path: Some(path.display().to_string()),
                 });
                 dir_count += 1;
-                if results.len() >= limit { break; }
+                if results.len() >= limit {
+                    break;
+                }
                 continue;
             }
 
             // Try to read file content for text files
-            let ext = path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             match ext {
-                "md" | "txt" | "sh" | "org" | "json" | "yaml" | "yml"
-                | "toml" | "nix" | "rs" | "py" | "js" | "ts" | "html"
-                | "css" | "xml" | "rst" | "rb" | "go" | "java" | "c" | "h" => {}
+                "md" | "txt" | "sh" | "org" | "json" | "yaml" | "yml" | "toml" | "nix" | "rs"
+                | "py" | "js" | "ts" | "html" | "css" | "xml" | "rst" | "rb" | "go" | "java"
+                | "c" | "h" => {}
                 _ => continue,
             }
 
@@ -1125,179 +1708,14 @@ fn search_directories(query: &str, limit: usize, max_per_dir: usize) -> Vec<Sear
                     file_path: Some(path.display().to_string()),
                 });
                 dir_count += 1;
-                if results.len() >= limit { break; }
+                if results.len() >= limit {
+                    break;
+                }
             }
         }
     }
 
     results
-}
-
-pub async fn api_search(req: HttpRequest) -> Result<HttpResponse> {
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
-    let index_file = format!("{}/index.jsonl", uucp_dir);
-    
-    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
-    let uri = req.uri().to_string();
-    let search_q = match parse_query_param(&uri, "q") {
-        Some(q) if !q.is_empty() => q.to_lowercase(),
-        _ => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Missing query parameter: q",
-            "usage": "curl 'http://localhost:8090/api/search?q=<query>'"
-        }))),
-    };
-    let search_content = parse_query_param(&uri, "content")
-        .map(|s| s != "0").unwrap_or(true);
-    let search_dirs = parse_query_param(&uri, "dirs")
-        .map(|s| s != "0").unwrap_or(true);
-    let limit: usize = parse_query_param(&uri, "limit")
-        .and_then(|s| s.parse().ok()).unwrap_or(50);
-
-    let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
-        .collect();
-
-    let mut results: Vec<SearchResult> = Vec::new();
-
-    for entry in entries.iter().rev() {
-        if results.len() >= limit { break; }
-
-        // Always check metadata (title, keywords)
-        let title_match = entry.title.to_lowercase().contains(&search_q);
-        let keyword_match = entry.keywords.iter().any(|k| k.to_lowercase().contains(&search_q));
-        let desc_match = entry.description.as_deref().map(|d| d.to_lowercase().contains(&search_q)).unwrap_or(false);
-
-        if title_match || keyword_match || desc_match {
-            results.push(SearchResult {
-                id: entry.id.clone(),
-                title: entry.title.clone(),
-                description: entry.description.clone(),
-                keywords: entry.keywords.clone(),
-                match_type: "metadata".to_string(),
-                excerpt: String::new(),
-                url: format!("/paste/{}", entry.id),
-                timestamp: entry.timestamp.clone(),
-                size: entry.size,
-                source: Some("paste".to_string()),
-                file_path: None,
-            });
-            continue;
-        }
-
-        // Optionally search content
-        if search_content {
-            if let Some(content) = read_paste_content(&entry.uucp_path) {
-                if content.to_lowercase().contains(&search_q) {
-                    let excerpt = excerpt_around(&content, &search_q, 80);
-                    results.push(SearchResult {
-                        id: entry.id.clone(),
-                        title: entry.title.clone(),
-                        description: entry.description.clone(),
-                        keywords: entry.keywords.clone(),
-                        match_type: "content".to_string(),
-                        excerpt,
-                        url: format!("/paste/{}", entry.id),
-                        timestamp: entry.timestamp.clone(),
-                        size: entry.size,
-                        source: Some("paste".to_string()),
-                        file_path: None,
-                    });
-                }
-            }
-        }
-    }
-
-    // Add directory search results (if enabled and we have room)
-    if search_dirs {
-        let dir_remaining = limit.saturating_sub(results.len());
-        if dir_remaining > 0 {
-            let dir_results = search_directories(&search_q, dir_remaining, 20);
-            results.extend(dir_results);
-        }
-    }
-
-    // Add git mount search results (from cached files)
-    let git_remaining = limit.saturating_sub(results.len());
-    if git_remaining > 0 {
-        // Extract data from cache under lock, then do I/O outside
-        let (name_matches, content_candidates) = {
-            let cache = crate::git_mount::get_cache();
-            let name_matches: Vec<(String, String, String, String, usize)> = cache
-                .search_names(&search_q, git_remaining)
-                .iter()
-                .map(|e| (e.mount_id.clone(), e.rel_path.clone(), e.name.clone(), e.path.clone(), e.size as usize))
-                .collect();
-
-            // For content search, get the list of candidates to search
-            let content_candidates: Vec<(String, String, String, String, usize)> = cache
-                .files.values()
-                .filter(|e| {
-                    let text_exts = ["rs", "py", "js", "ts", "go", "java", "c", "h", "cpp", "hpp",
-                        "md", "txt", "org", "toml", "yaml", "yml", "json", "nix", "sh"];
-                    text_exts.contains(&e.ext.as_str())
-                })
-                .take(100) // limit I/O
-                .map(|e| (e.mount_id.clone(), e.rel_path.clone(), e.name.clone(), e.path.clone(), e.size as usize))
-                .collect();
-
-            (name_matches, content_candidates)
-        };
-
-        // Add filename matches
-        for (mount_id, rel_path, name, file_path, size) in name_matches {
-            results.push(SearchResult {
-                id: format!("git-{}", rel_path.replace('/', "_")),
-                title: name,
-                description: Some(format!("Git: {}/{}", mount_id, rel_path)),
-                keywords: vec![],
-                match_type: "git".to_string(),
-                excerpt: String::new(),
-                url: format!("/git-view/{}/{}", mount_id, rel_path),
-                timestamp: String::new(),
-                size,
-                source: Some("git".to_string()),
-                file_path: Some(file_path),
-            });
-        }
-
-        // Content matches — do I/O outside the lock
-        let git_remaining2 = limit.saturating_sub(results.len());
-        if git_remaining2 > 0 {
-            let q = search_q.to_lowercase();
-            let mut count = 0;
-            for (mount_id, rel_path, name, file_path, size) in content_candidates {
-                if count >= git_remaining2 { break; }
-                if let Ok(content) = fs::read_to_string(&file_path) {
-                    if content.to_lowercase().contains(&q) {
-                        let excerpt = excerpt_around(&content, &search_q, 80);
-                        results.push(SearchResult {
-                            id: format!("git-c-{}", rel_path.replace('/', "_")),
-                            title: name,
-                            description: Some(format!("Git content: {}/{}", mount_id, rel_path)),
-                            keywords: vec![],
-                            match_type: "git-content".to_string(),
-                            excerpt,
-                            url: format!("/git-view/{}/{}", mount_id, rel_path),
-                            timestamp: String::new(),
-                            size,
-                            source: Some("git".to_string()),
-                            file_path: Some(file_path),
-                        });
-                        count += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "query": &search_q,
-        "total": results.len(),
-        "limit": limit,
-        "results": results,
-    })))
 }
 
 /// GET /api/search-doc?path=<path> - View a doc file returned by search
@@ -1307,10 +1725,12 @@ pub async fn search_doc(req: HttpRequest) -> Result<HttpResponse> {
     let uri = req.uri().to_string();
     let path = match parse_query_param(&uri, "path") {
         Some(p) if !p.is_empty() => p,
-        _ => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Missing path parameter",
-            "usage": "curl 'http://localhost:8090/api/search-doc?path=<filepath>'"
-        }))),
+        _ => {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": "Missing path parameter",
+                "usage": "curl 'http://localhost:8090/api/search-doc?path=<filepath>'"
+            })))
+        }
     };
 
     match fs::read_to_string(&path) {
@@ -1325,7 +1745,8 @@ pub async fn search_doc(req: HttpRequest) -> Result<HttpResponse> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("doc")
                 .to_string();
-            let html = format!(r#"<!DOCTYPE html>
+            let html = format!(
+                r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>{} — Kant Pastebin</title>
 <style>
 body{{font-family:monospace;max-width:900px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
@@ -1340,8 +1761,12 @@ code{{font-family:monospace}}
 <h1>📄 {}</h1>
 <p class="meta">📁 {} <span style="float:right">{}</span></p>
 <hr><pre><code>{}</code></pre>
-</body></html>"#, base_path, base_path, base_path, fname, fname, path, ext, content);
-            Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+</body></html>"#,
+                base_path, base_path, base_path, fname, fname, path, ext, content
+            );
+            Ok(HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(html))
         }
         Err(e) => Ok(HttpResponse::NotFound().json(serde_json::json!({
             "error": format!("Cannot read file: {}", e),
@@ -1357,11 +1782,18 @@ struct SimilarQuery {
 
 /// GET /api/similar/{id} - Find similar pastes by searching the content of the given paste
 /// CLI: curl 'http://localhost:8090/api/similar/20260514_143739'
-pub async fn api_similar(path: web::Path<String>, query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
+pub async fn api_similar(
+    path: web::Path<String>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
     let id = path.into_inner();
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let index_file = format!("{}/index.jsonl", uucp_dir);
-    let limit: usize = query.get("limit").and_then(|s| s.parse().ok()).unwrap_or(10);
+    let limit: usize = query
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
 
     // Get the content of the current paste
     let content = read_paste_content(&format!("{}/{}.txt", uucp_dir, id));
@@ -1371,9 +1803,11 @@ pub async fn api_similar(path: web::Path<String>, query: web::Query<std::collect
             let text: String = c.chars().take(200).collect();
             text.to_lowercase()
         }
-        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({
-            "error": format!("Paste {} not found or has no readable content", id)
-        }))),
+        None => {
+            return Ok(HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("Paste {} not found or has no readable content", id)
+            })))
+        }
     };
 
     // Search via same logic as api_search but against the extracted search text
@@ -1393,8 +1827,12 @@ pub async fn api_similar(path: web::Path<String>, query: web::Query<std::collect
     let mut results: Vec<SearchResult> = Vec::new();
 
     for entry in entries.iter().rev() {
-        if results.len() >= limit { break; }
-        if entry.id == id { continue; }
+        if results.len() >= limit {
+            break;
+        }
+        if entry.id == id {
+            continue;
+        }
 
         let lower_title = entry.title.to_lowercase();
         let lower_desc = entry.description.as_deref().unwrap_or("").to_lowercase();
@@ -1402,7 +1840,9 @@ pub async fn api_similar(path: web::Path<String>, query: web::Query<std::collect
             let kl = k.to_lowercase();
             terms.iter().any(|t| kl.contains(t))
         });
-        let title_match = terms.iter().any(|t| lower_title.contains(t) || lower_desc.contains(t));
+        let title_match = terms
+            .iter()
+            .any(|t| lower_title.contains(t) || lower_desc.contains(t));
 
         if title_match || kw_match {
             results.push(SearchResult {
@@ -1457,27 +1897,32 @@ pub async fn api_similar(path: web::Path<String>, query: web::Query<std::collect
 pub async fn api_bundle(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
     let pastes = match body.get("pastes").and_then(|v| v.as_array()) {
         Some(arr) => arr,
-        None => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Missing 'pastes' array",
-            "usage": "curl -X POST ... -d '{\"pastes\":[\"id1\",\"id2\"]}'"
-        })))
+        None => {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": "Missing 'pastes' array",
+                "usage": "curl -X POST ... -d '{\"pastes\":[\"id1\",\"id2\"]}'"
+            })))
+        }
     };
 
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
 
     // Collect all paste data
     let mut nodes: Vec<serde_json::Value> = Vec::new();
     for paste_id in pastes {
         let pid = paste_id.as_str().unwrap_or("");
-        if pid.is_empty() { continue; }
+        if pid.is_empty() {
+            continue;
+        }
 
         // Read from index
         let index_file = format!("{}/index.jsonl", uucp_dir);
-        let entry: Option<PasteIndex> = fs::read_to_string(&index_file)
-            .ok()
-            .and_then(|s| s.lines()
+        let entry: Option<PasteIndex> = fs::read_to_string(&index_file).ok().and_then(|s| {
+            s.lines()
                 .filter_map(|l| serde_json::from_str::<PasteIndex>(l).ok())
-                .find(|e: &PasteIndex| e.id == pid));
+                .find(|e: &PasteIndex| e.id == pid)
+        });
 
         // Read content
         let content = read_paste_content(&format!("{}/{}.txt", uucp_dir, pid));
@@ -1516,12 +1961,28 @@ pub async fn api_bundle(body: web::Json<serde_json::Value>) -> Result<HttpRespon
 
     // Store the bundle as a new paste
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let pastes_str: String = pastes.iter()
+    let pastes_str: String = pastes
+        .iter()
         .filter_map(|v| v.as_str())
         .collect::<Vec<_>>()
         .join("_");
-    let title = format!("dag-bundle-{}", &pastes_str.chars().take(40).collect::<String>());
-    let filename = format!("{}_{}.cbor", ts, title.clone().chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect::<String>());
+    let title = format!(
+        "dag-bundle-{}",
+        &pastes_str.chars().take(40).collect::<String>()
+    );
+    let filename = format!(
+        "{}_{}.cbor",
+        ts,
+        title
+            .clone()
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            })
+            .collect::<String>()
+    );
     let id = filename.trim_end_matches(".cbor").to_string();
     let uucp = format!("{}/{}", uucp_dir, filename);
 
@@ -1548,12 +2009,20 @@ pub async fn api_bundle(body: web::Json<serde_json::Value>) -> Result<HttpRespon
     fs::write(&txt_uucp, &txt_content).ok();
 
     // Write index entry
-    let keywords = vec!["dag-bundle".to_string(), "cbor".to_string(), "graph".to_string()];
+    let keywords = vec![
+        "dag-bundle".to_string(),
+        "cbor".to_string(),
+        "graph".to_string(),
+    ];
     let ngrams = tagging::extract_ngrams(&format!("{} {}", title, "dag-bundle cbor graph"), 3, 10);
     let index_entry = PasteIndex {
         id: id.clone(),
         title,
-        description: Some(format!("DAG-CBOR bundle of {} pastes: {}", nodes.len(), pastes_str)),
+        description: Some(format!(
+            "DAG-CBOR bundle of {} pastes: {}",
+            nodes.len(),
+            pastes_str
+        )),
         keywords,
         cid: local_cid.clone(),
         witness: witness.clone(),
@@ -1568,8 +2037,12 @@ pub async fn api_bundle(body: web::Json<serde_json::Value>) -> Result<HttpRespon
     };
     let index_file = format!("{}/index.jsonl", uucp_dir);
     let index_line = format!("{}\n", serde_json::to_string(&index_entry).unwrap());
-    fs::OpenOptions::new().create(true).append(true).open(&index_file)
-        .and_then(|mut f| std::io::Write::write_all(&mut f, index_line.as_bytes())).ok();
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&index_file)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, index_line.as_bytes()))
+        .ok();
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "id": id,
@@ -1582,6 +2055,389 @@ pub async fn api_bundle(body: web::Json<serde_json::Value>) -> Result<HttpRespon
         "url": format!("/paste/{}", id),
         "download_url": format!("/file/{}", id),
     })))
+}
+
+pub async fn api_search_results_bundle(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    let ids: Vec<String> = body
+        .get("results")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if ids.is_empty() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Missing or empty 'results' array"
+        })))
+    }
+
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let index_file = format!("{}/index.jsonl", uucp_dir);
+    let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
+        .collect();
+
+    let title = body
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("search results bundle")
+        .to_string();
+
+    let mut bundle = String::new();
+    bundle.push_str(&format!("=== Search Results Bundle ===\nTitle: {}\nCreated: {}\nTotal results: {}\n\n", title, Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), ids.len()));
+
+    for (idx, pid) in ids.iter().enumerate() {
+        let entry = entries.iter().find(|e| e.id == *pid);
+        let uucp_path = entry
+            .map(|e| e.uucp_path.clone())
+            .unwrap_or_else(|| format!("{}/{}.txt", uucp_dir, pid));
+        let content = read_paste_content(&uucp_path).unwrap_or_else(|| "[content unavailable]".to_string());
+        bundle.push_str(&format!(
+            "\n\n===== Result {}/{} =====\nID: {}\nTitle: {}\nTimestamp: {}\nKeywords: {}\nURL: /paste/{}\n\n{}\n",
+            idx + 1,
+            ids.len(),
+            pid,
+            entry.map(|e| e.title.as_str()).unwrap_or(pid),
+            entry.map(|e| e.timestamp.as_str()).unwrap_or(""),
+            entry.map(|e| e.keywords.join(", ")).unwrap_or_default(),
+            pid,
+            content
+        ));
+    }
+
+    let paste = Paste {
+        title: Some(title),
+        content: Some(bundle),
+        keywords: Some(vec!["search".to_string(), "bundle".to_string(), "results".to_string()]),
+        cid: None,
+        reply_to: None,
+    };
+    create_paste(web::Json(paste)).await
+}
+
+struct StoredChunkPaste {
+    id: String,
+    url: String,
+    sha256: String,
+    byte_len: usize,
+}
+
+async fn create_chunked_paste(title: &str, content: String, keywords: Vec<String>) -> Result<StoredChunkPaste> {
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let trimmed = content.trim();
+    let html_title = tagging::extract_html_title(&content);
+    let auto_desc = tagging::auto_describe(&content);
+    let title_owned = if title.is_empty() {
+        html_title.unwrap_or_else(|| {
+            let auto_tags = tagging::auto_tag(&content);
+            if !auto_tags.is_empty() { auto_desc } else { "untitled".to_string() }
+        })
+    } else {
+        title.to_string()
+    };
+    let slug_title = tagging::slugify(&title_owned);
+    let slug_keywords = keywords.iter().map(|k| tagging::slugify(k)).collect::<Vec<_>>().join("_");
+    let filename = if slug_keywords.is_empty() {
+        format!("{}_{}.txt", ts, slug_title)
+    } else {
+        format!("{}_{}_{}.txt", ts, slug_title, slug_keywords)
+    };
+    let id = filename.trim_end_matches(".txt").to_string();
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let uucp = format!("{}/{}", uucp_dir, filename);
+
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    let hash = hasher.finalize();
+    let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
+    let witness = hex::encode(hash);
+    let dasl_cid = crate::dasl::dasl_cid(content.as_bytes());
+    let section = erdfa_publish::sheaf::Section::new(content.as_bytes(), erdfa_publish::sheaf::Encoding::Raw);
+    let paste_content = format!(
+        "--- {} ---\nTitle: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: \n{}\n\n{}\n\n{}\n",
+        id,
+        title_owned,
+        keywords.join(", "),
+        local_cid,
+        witness,
+        "",
+        dasl_cid,
+        erdfa_publish::sheaf::sheaf_header(&section),
+        content,
+        section.to_rdfa()
+    );
+    fs::write(&uucp, paste_content).ok();
+    fs::write(format!("{}/{}.cid", uucp_dir, local_cid), &id).ok();
+
+    let index_entry = PasteIndex {
+        id: id.clone(),
+        title: if title_owned == "untitled" { tagging::auto_describe(&content) } else { title_owned },
+        description: Some(tagging::auto_describe(&content)),
+        keywords: keywords.clone(),
+        cid: local_cid.clone(),
+        witness: witness.clone(),
+        timestamp: ts,
+        filename: filename.clone(),
+        ngrams: tagging::extract_ngrams(trimmed, 3, 10),
+        ipfs_cid: None,
+        reply_to: None,
+        size: content.len(),
+        uucp_path: uucp.clone(),
+        root: None,
+    };
+    let index_line = format!("{}\n", serde_json::to_string(&index_entry).unwrap());
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(format!("{}/index.jsonl", uucp_dir))
+        .and_then(|mut f| std::io::Write::write_all(&mut f, index_line.as_bytes()))
+        .ok();
+
+    Ok(StoredChunkPaste {
+        id: index_entry.id.clone(),
+        url: with_base_url(&format!("/paste/{}", index_entry.id)),
+        sha256: sha256_hex(content.as_bytes()),
+        byte_len: content.len(),
+    })
+}
+
+pub async fn api_search_results_chunks(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    let ids: Vec<String> = body
+        .get("results")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if ids.is_empty() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Missing or empty 'results' array"
+        })))
+    }
+
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let entries: Vec<PasteIndex> = read_index_entries(&uucp_dir);
+    let entry_map: HashMap<String, PasteIndex> = entries.into_iter().map(|e| (e.id.clone(), e)).collect();
+    let title = body
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("search results chunked export")
+        .to_string();
+    let chunk_size = body
+        .get("chunk_size")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(250_000)
+        .clamp(8_000, 4_000_000) as usize;
+    let overlap = body
+        .get("overlap")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
+        .min((chunk_size / 8).max(1) as u64) as usize;
+
+    let mut all_lines: Vec<String> = Vec::new();
+    for pid in &ids {
+        let content = entry_map
+            .get(pid)
+            .and_then(|e| read_paste_content(&e.uucp_path))
+            .or_else(|| read_paste_content(&format!("{}/{}.txt", uucp_dir, pid)))
+            .unwrap_or_else(|| "[content unavailable]".to_string());
+        all_lines.extend(content.lines().map(|line| line.to_string()));
+    }
+
+    let total_lines = all_lines.len();
+    let mut unique_lines: Vec<String> = Vec::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for line in all_lines {
+        if !seen.contains_key(&line) {
+            seen.insert(line.clone(), unique_lines.len());
+            unique_lines.push(line);
+        }
+    }
+
+    let line_store = create_chunk_line_store(&title, &unique_lines).await?;
+    let chunks = build_line_chunks(&unique_lines, chunk_size, overlap);
+    let mut chunk_infos: Vec<serde_json::Value> = Vec::new();
+
+    for (idx, chunk) in chunks.iter().enumerate() {
+        let text = chunk_text(&unique_lines, chunk);
+        let stored = create_chunked_paste(
+            &format!("{} chunk {}/{}", title, idx + 1, chunks.len()),
+            render_chunk_json(idx, chunk, &text),
+            vec![
+                "chunked".to_string(),
+                "dedup".to_string(),
+                "search".to_string(),
+            ],
+        )
+        .await?;
+        chunk_infos.push(serde_json::json!({
+            "index": idx,
+            "paste_id": stored.id,
+            "start_line": chunk.start_line,
+            "end_line": chunk.end_line,
+            "line_count": chunk.line_ids.len(),
+            "byte_len": stored.byte_len,
+            "sha256": stored.sha256,
+            "url": stored.url,
+        }));
+    }
+
+    let manifest = serde_json::json!({
+        "version": 1,
+        "type": "chunked-line-dedup",
+        "title": title,
+        "created": Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        "source_ids": ids,
+        "window": {
+            "chunk_size": chunk_size,
+            "overlap": overlap,
+            "unit": "bytes"
+        },
+        "total_lines": total_lines,
+        "unique_lines": unique_lines.len(),
+        "dedup_ratio": if total_lines == 0 { 1.0 } else { unique_lines.len() as f64 / total_lines as f64 },
+        "line_store": {
+            "id": line_store.id.clone(),
+            "url": line_store.url.clone(),
+            "sha256": line_store.sha256.clone(),
+            "byte_len": line_store.byte_len,
+        },
+        "chunks": chunk_infos,
+    });
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(format!("JSON error: {}", e)))?;
+    let manifest = create_chunked_paste(
+        &format!("{} manifest", title),
+        manifest_json,
+        vec![
+            "chunked".to_string(),
+            "manifest".to_string(),
+            "dedup".to_string(),
+            "search".to_string(),
+        ],
+    )
+    .await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "id": manifest.id,
+        "title": format!("{} manifest", title),
+        "format": "chunked-line-dedup",
+        "total_lines": total_lines,
+        "unique_lines": unique_lines.len(),
+        "chunk_count": chunk_infos.len(),
+        "chunk_size": chunk_size,
+        "overlap": overlap,
+        "url": manifest.url,
+        "line_store": {
+            "id": line_store.id,
+            "url": line_store.url,
+        },
+        "chunks": chunk_infos,
+    })))
+}
+
+fn with_base_url(url: &str) -> String {
+    let base_path = env::var("BASE_PATH").unwrap_or_default();
+    if base_path.is_empty() || !url.starts_with("/paste/") {
+        url.to_string()
+    } else {
+        format!("{}/{}", base_path.trim_end_matches('/'), url.trim_start_matches('/'))
+    }
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+}
+
+struct LineChunk {
+    start_line: usize,
+    end_line: usize,
+    line_ids: Vec<usize>,
+}
+
+fn build_line_chunks(lines: &[String], chunk_size: usize, overlap: usize) -> Vec<LineChunk> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    let mut chunks: Vec<LineChunk> = Vec::new();
+    let mut start = 0usize;
+    while start < lines.len() {
+        let mut end = start;
+        let mut bytes = 0usize;
+        while end < lines.len() {
+            let next = bytes + lines[end].len() + 1;
+            if end > start && next > chunk_size {
+                break;
+            }
+            bytes = next;
+            end += 1;
+        }
+        if end == start {
+            end = start + 1;
+        }
+        let line_ids: Vec<usize> = (start..end).collect();
+        chunks.push(LineChunk { start_line: start, end_line: end, line_ids });
+        if end == lines.len() {
+            break;
+        }
+        start = end.saturating_sub(overlap);
+    }
+    chunks
+}
+
+fn chunk_text(lines: &[String], chunk: &LineChunk) -> String {
+    chunk.line_ids.iter().map(|idx| lines[*idx].as_str()).collect::<Vec<_>>().join("\n")
+}
+
+fn render_chunk_json(index: usize, chunk: &LineChunk, text: &str) -> String {
+    serde_json::json!({
+        "version": 1,
+        "type": "chunked-export-chunk",
+        "chunk_index": index,
+        "start_line": chunk.start_line,
+        "end_line": chunk.end_line,
+        "line_count": chunk.line_ids.len(),
+        "byte_len": text.len(),
+        "sha256": sha256_hex(text.as_bytes()),
+        "line_ids": chunk.line_ids,
+        "text": text,
+    })
+    .to_string()
+}
+
+async fn create_chunk_line_store(title: &str, lines: &[String]) -> Result<StoredChunkPaste> {
+    let mut content = String::new();
+    for (idx, line) in lines.iter().enumerate() {
+        let obj = serde_json::json!({
+            "id": idx,
+            "sha256": sha256_hex(line.as_bytes()),
+            "text": line,
+        });
+        content.push_str(&obj.to_string());
+        content.push('\n');
+    }
+    create_chunked_paste(
+        &format!("{} line store", title),
+        content,
+        vec![
+            "chunked".to_string(),
+            "line-store".to_string(),
+            "dedup".to_string(),
+        ],
+    )
+    .await
 }
 
 /// GET /ipfs/{cid} - Proxy IPFS content
@@ -1600,7 +2456,9 @@ pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
                 [0xFF, 0xD8, ..] => "image/jpeg",
                 [0x3C, ..] => "text/html; charset=utf-8",
                 [0x7B, ..] => "application/json",
-                _ if data.starts_with(b"<!") || data.starts_with(b"<html") => "text/html; charset=utf-8",
+                _ if data.starts_with(b"<!") || data.starts_with(b"<html") => {
+                    "text/html; charset=utf-8"
+                }
                 _ => "application/octet-stream",
             };
             return Ok(HttpResponse::Ok().content_type(ct).body(data));
@@ -1609,7 +2467,9 @@ pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
 
     // Fallback: try local flatfs
     if let Some(block) = ipfs::ipfs_cat(&cid) {
-        return Ok(HttpResponse::Ok().content_type("application/octet-stream").body(block));
+        return Ok(HttpResponse::Ok()
+            .content_type("application/octet-stream")
+            .body(block));
     }
 
     Ok(HttpResponse::NotFound().body(format!("IPFS CID not found: {}", cid)))
@@ -1618,12 +2478,15 @@ pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
 /// GET /gallery - NFT gallery from enriched directory
 pub async fn gallery() -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_default();
-    let nft_dir = env::var("NFT_DIR").unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
+    let nft_dir = env::var("NFT_DIR")
+        .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
 
     let mut items = Vec::new();
     if let Ok(entries) = fs::read_dir(&nft_dir) {
         for entry in entries.flatten() {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
             let qid = entry.file_name().to_string_lossy().to_string();
             let meta_path = entry.path().join("metadata.rdfa");
             let mut meta = std::collections::HashMap::new();
@@ -1643,9 +2506,15 @@ pub async fn gallery() -> Result<HttpResponse> {
             let has_image = entry.path().join("source.jpg").exists();
 
             let img_html = if has_image && !nft_cid.is_empty() {
-                format!(r#"<img src="{}/ipfs/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#, base_path, nft_cid, name)
+                format!(
+                    r#"<img src="{}/ipfs/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
+                    base_path, nft_cid, name
+                )
             } else if has_image {
-                format!(r#"<img src="{}/gallery/img/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#, base_path, qid, name)
+                format!(
+                    r#"<img src="{}/gallery/img/{}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{}">"#,
+                    base_path, qid, name
+                )
             } else {
                 r#"<div style="width:200px;height:150px;background:#222;display:flex;align-items:center;justify-content:center;border-radius:4px">🖼️ No image</div>"#.to_string()
             };
@@ -1675,7 +2544,8 @@ pub async fn gallery() -> Result<HttpResponse> {
         }
     }
 
-    let html = format!(r#"<!DOCTYPE html>
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>NFT Gallery</title>
 <style>
 body{{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#111;color:#eee}}
@@ -1698,17 +2568,24 @@ h1{{color:#0ff}}
         items = items.join("\n"),
     );
 
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// GET /gallery/img/{qid} - Serve source image from enriched dir
 pub async fn gallery_image(path: web::Path<String>) -> Result<HttpResponse> {
     let qid = path.into_inner();
-    let nft_dir = env::var("NFT_DIR").unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
+    let nft_dir = env::var("NFT_DIR")
+        .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
     let img_path = format!("{}/{}/source.jpg", nft_dir, qid);
     match fs::read(&img_path) {
         Ok(data) => {
-            let ct = if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) { "image/png" } else { "image/jpeg" };
+            let ct = if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                "image/png"
+            } else {
+                "image/jpeg"
+            };
             Ok(HttpResponse::Ok().content_type(ct).body(data))
         }
         Err(_) => Ok(HttpResponse::NotFound().body("Image not found")),
@@ -1717,8 +2594,9 @@ pub async fn gallery_image(path: web::Path<String>) -> Result<HttpResponse> {
 
 /// Enrich a Wikidata QID via the enrich-qid.sh pipeline
 async fn enrich_qid(qid: &str) -> Result<HttpResponse> {
-    let pipeline = env::var("ENRICH_PIPELINE")
-        .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh".to_string());
+    let pipeline = env::var("ENRICH_PIPELINE").unwrap_or_else(|_| {
+        "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh".to_string()
+    });
     let nft_dir = env::var("NFT_DIR")
         .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
 
@@ -1769,20 +2647,22 @@ async fn enrich_qid(qid: &str) -> Result<HttpResponse> {
                 "detail": stderr.to_string(),
             })))
         }
-        Err(e) => {
-            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("Pipeline not found: {}", e),
-            })))
-        }
+        Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("Pipeline not found: {}", e),
+        }))),
     }
 }
 
 /// GET /plugins - List available plugins
-pub async fn list_plugins(registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>) -> Result<HttpResponse> {
+pub async fn list_plugins(
+    registry: web::Data<std::sync::Mutex<plugin::PluginRegistry>>,
+) -> Result<HttpResponse> {
     let reg = registry.lock().unwrap();
-    let plugins: Vec<_> = reg.list().iter().map(|(n, v, d)| {
-        serde_json::json!({"name": n, "version": v, "description": d})
-    }).collect();
+    let plugins: Vec<_> = reg
+        .list()
+        .iter()
+        .map(|(n, v, d)| serde_json::json!({"name": n, "version": v, "description": d}))
+        .collect();
     Ok(HttpResponse::Ok().json(serde_json::json!({"plugins": plugins})))
 }
 
@@ -1834,7 +2714,7 @@ lazy_static::lazy_static! {
 pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
     use actix_web::web::BytesMut;
     use futures_util::StreamExt as _;
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let mut file_data: Vec<u8> = Vec::new();
@@ -1851,12 +2731,15 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
         }
         match field_name.as_str() {
             "file" => {
-                orig_name = field.content_disposition()
+                orig_name = field
+                    .content_disposition()
                     .and_then(|cd| cd.get_filename().map(|s| s.to_string()))
                     .unwrap_or_else(|| "archive.tar.gz".to_string());
                 file_data = buf;
             }
-            "title" => { title = String::from_utf8_lossy(&buf).to_string(); }
+            "title" => {
+                title = String::from_utf8_lossy(&buf).to_string();
+            }
             _ => {}
         }
     }
@@ -1879,7 +2762,10 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
 
     // Store for later access
     let entry_count = result.entries.len();
-    ARCHIVE_STORE.lock().unwrap().insert(session_id.clone(), result);
+    ARCHIVE_STORE
+        .lock()
+        .unwrap()
+        .insert(session_id.clone(), result);
 
     // ── Register the archive file itself in the spool + index ──────────
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
@@ -1892,7 +2778,11 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     let slug = tagging::slugify(&title);
     let ext = orig_name.rsplit('.').next().unwrap_or("bin");
     let filename = format!("{}_{}.{}", ts, slug, ext);
-    let steam_id = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(&filename).to_string();
+    let steam_id = filename
+        .rsplit_once('.')
+        .map(|(s, _)| s)
+        .unwrap_or(&filename)
+        .to_string();
     let uucp = format!("{}/{}", uucp_dir, filename);
 
     // Write the raw archive file to spool
@@ -1909,7 +2799,11 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
         &uucp_dir,
         &steam_id,
         &format!("Archive: {}", orig_name),
-        Some(&format!("{} entries · {} bytes", entry_count, file_data.len())),
+        Some(&format!(
+            "{} entries · {} bytes",
+            entry_count,
+            file_data.len()
+        )),
         vec!["archive".to_string(), ext.to_string()],
         &local_cid,
         &witness,
@@ -1961,12 +2855,20 @@ pub async fn archive_viewer(path: web::Path<String>) -> Result<HttpResponse> {
             };
             let has_preview = entry.content.is_some();
             let preview_btn = if has_preview {
-                format!(r#"<button class="preview-btn" onclick="previewFile({},'{}')">👁️</button>"#, i, html_escape(&entry.path))
+                format!(
+                    r#"<button class="preview-btn" onclick="previewFile({},'{}')">👁️</button>"#,
+                    i,
+                    html_escape(&entry.path)
+                )
             } else {
                 String::new()
             };
             let post_btn = if has_preview {
-                format!(r#"<button class="post-btn" onclick="postFile({},'{}')">📤</button>"#, i, html_escape(&entry.path))
+                format!(
+                    r#"<button class="post-btn" onclick="postFile({},'{}')">📤</button>"#,
+                    i,
+                    html_escape(&entry.path)
+                )
             } else {
                 String::new()
             };
@@ -1988,7 +2890,8 @@ pub async fn archive_viewer(path: web::Path<String>) -> Result<HttpResponse> {
         }
     }
 
-    let html = format!(r#"<!DOCTYPE html>
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
 <title>Archive Viewer — {}</title>
@@ -2120,7 +3023,10 @@ async function postFile(idx, name) {{
 </script>
 </body></html>"#,
         result.filename,
-        base_path, base_path, base_path, base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
         result.filename,
         result.entry_count,
         format_size(result.total_size),
@@ -2131,7 +3037,9 @@ async function postFile(idx, name) {{
         session_id,
     );
 
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// POST /archive-generate/{session_id} — concatenate selected files into a paste
@@ -2145,20 +3053,31 @@ pub async fn archive_generate(
     let store = ARCHIVE_STORE.lock().unwrap();
     let result = match store.get(&session_id) {
         Some(r) => r,
-        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))),
+        None => {
+            return Ok(
+                HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))
+            )
+        }
     };
 
     // Build a table of contents
     let mut allm = String::new();
     allm.push_str("=== ALLM.TXT ===\n");
     allm.push_str(&format!("Source archive: {}\n", result.filename));
-    allm.push_str(&format!("Generated: {}\n", Utc::now().format("%Y-%m-%d %H:%M:%S UTC")));
+    allm.push_str(&format!(
+        "Generated: {}\n",
+        Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    ));
     allm.push_str(&format!("Selected files: {}\n\n", files.join(", ")));
 
     for file_path in &files {
         // Find the entry by path
         if let Some(entry) = result.entries.iter().find(|e| e.path == *file_path) {
-            allm.push_str(&format!("\n───── {} ({}) ─────\n", entry.path, format_size(entry.size)));
+            allm.push_str(&format!(
+                "\n───── {} ({}) ─────\n",
+                entry.path,
+                format_size(entry.size)
+            ));
             if let Some(ref content) = entry.content {
                 allm.push_str(content);
                 if !content.ends_with('\n') {
@@ -2194,11 +3113,22 @@ pub async fn archive_generate(
     fs::write(&cid_file, &id).ok();
     // Index entry so the allm appears in browse
     write_index_entry(
-        &uucp_dir, &id, "allm.txt",
-        Some(&format!("Concatenated {} files from {}", files.len(), result.filename)),
+        &uucp_dir,
+        &id,
+        "allm.txt",
+        Some(&format!(
+            "Concatenated {} files from {}",
+            files.len(),
+            result.filename
+        )),
         vec!["allm".to_string(), "archive".to_string()],
-        &local_cid, &witness, &filename, allm.len(), ipfs_cid,
-        None, None,
+        &local_cid,
+        &witness,
+        &filename,
+        allm.len(),
+        ipfs_cid,
+        None,
+        None,
     );
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -2222,7 +3152,11 @@ pub async fn archive_split(
     let store = ARCHIVE_STORE.lock().unwrap();
     let result = match store.get(&session_id) {
         Some(r) => r,
-        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))),
+        None => {
+            return Ok(
+                HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))
+            )
+        }
     };
 
     // Collect text from selected files
@@ -2240,12 +3174,18 @@ pub async fn archive_split(
     }
 
     if all_text.is_empty() {
-        return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "No text content in selected files"})));
+        return Ok(HttpResponse::BadRequest()
+            .json(serde_json::json!({"error": "No text content in selected files"})));
     }
 
     // Split into chunks of ~100KB
     let chunk_size: usize = 100 * 1024;
-    let chunks = crate::archive::split_into_chunks(&all_text, chunk_size);
+    let chunks = crate::splitter::split_text(
+        &all_text,
+        chunk_size,
+        crate::model::SplitUnit::Byte,
+        crate::model::SplitMode::Word,
+    );
 
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
@@ -2270,11 +3210,19 @@ pub async fn archive_split(
     }
 
     // Create an index paste linking all chunks
-    let index_content = format!("=== Split Index ===\nSource: {}\nDate: {}\nTotal chunks: {}\nFiles: {}\n\n",
-        result.filename, Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), chunks.len(), files.join(", "));
-    let index_content = index_content + &chunk_ids.iter().enumerate().map(|(i, id)| {
-        format!("Chunk {:04}: /paste/{}\n", i, id)
-    }).collect::<String>();
+    let index_content = format!(
+        "=== Split Index ===\nSource: {}\nDate: {}\nTotal chunks: {}\nFiles: {}\n\n",
+        result.filename,
+        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        chunks.len(),
+        files.join(", ")
+    );
+    let index_content = index_content
+        + &chunk_ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| format!("Chunk {:04}: /paste/{}\n", i, id))
+            .collect::<String>();
 
     let index_id = format!("split_index_{}", ts);
     let idx_filename = format!("{}.txt", index_id);
@@ -2290,14 +3238,16 @@ pub async fn archive_split(
 }
 
 /// GET /archive-preview/{session_id}/{index} — JSON preview of a single file
-pub async fn archive_preview(
-    path: web::Path<(String, usize)>,
-) -> Result<HttpResponse> {
+pub async fn archive_preview(path: web::Path<(String, usize)>) -> Result<HttpResponse> {
     let (session_id, idx) = path.into_inner();
     let store = ARCHIVE_STORE.lock().unwrap();
     let result = match store.get(&session_id) {
         Some(r) => r,
-        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))),
+        None => {
+            return Ok(
+                HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))
+            )
+        }
     };
 
     match result.entries.get(idx) {
@@ -2307,29 +3257,40 @@ pub async fn archive_preview(
             "content": entry.content.as_deref().unwrap_or(""),
             "is_text": entry.content.is_some(),
         }))),
-        None => Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Index out of range"}))),
+        None => {
+            Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Index out of range"})))
+        }
     }
 }
 
 /// POST /archive-post-file/{session_id}/{idx} — post a single file from archive as a paste
-pub async fn archive_post_file(
-    path: web::Path<(String, usize)>,
-) -> Result<HttpResponse> {
+pub async fn archive_post_file(path: web::Path<(String, usize)>) -> Result<HttpResponse> {
     let (session_id, idx) = path.into_inner();
     let store = ARCHIVE_STORE.lock().unwrap();
     let result = match store.get(&session_id) {
         Some(r) => r,
-        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))),
+        None => {
+            return Ok(
+                HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))
+            )
+        }
     };
 
     let entry = match result.entries.get(idx) {
         Some(e) => e,
-        None => return Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "Index out of range"}))),
+        None => {
+            return Ok(
+                HttpResponse::NotFound().json(serde_json::json!({"error": "Index out of range"}))
+            )
+        }
     };
 
     let content = match entry.content {
         Some(ref c) => c,
-        None => return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "Binary file — cannot post as paste"}))),
+        None => {
+            return Ok(HttpResponse::BadRequest()
+                .json(serde_json::json!({"error": "Binary file — cannot post as paste"})))
+        }
     };
 
     // Build paste content
@@ -2356,11 +3317,18 @@ pub async fn archive_post_file(
 
     // Index entry
     write_index_entry(
-        &uucp_dir, &id, &entry.path,
+        &uucp_dir,
+        &id,
+        &entry.path,
         Some(&format!("From archive: {}", result.filename)),
         vec!["archive".to_string(), "paste".to_string()],
-        &local_cid, &witness, &filename, content.len(), ipfs_cid,
-        None, None,
+        &local_cid,
+        &witness,
+        &filename,
+        content.len(),
+        ipfs_cid,
+        None,
+        None,
     );
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -2375,9 +3343,13 @@ pub async fn archive_post_file(
 /// GET /splitter/ — text splitter page
 pub async fn splitter_page(query: web::Query<HashMap<String, String>>) -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
-    let prefill = query.get("text").map(|s| html_escape(s)).unwrap_or_default();
+    let prefill = query
+        .get("text")
+        .map(|s| html_escape(s))
+        .unwrap_or_default();
 
-    let html = format!(r#"<!DOCTYPE html>
+    let html = format!(
+        r#"<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>✂️ Text Splitter</title>
 <style>
@@ -2410,44 +3382,71 @@ button:disabled{{background:#333;color:#666;cursor:not-allowed}}
 <div class="settings">
   <label>Platform profile: </label><br>
   <div id="profileCards" style="margin:8px 0"></div>
-  <div style="margin-top:10px">
-    <label>Chunk size: </label>
-    <input id="chunkSize" type="number" value="100000" style="width:100px"> bytes
-    <label style="margin-left:15px">Overlap: </label>
-    <input id="overlap" type="number" value="0" style="width:80px"> bytes
-    <label style="margin-left:15px">Split at: </label>
-    <select id="splitMode">
-      <option value="line">Newline</option>
-      <option value="word" selected>Word boundary</option>
-      <option value="exact">Exact byte</option>
-    </select>
-  </div>
-  <p id="profileDesc" style="font-size:12px;color:#888;margin:5px 0"></p>
+    <div style="margin-top:10px">
+      <label>Chunk size: </label>
+      <input id="chunkSize" type="number" value="100000" style="width:100px"> <span id="chunkUnit">words</span>
+      <label style="margin-left:15px">Overlap: </label>
+      <input id="overlap" type="number" value="0" style="width:80px"> <span id="overlapUnit">words</span>
+      <label style="margin-left:15px">Split at: </label>
+      <select id="splitMode">
+        <option value="line">Newline</option>
+        <option value="word" selected>Word boundary</option>
+        <option value="exact">Exact</option>
+      </select>
+    </div>
+    <p id="profileDesc" style="font-size:12px;color:#888;margin:5px 0"></p>
 </div>
 
 <textarea id="textInput" placeholder="Paste text to split here...">{prefill}</textarea><br>
-<button onclick="splitText()">✂️ Split</button>
-<button onclick="pasteFromClipboard()">📋 Paste from Clipboard</button>
-<button onclick="clearText()">🗑️ Clear</button>
+  <button onclick="splitText(event)">✂️ Split</button>
+  <button onclick="pasteFromClipboard()">📋 Paste from Clipboard</button>
+  <button onclick="clearText()">🗑️ Clear</button>
+  <button onclick="downloadAllChunks(event)">💾 Download ZIP</button>
 
 <div id="result" style="display:none">
   <h3>Results</h3>
   <p id="summary"></p>
   <div id="chunks"></div>
-  <button onclick="uploadAllChunks()">📤 Upload All as Pastes</button>
-  <button onclick="downloadAllChunks()">💾 Download All</button>
+  <button onclick="uploadAllChunks(event)">📤 Upload All as Pastes</button>
+  <button onclick="downloadAllChunks(event)">💾 Download ZIP</button>
 </div>
 
 <script>
 let profiles = [];
 let activeProfile = null;
 
+function unitLabel(unit) {{
+  if (unit === 'word' || unit === 'words') return 'words';
+  if (unit === 'token' || unit === 'tokens') return 'estimated tokens';
+  return 'bytes';
+}}
+
+function formatNumber(n) {{
+  return new Intl.NumberFormat().format(n || 0);
+}}
+
+function formatUnitValue(value, unit) {{
+  const label = unitLabel(unit);
+  if (label === 'bytes') {{
+    if (value >= 1048576) return (value / 1048576).toFixed(value >= 104857600 ? 0 : 2) + ' MB';
+    if (value >= 1024) return (value / 1024).toFixed(value >= 1048576 ? 0 : 1) + ' KB';
+    return value + ' B';
+  }}
+  return formatNumber(value) + ' ' + label;
+}}
+
+function getProfile(name) {{
+  return profiles.find(p => p.name === name) || null;
+}}
+
 async function loadProfiles() {{
   try {{
-    const res = await fetch('api/split-profiles');
+    const res = await fetch('{bp}/api/split-profiles');
     const data = await res.json();
     profiles = data.profiles || [];
     renderProfileCards();
+    const defaultName = profiles.some(p => p.name === 'notebooklm') ? 'notebooklm' : (profiles.some(p => p.name === 'openai') ? 'openai' : (profiles[0] ? profiles[0].name : 'custom'));
+    setTimeout(() => selectProfile(defaultName), 300);
   }} catch(e) {{
     console.error('Failed to load profiles:', e);
   }}
@@ -2460,13 +3459,13 @@ function renderProfileCards() {{
     const card = document.createElement('div');
     card.className = 'profile-card';
     card.dataset.name = p.name;
-    const sizeLabel = p.chunk_size >= 1048576 ? (p.chunk_size/1048576).toFixed(0)+'MB' :
-                      p.chunk_size >= 1024 ? (p.chunk_size/1024).toFixed(0)+'KB' : p.chunk_size+'B';
-    card.innerHTML = p.label + '<div class="profile-info">' + sizeLabel + ' chunks · ' + p.overlap + 'B overlap · ' + p.max_output_tokens + ' out</div>';
+    const size = formatUnitValue(p.chunk_size, p.unit);
+    const overlap = formatUnitValue(p.overlap, p.unit);
+    const context = formatUnitValue(p.context_window, p.unit);
+    card.innerHTML = p.label + '<div class="profile-info">' + size + ' chunks · ' + overlap + ' overlap · ' + context + ' context · ' + p.max_output_tokens + ' out</div>';
     card.onclick = () => selectProfile(p.name);
     container.appendChild(card);
   }});
-  // Add "Custom" card
   const custom = document.createElement('div');
   custom.className = 'profile-card';
   custom.dataset.name = 'custom';
@@ -2475,46 +3474,59 @@ function renderProfileCards() {{
   container.appendChild(custom);
 }}
 
+function updateUnitLabels(unit) {{
+  document.getElementById('chunkUnit').textContent = unitLabel(unit);
+  document.getElementById('overlapUnit').textContent = unitLabel(unit);
+}}
+
 function selectProfile(name) {{
   activeProfile = name;
   document.querySelectorAll('.profile-card').forEach(c => c.classList.remove('active'));
   document.querySelector('.profile-card[data-name="'+name+'"]')?.classList.add('active');
   if (name === 'custom') {{
-    document.getElementById('profileDesc').textContent = 'Custom — adjust chunk size and overlap manually';
+    document.getElementById('profileDesc').textContent = 'Custom — adjust chunk size, overlap, unit, and split mode manually';
     return;
   }}
-  const p = profiles.find(p => p.name === name);
+  const p = getProfile(name);
   if (p) {{
     document.getElementById('chunkSize').value = p.chunk_size;
     document.getElementById('overlap').value = p.overlap;
     document.getElementById('splitMode').value = p.split_mode;
-    document.getElementById('profileDesc').textContent = p.description || (p.label + ': ' + p.context_window + 'B context, ' + p.max_output_tokens + ' output tokens');
+    updateUnitLabels(p.unit);
+    document.getElementById('profileDesc').textContent = p.description || (p.label + ': ' + formatUnitValue(p.chunk_size, p.unit) + ' chunks, ' + formatUnitValue(p.overlap, p.unit) + ' overlap, ' + formatUnitValue(p.context_window, p.unit) + ' context, ' + p.max_output_tokens + ' output tokens');
   }}
 }}
 
-async function splitText() {{
-  const text = document.getElementById('textInput').value;
-  if (!text.trim()) {{ alert('No text to split.'); return; }}
+function splitBody() {{
   const chunkSize = parseInt(document.getElementById('chunkSize').value);
   const overlap = parseInt(document.getElementById('overlap').value) || 0;
-  const body = {{ content: text, chunk_size: chunkSize, overlap: overlap }};
+  const splitMode = document.getElementById('splitMode').value;
+  const unit = activeProfile && activeProfile !== 'custom' ? (getProfile(activeProfile)?.unit || 'word') : 'byte';
+  const body = {{ content: document.getElementById('textInput').value, chunk_size: chunkSize, overlap: overlap, unit: unit, split_mode: splitMode }};
   if (activeProfile && activeProfile !== 'custom') body.profile = activeProfile;
-  const res = await fetch('api/split', {{
+  return body;
+}}
+
+async function splitText(event) {{
+  const text = document.getElementById('textInput').value;
+  if (!text.trim()) {{ alert('No text to split.'); return; }}
+  const res = await fetch('{bp}/api/split', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify(body)
+    body: JSON.stringify(splitBody())
   }});
   const data = await res.json();
   if (data.error) {{ alert('Error: ' + data.error); return; }}
   document.getElementById('result').style.display = 'block';
   const profileLabel = activeProfile && activeProfile !== 'custom' ? ' [' + activeProfile + ']' : '';
-  document.getElementById('summary').textContent = text.length + ' bytes → ' + data.chunks + ' chunks (~' + chunkSize + ' B each, ' + overlap + ' B overlap)' + profileLabel;
+  const unit = data.unit || splitBody().unit;
+  document.getElementById('summary').textContent = formatNumber(text.length) + ' bytes / ' + formatNumber(data.word_count) + ' words / ' + formatNumber(data.estimated_tokens) + ' estimated tokens → ' + data.chunks + ' chunks (' + formatUnitValue(data.chunk_size, unit) + ' chunks, ' + formatUnitValue(data.overlap, unit) + ' overlap)' + profileLabel;
   const chunksDiv = document.getElementById('chunks');
   chunksDiv.innerHTML = '';
   data.contents.forEach((c, i) => {{
     const div = document.createElement('div');
-    div.innerHTML = '<div class="chunk-label">Chunk ' + (i+1) + '/' + data.chunks + ' (' + c.length + ' chars)</div>'
-      + '<pre>' + escHtml(c.slice(0,500)) + (c.length > 500 ? '<span style="color:#666">… (truncated)</span>' : '') + '</pre>';
+    div.innerHTML = '<div class="chunk-label">Chunk ' + (i+1) + '/' + data.chunks + ' (' + formatNumber(c.length) + ' chars)</div>'
+      + '<pre>' + escHtml(c.slice(0,1000)) + (c.length > 1000 ? '<span style="color:#666">… (truncated)</span>' : '') + '</pre>';
     chunksDiv.appendChild(div);
   }});
 }}
@@ -2531,15 +3543,12 @@ function clearText() {{
   document.getElementById('result').style.display = 'none';
 }}
 
-async function uploadAllChunks() {{
+async function uploadAllChunks(event) {{
   const btn = event.target; btn.disabled = true; btn.textContent = '⏳ Uploading...';
   try {{
-    const text = document.getElementById('textInput').value;
-    const sz = parseInt(document.getElementById('chunkSize').value);
-    const overlap = parseInt(document.getElementById('overlap').value) || 0;
-    const body = {{ content: text, chunk_size: sz, overlap: overlap, title: 'splitter_upload' }};
-    if (activeProfile && activeProfile !== 'custom') body.profile = activeProfile;
-    const res = await fetch('api/split-upload', {{
+    const body = splitBody();
+    body.title = 'splitter_upload';
+    const res = await fetch('{bp}/api/split-upload', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify(body)
@@ -2551,111 +3560,267 @@ async function uploadAllChunks() {{
   finally {{ btn.disabled = false; btn.textContent = '📤 Upload All as Pastes'; }}
 }}
 
-async function downloadAllChunks() {{
+async function downloadAllChunks(event) {{
+  const btn = event.target;
   const text = document.getElementById('textInput').value;
-  const sz = parseInt(document.getElementById('chunkSize').value);
-  const overlap = parseInt(document.getElementById('overlap').value) || 0;
-  const body = {{ content: text, chunk_size: sz, overlap: overlap }};
-  if (activeProfile && activeProfile !== 'custom') body.profile = activeProfile;
-  const res = await fetch('api/split', {{
+  if (!text.trim()) {{ alert('No text to split.'); return; }}
+  btn.disabled = true;
+  btn.textContent = '⏳ Preparing ZIP...';
+  const res = await fetch('{bp}/api/split-download', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify(body)
+    body: JSON.stringify(splitBody())
   }});
-  const data = await res.json();
-  const zip = new JSZip();
-  data.contents.forEach((c, i) => {{ zip.file('chunk_' + String(i+1).padStart(4,'0') + '.txt', c); }});
-  const blob = await zip.generateAsync({{type:'blob'}});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'chunks.zip'; a.click();
+  if (!res.ok) {{ alert('Error: ' + await res.text()); btn.disabled = false; btn.textContent = '💾 Download ZIP'; return; }}
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'split_chunks.zip';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  btn.disabled = false;
+  btn.textContent = '💾 Download ZIP';
 }}
 
-// Load profiles on page load
-loadProfiles();
-// Select OpenAI by default
-setTimeout(() => selectProfile('openai'), 300);
-</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-</body></html>"#, bp = base_path, prefill = prefill);
+const savedText = localStorage.getItem('splitter-text') || '';
+if (savedText && !document.getElementById('textInput').value.trim()) {{
+  document.getElementById('textInput').value = savedText;
+}}
 
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+loadProfiles();
+</script>
+</body></html>"#,
+        bp = base_path,
+        prefill = prefill
+    );
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// POST /api/split — split text into chunks (JSON API)
 pub async fn api_split(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
     let content = body.get("content").and_then(|v| v.as_str()).unwrap_or("");
-    let chunk_size = body.get("chunk_size").and_then(|v| v.as_u64()).unwrap_or(102400) as usize;
-    let overlap = body.get("overlap").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let profile_name = body.get("profile").and_then(|v| v.as_str());
+    let split_options = match resolve_split_request(&body) {
+        Ok(options) => options,
+        Err(response) => return Ok(response),
+    };
+    let (
+        effective_chunk_size,
+        effective_overlap,
+        effective_unit,
+        effective_split_mode,
+        profile_name,
+    ) = split_options;
 
     if content.is_empty() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "empty content"})));
     }
 
-    // Resolve profile if provided
-    let (effective_chunk_size, effective_overlap) = if let Some(name) = profile_name {
-        if let Some(profile) = SplitProfile::find_preset(name) {
-            (profile.chunk_size, profile.overlap)
-        } else {
-            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                "error": format!("unknown profile: {}", name),
-                "available": SplitProfile::presets().iter().map(|p| p.name.clone()).collect::<Vec<_>>()
-            })));
-        }
-    } else {
-        (chunk_size, overlap)
-    };
-
-    let chunks = crate::archive::split_into_chunks(content, effective_chunk_size);
-
-    // Apply overlap: for each chunk after the first, prepend the tail of the previous chunk
-    let overlapped = if effective_overlap > 0 && chunks.len() > 1 {
-        let mut result = Vec::with_capacity(chunks.len());
-        for (i, chunk) in chunks.iter().enumerate() {
-            if i == 0 {
-                result.push(chunk.clone());
-            } else {
-                let prev = &chunks[i - 1];
-                let prev_tail = if prev.len() > effective_overlap {
-                    &prev[prev.len() - effective_overlap..]
-                } else {
-                    prev.as_str()
-                };
-                result.push(format!("{}{}", prev_tail, chunk));
-            }
-        }
-        result
-    } else {
-        chunks
-    };
+    let chunks = crate::splitter::split_text(
+        content,
+        effective_chunk_size,
+        effective_unit.clone(),
+        effective_split_mode.clone(),
+    );
+    let overlapped = crate::splitter::apply_overlap(
+        chunks,
+        effective_overlap,
+        effective_unit.clone(),
+        effective_split_mode.clone(),
+    );
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "chunks": overlapped.len(),
         "chunk_size": effective_chunk_size,
         "overlap": effective_overlap,
+        "unit": serde_json::to_value(&effective_unit).unwrap_or(serde_json::Value::String("byte".into())),
+        "split_mode": serde_json::to_value(&effective_split_mode).unwrap_or(serde_json::Value::String("word".into())),
         "profile": profile_name,
         "total_size": content.len(),
+        "word_count": crate::splitter::count_words(content),
+        "estimated_tokens": crate::splitter::estimate_tokens(content),
         "contents": overlapped,
     })))
 }
 
-/// POST /api/split-upload — split text and upload all chunks as pastes
-pub async fn api_split_upload(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
-    use sha2::{Sha256, Digest};
+/// POST /api/split-paste — split a stored paste without returning all chunk bodies
+pub async fn api_split_paste(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    let content = match resolve_split_content(&body) {
+        Ok(content) => content,
+        Err(response) => return Ok(response),
+    };
+    let split_options = match resolve_split_request(&body) {
+        Ok(options) => options,
+        Err(response) => return Ok(response),
+    };
+    let (effective_chunk_size, effective_overlap, effective_unit, effective_split_mode, profile_name) = split_options;
 
-    let content = body.get("content").and_then(|v| v.as_str()).unwrap_or("");
-    let chunk_size = body.get("chunk_size").and_then(|v| v.as_u64()).unwrap_or(102400) as usize;
-    let title = body.get("title").and_then(|v| v.as_str()).unwrap_or("split");
+    let chunks = crate::splitter::split_text(
+        &content,
+        effective_chunk_size,
+        effective_unit.clone(),
+        effective_split_mode.clone(),
+    );
+    let overlapped = crate::splitter::apply_overlap(
+        chunks,
+        effective_overlap,
+        effective_unit.clone(),
+        effective_split_mode.clone(),
+    );
+    let preview_limit: usize = body
+        .get("preview_chars")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let preview_chunks: usize = body
+        .get("preview_chunks")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(3) as usize;
+    let preview = overlapped
+        .iter()
+        .enumerate()
+        .take(preview_chunks)
+        .map(|(index, chunk)| {
+            let text = if preview_limit == 0 {
+                String::new()
+            } else {
+                chunk.chars().take(preview_limit).collect()
+            };
+            serde_json::json!({
+                "index": index,
+                "byte_len": chunk.len(),
+                "text": text,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "chunks": overlapped.len(),
+        "chunk_size": effective_chunk_size,
+        "overlap": effective_overlap,
+        "unit": serde_json::to_value(&effective_unit).unwrap_or(serde_json::Value::String("byte".into())),
+        "split_mode": serde_json::to_value(&effective_split_mode).unwrap_or(serde_json::Value::String("word".into())),
+        "profile": profile_name,
+        "total_size": content.len(),
+        "word_count": crate::splitter::count_words(&content),
+        "estimated_tokens": crate::splitter::estimate_tokens(&content),
+        "preview_chunks": preview,
+    })))
+}
+
+/// POST /api/split-download — download split chunks as a zip of plain .txt files
+pub async fn api_split_download(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    let content = match resolve_split_content(&body) {
+        Ok(content) => content,
+        Err(response) => return Ok(response),
+    };
+    let split_options = match resolve_split_request(&body) {
+        Ok(options) => options,
+        Err(response) => return Ok(response),
+    };
+    let (effective_chunk_size, effective_overlap, effective_unit, effective_split_mode, _) = split_options;
 
     if content.is_empty() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "empty content"})));
     }
 
-    let chunks = crate::archive::split_into_chunks(content, chunk_size);
+    let chunks = crate::splitter::split_text(
+        &content,
+        effective_chunk_size,
+        effective_unit.clone(),
+        effective_split_mode.clone(),
+    );
+    let overlapped = crate::splitter::apply_overlap(
+        chunks,
+        effective_overlap,
+        effective_unit,
+        effective_split_mode,
+    );
+    let zip_bytes = match create_split_zip(&overlapped) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("failed to create zip: {}", e)
+            })))
+        }
+    };
+    let filename = format!("split_chunks_{}.zip", Utc::now().format("%Y%m%d_%H%M%S"));
+
+    Ok(HttpResponse::Ok()
+        .content_type("application/zip")
+        .insert_header(("Content-Disposition", format!("attachment; filename=\"{}\"", filename)))
+        .body(zip_bytes))
+}
+
+fn create_split_zip(chunks: &[String]) -> std::io::Result<Vec<u8>> {
+    use std::io::{Cursor, Write};
+    use zip::{write::FileOptions, CompressionMethod, ZipWriter};
+
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    let options = FileOptions::<'_, ()>::default().compression_method(CompressionMethod::Deflated);
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        let filename = format!("part_{:04}.txt", i + 1);
+        zip.start_file(filename, options)?;
+        zip.write_all(chunk.as_bytes())?;
+    }
+
+    Ok(zip.finish()?.into_inner())
+}
+
+/// POST /api/split-upload — split text and upload all chunks as pastes
+pub async fn api_split_upload(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
+    use sha2::{Digest, Sha256};
+
+    let content = match resolve_split_content(&body) {
+        Ok(content) => content,
+        Err(response) => return Ok(response),
+    };
+    let paste_id = body
+        .get("paste_id")
+        .and_then(|v| v.as_str())
+        .or_else(|| body.get("id").and_then(|v| v.as_str()))
+        .unwrap_or("paste");
+    let title = body
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("split_{}", paste_id));
+    let split_options = match resolve_split_request(&body) {
+        Ok(options) => options,
+        Err(response) => return Ok(response),
+    };
+    let (
+        effective_chunk_size,
+        effective_overlap,
+        effective_unit,
+        effective_split_mode,
+        profile_name,
+    ) = split_options;
+
+    if content.is_empty() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "empty content"})));
+    }
+
+    let chunks = crate::splitter::split_text(
+        &content,
+        effective_chunk_size,
+        effective_unit.clone(),
+        effective_split_mode.clone(),
+    );
+    let overlapped = crate::splitter::apply_overlap(
+        chunks,
+        effective_overlap,
+        effective_unit,
+        effective_split_mode,
+    );
+
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let mut chunk_ids = Vec::new();
 
-    for (i, chunk) in chunks.iter().enumerate() {
+    for (i, chunk) in overlapped.iter().enumerate() {
         let id = format!("{}_{}_part{:04}", ts, title, i);
         let filename = format!("{}.txt", id);
         let uucp = format!("{}/{}", uucp_dir, filename);
@@ -2667,7 +3832,7 @@ pub async fn api_split_upload(body: web::Json<serde_json::Value>) -> Result<Http
         let witness = hex::encode(&hash);
 
         let paste_content = format!("--- {} ---\nTitle: {} (chunk {}/{})\nKeywords: split, chunk\nCID: {}\nWitness: {}\n\n{}\n",
-            id, title, i + 1, chunks.len(), local_cid, witness, chunk);
+            id, title, i + 1, overlapped.len(), local_cid, witness, chunk);
 
         fs::write(&uucp, &paste_content).ok();
         chunk_ids.push(id);
@@ -2677,18 +3842,91 @@ pub async fn api_split_upload(body: web::Json<serde_json::Value>) -> Result<Http
     let index_id = format!("{}_{}_index", ts, title);
     let index_filename = format!("{}.txt", index_id);
     let index_uucp = format!("{}/{}", uucp_dir, index_filename);
-    let index_content = format!("=== Split Index ===\nTitle: {}\nDate: {}\nTotal chunks: {}\n\n{}\n",
-        title, Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), chunks.len(),
-        chunk_ids.iter().enumerate().map(|(i, id)| format!("Chunk {:04}: /paste/{}\n", i, id)).collect::<String>());
+    let index_content = format!(
+        "=== Split Index ===\nTitle: {}\nDate: {}\nTotal chunks: {}\nProfile: {}\n\n{}\n",
+        title,
+        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        overlapped.len(),
+        profile_name.unwrap_or_else(|| "custom".to_string()),
+        chunk_ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| format!("Chunk {:04}: /paste/{}\n", i, id))
+            .collect::<String>()
+    );
     fs::write(&index_uucp, &index_content).ok();
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
-        "chunks": chunks.len(),
+        "chunks": overlapped.len(),
         "chunk_ids": chunk_ids,
         "index_id": index_id,
         "url": format!("/paste/{}", index_id),
         "total_size": content.len(),
+        "word_count": crate::splitter::count_words(&content),
+        "estimated_tokens": crate::splitter::estimate_tokens(&content),
     })))
+}
+
+fn resolve_split_request(
+    body: &serde_json::Value,
+) -> std::result::Result<(usize, usize, SplitUnit, SplitMode, Option<String>), HttpResponse> {
+    let chunk_size = body
+        .get("chunk_size")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(102400) as usize;
+    let overlap = body.get("overlap").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let profile_name = body
+        .get("profile")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+
+    if let Some(name) = profile_name.as_deref() {
+        if let Some(profile) = SplitProfile::find_preset(name) {
+            return Ok((
+                profile.chunk_size,
+                profile.overlap,
+                profile.unit,
+                profile.split_mode,
+                Some(name.to_string()),
+            ));
+        }
+
+        return Err(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": format!("unknown profile: {}", name),
+            "available": SplitProfile::presets().iter().map(|p| p.name.clone()).collect::<Vec<_>>()
+        })));
+    }
+
+    let unit = match body.get("unit").and_then(|v| v.as_str()) {
+        Some(value) => parse_split_unit(value)
+            .map_err(|e| HttpResponse::BadRequest().json(serde_json::json!({"error": e})))?,
+        None => SplitUnit::Byte,
+    };
+    let split_mode = match body.get("split_mode").and_then(|v| v.as_str()) {
+        Some(value) => parse_split_mode(value)
+            .map_err(|e| HttpResponse::BadRequest().json(serde_json::json!({"error": e})))?,
+        None => SplitMode::Word,
+    };
+
+    Ok((chunk_size, overlap, unit, split_mode, None))
+}
+
+fn parse_split_unit(value: &str) -> std::result::Result<SplitUnit, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "byte" | "bytes" | "b" => Ok(SplitUnit::Byte),
+        "word" | "words" | "w" => Ok(SplitUnit::Word),
+        "token" | "tokens" | "tok" => Ok(SplitUnit::Token),
+        _ => Err(format!("unknown unit: {}", value)),
+    }
+}
+
+fn parse_split_mode(value: &str) -> std::result::Result<SplitMode, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "line" | "newline" => Ok(SplitMode::Line),
+        "word" | "word-boundary" => Ok(SplitMode::Word),
+        "exact" => Ok(SplitMode::Exact),
+        _ => Err(format!("unknown split_mode: {}", value)),
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -2720,9 +3958,11 @@ fn format_size(size: u64) -> String {
 pub async fn nix_skill_analyze(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
     let path = match body.get("path").and_then(|v| v.as_str()) {
         Some(p) => p.to_string(),
-        None => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Missing 'path' parameter"
-        }))),
+        None => {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": "Missing 'path' parameter"
+            })))
+        }
     };
 
     match crate::nix_skill::analyze_flake(&path) {
@@ -2740,22 +3980,26 @@ pub async fn nix_skill_analyze(body: web::Json<serde_json::Value>) -> Result<Htt
 /// POST /api/nix-skill/find — Find and analyze all flake.nix files in a directory
 /// Body: {"directory": "~/dasl", "max_depth": 4}
 pub async fn nix_skill_find(body: web::Json<serde_json::Value>) -> Result<HttpResponse> {
-    let directory = body.get("directory")
+    let directory = body
+        .get("directory")
         .and_then(|v| v.as_str())
         .unwrap_or("~/dasl")
         .to_string();
-    let max_depth: usize = body.get("max_depth")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(4) as usize;
+    let max_depth: usize = body.get("max_depth").and_then(|v| v.as_i64()).unwrap_or(4) as usize;
 
-    let dir = directory.replace("~", &env::var("HOME").unwrap_or_else(|_| "/home/mdupont".to_string()));
+    let dir = directory.replace(
+        "~",
+        &env::var("HOME").unwrap_or_else(|_| "/home/mdupont".to_string()),
+    );
 
     // Find all flake.nix files up to max_depth
     let mut paths = Vec::new();
     let mut dirs_to_check = vec![(dir.clone(), 0)];
 
     while let Some((current_dir, depth)) = dirs_to_check.pop() {
-        if depth > max_depth { continue; }
+        if depth > max_depth {
+            continue;
+        }
         let entries = match std::fs::read_dir(&current_dir) {
             Ok(e) => e,
             Err(_) => continue,
@@ -2764,7 +4008,9 @@ pub async fn nix_skill_find(body: web::Json<serde_json::Value>) -> Result<HttpRe
             let entry_path = entry.path();
             if entry_path.is_dir() && depth < max_depth {
                 dirs_to_check.push((entry_path.display().to_string(), depth + 1));
-            } else if entry_path.is_file() && entry_path.file_name().map_or(false, |n| n == "flake.nix") {
+            } else if entry_path.is_file()
+                && entry_path.file_name().map_or(false, |n| n == "flake.nix")
+            {
                 paths.push(entry_path.display().to_string());
             }
         }
@@ -2821,6 +4067,7 @@ pub async fn create_split_profile(body: web::Json<SplitProfileRequest>) -> Resul
         label: body.label.clone().unwrap_or_else(|| body.name.clone()),
         context_window: body.context_window.unwrap_or(body.chunk_size * 2),
         chunk_size: body.chunk_size,
+        unit: body.unit.clone().unwrap_or(SplitUnit::Byte),
         overlap: body.overlap.unwrap_or(0),
         max_output_tokens: body.max_output_tokens.unwrap_or(4096),
         split_mode: body.split_mode.clone().unwrap_or(SplitMode::Word),
@@ -2853,7 +4100,8 @@ pub async fn git_browse() -> Result<HttpResponse> {
 
     let stats = cache.stats();
 
-    let html = format!(r##"<!DOCTYPE html>
+    let html = format!(
+        r##"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Git Mounts — Kant Pastebin</title>
 <style>
 body{{font-family:monospace;max-width:900px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
@@ -2868,15 +4116,26 @@ h1{{color:#0f0;border-bottom:1px solid #333}}
 <p style="color:#888">Mounted git repositories — demand-cached, LRU-evicted</p>
 <p style="color:#666;font-size:12px">Cache: {} files · {} dirs · {} total accesses</p>
 <div>{}</div>
-</body></html>"##, base_path, base_path, base_path,
-        stats["cached_files"], stats["cached_dirs"], stats["total_accesses"],
-        mount_cards);
+</body></html>"##,
+        base_path,
+        base_path,
+        base_path,
+        stats["cached_files"],
+        stats["cached_dirs"],
+        stats["total_accesses"],
+        mount_cards
+    );
 
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// GET /git-browse/{mount_id} — browse a mounted repo
-pub async fn git_browse_mount(path: web::Path<String>, query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
+pub async fn git_browse_mount(
+    path: web::Path<String>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
     let mount_id = path.into_inner();
     let sub_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
@@ -2895,25 +4154,38 @@ pub async fn git_browse_mount(path: web::Path<String>, query: web::Query<std::co
         }
 
         let mount_info = cache.mounts.get(&mount_id);
-        let mount_name = mount_info.map(|m| m.name.clone()).unwrap_or_else(|| mount_id.clone());
-        let commit_short = mount_info.and_then(|m| m.head_commit.as_deref())
+        let mount_name = mount_info
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| mount_id.clone());
+        let commit_short = mount_info
+            .and_then(|m| m.head_commit.as_deref())
             .map(|c| c[..7.min(c.len())].to_string())
             .unwrap_or_else(|| "n/a".to_string());
-        let branch = mount_info.and_then(|m| m.branch.clone()).unwrap_or_else(|| "detached".to_string());
+        let branch = mount_info
+            .and_then(|m| m.branch.clone())
+            .unwrap_or_else(|| "detached".to_string());
 
         (entries, mount_name, commit_short, branch)
     };
 
     // Breadcrumb
-    let mut breadcrumb = format!(r#"<a href="{}/git-browse">📁 Mounts</a> / <a href="{}/git-browse/{}">{}</a>"#, base_path, base_path, mount_id, mount_name);
+    let mut breadcrumb = format!(
+        r#"<a href="{}/git-browse">📁 Mounts</a> / <a href="{}/git-browse/{}">{}</a>"#,
+        base_path, base_path, mount_id, mount_name
+    );
     if !sub_path.is_empty() {
         let parts: Vec<&str> = sub_path.split('/').filter(|s| !s.is_empty()).collect();
         let mut accumulated = String::new();
         for (i, part) in parts.iter().enumerate() {
-            if i > 0 { accumulated.push('/'); }
+            if i > 0 {
+                accumulated.push('/');
+            }
             accumulated.push_str(part);
             if i < parts.len() - 1 {
-                breadcrumb.push_str(&format!(r#" / <a href="{}/git-browse/{}?path={}">{}</a>"#, base_path, mount_id, accumulated, part));
+                breadcrumb.push_str(&format!(
+                    r#" / <a href="{}/git-browse/{}?path={}">{}</a>"#,
+                    base_path, mount_id, accumulated, part
+                ));
             } else {
                 breadcrumb.push_str(&format!(" / {}", part));
             }
@@ -2936,7 +4208,8 @@ pub async fn git_browse_mount(path: web::Path<String>, query: web::Query<std::co
         format!(r#"<div style="border-bottom:1px solid #222;padding:6px 0">{} {} <span style="color:#666;font-size:12px">{}</span></div>"#, link, badge, size_str)
     }).collect();
 
-    let html = format!(r##"<!DOCTYPE html>
+    let html = format!(
+        r##"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>{} — Git Browse</title>
 <style>
 body{{font-family:monospace;max-width:900px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
@@ -2951,9 +4224,21 @@ h1{{color:#0f0;border-bottom:1px solid #333}}
 <h1>📁 {}</h1>
 <p style="color:#666;font-size:12px">🔀 {} · {}</p>
 <div style="margin-top:15px">{}</div>
-</body></html>"##, mount_name, base_path, base_path, base_path, breadcrumb, mount_name, branch, commit_short, items);
+</body></html>"##,
+        mount_name,
+        base_path,
+        base_path,
+        base_path,
+        breadcrumb,
+        mount_name,
+        branch,
+        commit_short,
+        items
+    );
 
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
 
 /// GET /git-view/{mount_id}/{path:.*} — view a file from a git mount
@@ -2973,10 +4258,19 @@ pub async fn git_view_file(path: web::Path<(String, String)>) -> Result<HttpResp
 }
 
 /// Render a file view page (shared between browse and direct view).
-fn git_view_file_content(mount_id: &str, sub_path: &str, content: &str, base_path: &str) -> Result<HttpResponse> {
+fn git_view_file_content(
+    mount_id: &str,
+    sub_path: &str,
+    content: &str,
+    base_path: &str,
+) -> Result<HttpResponse> {
     let mount_name = {
         let cache = crate::git_mount::get_cache();
-        cache.mounts.get(mount_id).map(|m| m.name.clone()).unwrap_or_else(|| mount_id.to_string())
+        cache
+            .mounts
+            .get(mount_id)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| mount_id.to_string())
     };
 
     let ext = Path::new(sub_path)
@@ -2993,20 +4287,33 @@ fn git_view_file_content(mount_id: &str, sub_path: &str, content: &str, base_pat
 
     let commit_short = {
         let cache = crate::git_mount::get_cache();
-        cache.get_file_entry(mount_id, sub_path)
-            .and_then(|f| f.head_commit.as_deref().map(|c| c[..7.min(c.len())].to_string()))
+        cache
+            .get_file_entry(mount_id, sub_path)
+            .and_then(|f| {
+                f.head_commit
+                    .as_deref()
+                    .map(|c| c[..7.min(c.len())].to_string())
+            })
             .unwrap_or_else(|| "n/a".to_string())
     };
 
     // Breadcrumb
     let parts: Vec<&str> = sub_path.split('/').filter(|s| !s.is_empty()).collect();
-    let mut breadcrumb = format!(r#"<a href="{}/git-browse">📁 Mounts</a> / <a href="{}/git-browse/{}">{}</a>"#, base_path, base_path, mount_id, mount_name);
+    let mut breadcrumb = format!(
+        r#"<a href="{}/git-browse">📁 Mounts</a> / <a href="{}/git-browse/{}">{}</a>"#,
+        base_path, base_path, mount_id, mount_name
+    );
     let mut accumulated = String::new();
     for (i, part) in parts.iter().enumerate() {
-        if i > 0 { accumulated.push('/'); }
+        if i > 0 {
+            accumulated.push('/');
+        }
         accumulated.push_str(part);
         if i < parts.len() - 1 {
-            breadcrumb.push_str(&format!(r#" / <a href="{}/git-browse/{}?path={}">{}</a>"#, base_path, mount_id, accumulated, part));
+            breadcrumb.push_str(&format!(
+                r#" / <a href="{}/git-browse/{}?path={}">{}</a>"#,
+                base_path, mount_id, accumulated, part
+            ));
         } else {
             breadcrumb.push_str(&format!(" / {}", part));
         }
@@ -3036,7 +4343,8 @@ fn git_view_file_content(mount_id: &str, sub_path: &str, content: &str, base_pat
     // Escape HTML in content
     let escaped = html_escape(content);
 
-    let html = format!(r##"<!DOCTYPE html>
+    let html = format!(
+        r##"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>{} — Git View</title>
 <style>
 body{{font-family:monospace;max-width:1100px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
@@ -3056,22 +4364,36 @@ code{{font-family:monospace;font-size:13px}}
 <p class="meta">📁 {} · {} · 🔀 {}</p>
 <hr>
 <pre><code class="{}">{}</code></pre>
-</body></html>"##, fname, base_path, base_path, base_path, breadcrumb, fname, sub_path, ext, commit_short, lang_class, escaped);
+</body></html>"##,
+        fname,
+        base_path,
+        base_path,
+        base_path,
+        breadcrumb,
+        fname,
+        sub_path,
+        ext,
+        commit_short,
+        lang_class,
+        escaped
+    );
 
-    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html))
 }
-
-
 
 /// GET /api/git-search?q=... — search git-mounted files
 pub async fn api_git_search(req: HttpRequest) -> Result<HttpResponse> {
     let uri = req.uri().to_string();
     let query = match parse_query_param(&uri, "q") {
         Some(q) if !q.is_empty() => q,
-        _ => return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Missing query parameter: q",
-            "usage": "curl 'http://localhost:8090/api/git-search?q=cbor'"
-        }))),
+        _ => {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": "Missing query parameter: q",
+                "usage": "curl 'http://localhost:8090/api/git-search?q=cbor'"
+            })))
+        }
     };
 
     let limit: usize = parse_query_param(&uri, "limit")
@@ -3085,19 +4407,22 @@ pub async fn api_git_search(req: HttpRequest) -> Result<HttpResponse> {
     let mut cache = crate::git_mount::get_cache();
 
     // Filename/path matches
-    let file_results: Vec<serde_json::Value> = cache.search_names(&query, limit)
+    let file_results: Vec<serde_json::Value> = cache
+        .search_names(&query, limit)
         .iter()
-        .map(|e| serde_json::json!({
-            "type": "file",
-            "mount_id": e.mount_id,
-            "path": e.rel_path,
-            "name": e.name,
-            "ext": e.ext,
-            "size": e.size,
-            "url": format!("/git-view/{}/{}", e.mount_id, e.rel_path),
-            "is_submodule": e.is_submodule,
-            "head_commit": e.head_commit,
-        }))
+        .map(|e| {
+            serde_json::json!({
+                "type": "file",
+                "mount_id": e.mount_id,
+                "path": e.rel_path,
+                "name": e.name,
+                "ext": e.ext,
+                "size": e.size,
+                "url": format!("/git-view/{}/{}", e.mount_id, e.rel_path),
+                "is_submodule": e.is_submodule,
+                "head_commit": e.head_commit,
+            })
+        })
         .collect();
 
     let mut results = file_results;
@@ -3132,15 +4457,19 @@ pub async fn api_git_search(req: HttpRequest) -> Result<HttpResponse> {
 /// GET /api/git-index — return cache info
 pub async fn api_git_index() -> Result<HttpResponse> {
     let mut cache = crate::git_mount::get_cache();
-    let mounts: Vec<serde_json::Value> = cache.mounts.values().map(|m| {
-        serde_json::json!({
-            "id": m.id,
-            "root": m.root,
-            "name": m.name,
-            "head_commit": m.head_commit,
-            "branch": m.branch,
+    let mounts: Vec<serde_json::Value> = cache
+        .mounts
+        .values()
+        .map(|m| {
+            serde_json::json!({
+                "id": m.id,
+                "root": m.root,
+                "name": m.name,
+                "head_commit": m.head_commit,
+                "branch": m.branch,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "mounts": mounts,

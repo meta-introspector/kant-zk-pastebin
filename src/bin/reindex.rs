@@ -7,9 +7,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 fn main() {
-    let dir = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| std::env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".into()));
+    let dir = std::env::args().nth(1).unwrap_or_else(|| {
+        std::env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".into())
+    });
     let dir = PathBuf::from(&dir);
     let index_path = dir.join("index.jsonl");
 
@@ -53,15 +53,22 @@ fn main() {
         let content = fs::read_to_string(entry.path()).unwrap_or_default();
 
         // Parse timestamp and title from filename
-        let (timestamp, title) = if base.len() > 16 && base.chars().take(8).all(|c| c.is_ascii_digit())
+        let (timestamp, title) = if base.len() > 16
+            && base.chars().take(8).all(|c| c.is_ascii_digit())
             && base.chars().nth(8) == Some('_')
             && base.chars().skip(9).take(6).all(|c| c.is_ascii_digit())
         {
             let ts = &base[..15];
-            let rest = if base.len() > 16 { &base[16..] } else { "untitled" };
+            let rest = if base.len() > 16 {
+                &base[16..]
+            } else {
+                "untitled"
+            };
             (ts.to_string(), rest.replace('_', " "))
         } else {
-            let mtime = entry.metadata().ok()
+            let mtime = entry
+                .metadata()
+                .ok()
                 .and_then(|m| m.modified().ok())
                 .map(|t| {
                     let d = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
@@ -116,7 +123,11 @@ fn main() {
 
     // Append new entries
     if !new_lines.is_empty() {
-        let mut f = fs::OpenOptions::new().create(true).append(true).open(&index_path).unwrap();
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&index_path)
+            .unwrap();
         for line in &new_lines {
             writeln!(f, "{}", line).unwrap();
         }

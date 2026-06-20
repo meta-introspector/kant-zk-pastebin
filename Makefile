@@ -1,10 +1,11 @@
-.PHONY: build deploy run clean help tiles
+.PHONY: build deploy run test-share-menu clean help tiles
 
 help:
 	@echo "Kant Pastebin"
 	@echo ""
 	@echo "  make build       — Build (nix build)"
 	@echo "  make run         — Run with cargo"
+	@echo "  make test-share-menu — Run offline share menu test"
 	@echo "  make deploy      — Deploy with systemd"
 	@echo "  make tiles       — Copy DAG-CBOR tiles from dasl-testing"
 	@echo "  make clean       — Clean build artifacts"
@@ -17,6 +18,9 @@ build:
 
 run:
 	nix develop -c cargo run
+
+test-share-menu:
+	nix develop -c cargo run --bin kant-pastebin -- test-share-menu
 
 deploy: build
 	bash deploy.sh

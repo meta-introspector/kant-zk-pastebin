@@ -92,6 +92,10 @@ locations."/nora/health" = {
         '';
       };
 
+      # ─── NotebookLM exports  ────────────────────────────────────────
+      # NOTE: Served via /etc/nginx/locations.d/notebooklm.conf
+      # (Ubuntu-managed nginx, not system-manager)
+
       locations."/nora/" = {
         proxyPass = "http://127.0.0.1:4000/";
         proxyWebsockets = false;

@@ -34,8 +34,7 @@ pub struct FlakeInput {
 
 /// Analyze a flake.nix file at the given path
 pub fn analyze_flake(path: &str) -> Result<FlakeAnalysis, String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("Cannot read {}: {}", path, e))?;
+    let content = fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path, e))?;
 
     let content_trimmed = content.trim();
 
@@ -117,7 +116,8 @@ pub fn analyze_flake(path: &str) -> Result<FlakeAnalysis, String> {
     let pkg_re = Regex::new(r"(?m)^\s+(\w+)\s*=\s*(pkgs\.[a-zA-Z.]+|self\.packages|nixpkgs\.legacyPackages|pkgs\.callPackage|pkgs\.buildRustPackage|pkgs\.stdenv\.mkDerivation|pkgs\.writeShellScriptBin|pkgs\.rustPlatform\.buildRustPackage)").unwrap();
     for cap in pkg_re.captures_iter(&content) {
         let pkg_name = cap[1].to_string();
-        if !analysis.packages.contains(&pkg_name) && pkg_name != "packages" && pkg_name != "default" {
+        if !analysis.packages.contains(&pkg_name) && pkg_name != "packages" && pkg_name != "default"
+        {
             analysis.packages.push(pkg_name);
         }
     }
@@ -162,7 +162,9 @@ pub fn analyze_flake(path: &str) -> Result<FlakeAnalysis, String> {
 
     // Detect systemConfigs
     if content.contains("systemConfigs") {
-        let sc_re = Regex::new(r"(?m)^\s+(\w+(?:-\w+)*)\s*=\s*system-manager\.lib\.makeSystemConfig").unwrap();
+        let sc_re =
+            Regex::new(r"(?m)^\s+(\w+(?:-\w+)*)\s*=\s*system-manager\.lib\.makeSystemConfig")
+                .unwrap();
         for cap in sc_re.captures_iter(&content) {
             analysis.system_configs.push(cap[1].to_string());
         }
@@ -171,7 +173,9 @@ pub fn analyze_flake(path: &str) -> Result<FlakeAnalysis, String> {
     // Feature detection
     analysis.has_tests = content_contains(&content, "doCheck") || content.contains("checkPhase");
     analysis.has_checks = content_contains_bool(&content, "checks");
-    analysis.has_formatter = content_contains(&content, "formatter") || content.contains("treefmt") || content.contains("nixpkgs-fmt");
+    analysis.has_formatter = content_contains(&content, "formatter")
+        || content.contains("treefmt")
+        || content.contains("nixpkgs-fmt");
 
     // Warnings
     if let Some(nixpkgs_url) = &analysis.nixpkgs_url {
@@ -181,25 +185,37 @@ pub fn analyze_flake(path: &str) -> Result<FlakeAnalysis, String> {
                 nixpkgs_url
             ));
         } else {
-            analysis.warnings.push("nixpkgs uses local mirror — ✓".to_string());
+            analysis
+                .warnings
+                .push("nixpkgs uses local mirror — ✓".to_string());
         }
     }
 
     // Check for cargoLock vs cargoVendorDir (purity)
     if content.contains("cargoLock") {
-        analysis.warnings.push(
-            "Uses cargoLock.lockFile — build will fetch from crates.io (impure)".to_string()
-        );
+        analysis
+            .warnings
+            .push("Uses cargoLock.lockFile — build will fetch from crates.io (impure)".to_string());
     } else if content.contains("cargoVendorDir") {
-        analysis.warnings.push("Uses cargoVendorDir — pure local build ✓".to_string());
+        analysis
+            .warnings
+            .push("Uses cargoVendorDir — pure local build ✓".to_string());
     }
 
     // Check for flake.lock
-    let flake_lock = format!("{}/flake.lock", fs::canonicalize(path)
-        .map(|p| p.parent().map(|pp| pp.to_string_lossy().to_string()).unwrap_or_default())
-        .unwrap_or_default());
+    let flake_lock = format!(
+        "{}/flake.lock",
+        fs::canonicalize(path)
+            .map(|p| p
+                .parent()
+                .map(|pp| pp.to_string_lossy().to_string())
+                .unwrap_or_default())
+            .unwrap_or_default()
+    );
     if fs::metadata(&flake_lock).is_err() {
-        analysis.warnings.push("No flake.lock found — dependencies may drift".to_string());
+        analysis
+            .warnings
+            .push("No flake.lock found — dependencies may drift".to_string());
     }
 
     Ok(analysis)
@@ -255,7 +271,10 @@ fn extract_block(content: &str, name: &str) -> Option<String> {
 
     for (i, ch) in content[start_byte..].char_indices() {
         match ch {
-            '{' => { depth += 1; started = true; }
+            '{' => {
+                depth += 1;
+                started = true;
+            }
             '}' => {
                 depth -= 1;
                 if started && depth == 0 {
@@ -267,7 +286,9 @@ fn extract_block(content: &str, name: &str) -> Option<String> {
         }
     }
 
-    if depth != 0 { return None; }
+    if depth != 0 {
+        return None;
+    }
     Some(content[start_byte..end_byte].to_string())
 }
 
@@ -282,7 +303,10 @@ fn extract_block_by_key(content: &str, key: &str) -> Option<String> {
 
     for (i, ch) in content[start_byte..].char_indices() {
         match ch {
-            '{' => { depth += 1; started = true; }
+            '{' => {
+                depth += 1;
+                started = true;
+            }
             '}' => {
                 depth -= 1;
                 if started && depth == 0 {
@@ -294,6 +318,8 @@ fn extract_block_by_key(content: &str, key: &str) -> Option<String> {
         }
     }
 
-    if depth != 0 { return None; }
+    if depth != 0 {
+        return None;
+    }
     Some(content[start_byte..end_byte].to_string())
 }

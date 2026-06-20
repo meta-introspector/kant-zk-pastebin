@@ -1,0 +1,205 @@
+---
+name: pastebin-large-post-workflow
+description: Work on Kant Pastebin large-post split/share behavior. Use when fixing or extending split, share, ZIP download, chunk upload, or deployment docs for large pastes.
+---
+
+# Pastebin Large Post Split/Share Workflow
+
+## When to Use
+
+Use this skill when working on:
+
+1. Splitting large pastes without loading full raw content into the browser.
+2. Server-side split endpoints that accept `paste_id`.
+3. ZIP downloads of split chunks.
+4. Uploading split chunks as separate pastes.
+5. Share button fallback behavior.
+6. Nix/system-manager deployment of `kant-pastebin`.
+
+## Current Architecture
+
+The post split page uses the paste ID only. It does not render a full-content `<textarea>` and does not call the generic `/api/split` endpoint with raw text.
+
+Flow:
+
+1. Browser opens `/paste/{id}/split`.
+2. Browser sends `{ paste_id, chunk_size, unit, split_mode, overlap }` to `/api/split-paste`.
+3. Server resolves stored paste content by ID.
+4. Server splits content and returns summary metadata plus a tiny preview.
+5. Browser can request `/api/split-download` for a ZIP or `/api/split-upload` for chunk pastes.
+
+## Endpoints
+
+### `POST /api/split-paste`
+
+Use for previewing split results for a stored paste.
+
+Request fields:
+
+- `paste_id` or `id`: paste identifier.
+- `chunk_size`: byte count, default `102400`.
+- `unit`: currently sent as `byte`.
+- `split_mode`: `exact`, `line`, or `word`.
+- `overlap`: overlap bytes, usually `0`.
+- `preview_chars`: optional per-chunk preview limit.
+- `preview_chunks`: optional number of chunks to preview.
+
+Response includes:
+
+- `chunks`
+- `chunk_size`
+- `overlap`
+- `unit`
+- `split_mode`
+- `total_size`
+- `word_count`
+- `estimated_tokens`
+- `preview_chunks`
+
+Do not return all chunk bodies from this endpoint.
+
+### `POST /api/split-download`
+
+Use for downloading all chunks as a ZIP.
+
+Accepts either:
+
+- `paste_id` or `id`
+- raw `content`
+
+Response is `application/zip` with files named:
+
+```text
+part_0001.txt
+part_0002.txt
+part_0003.txt
+...
+```
+
+No manifest or extra files should be added.
+
+### `POST /api/split-upload`
+
+Use for creating one paste per chunk and one index paste.
+
+Accepts either:
+
+- `paste_id` or `id`
+- raw `content`
+
+Returns:
+
+- `chunks`
+- `chunk_ids`
+- `index_id`
+- `url`
+- `total_size`
+- `word_count`
+- `estimated_tokens`
+
+## Content Resolution
+
+`resolve_split_content()` chooses content in this order:
+
+1. `paste_id` or `id`
+2. raw `content`
+
+For paste IDs:
+
+1. Read the paste index from `UUCP_SPOOL`.
+2. Find the entry with matching `id`.
+3. Read `entry.uucp_path`.
+4. Fall back to `$UUCP_SPOOL/<paste_id>.txt`.
+
+`read_paste_content()` must extract actual content from the stored paste wrapper. Current format places `Sheaf:` before the content and RDFa after it. Find `Sheaf:` in the header, skip the blank line after it, then stop before the first `<div`.
+
+## Split Page Requirements
+
+The split page must:
+
+- Avoid a full raw-content `<textarea>`.
+- Avoid returning all chunk bodies for preview.
+- Show chunk-size choices from 128 KB through 8 MB.
+- Default chunk size to 1 MB.
+- Show boundary choices: Newline, Word boundary, Exact bytes.
+- Default boundary to Exact bytes.
+- Show only a tiny preview, e.g. 500 characters for 3 chunks.
+- Keep Download ZIP and Upload Chunks as Pastes actions.
+
+## Share Button Requirements
+
+The post page Share button must open a destination menu with:
+
+- Native Share
+- Copy URL
+- Copy Prompt
+- Claude
+- OpenAI / ChatGPT
+- Grok
+- X
+- NightCafe
+- DeepSeek Chat
+- Search GitHub
+- Search Hugging Face
+
+The chat/search prompt is built from the paste title, paste URL, and up to the first 4000 characters of paste content. Search destinations use the title plus the first 1000 characters. Native sharing still falls back to URL copying when unavailable.
+
+Do not rely on `navigator.share` without a fallback.
+
+## Offline Share Menu Test
+
+The share menu renderer and destination wiring are covered by a no-HTTP CLI test:
+
+```bash
+make test-share-menu
+```
+
+Equivalent direct command:
+
+```bash
+nix develop -c cargo run --bin kant-pastebin -- test-share-menu
+```
+
+## Deployment
+
+Use the flake and repo deploy script:
+
+```bash
+nix build .#kant-pastebin --print-out-paths
+./deploy.sh
+```
+
+`deploy.sh` resolves its physical script directory and uses:
+
+```text
+$PASTEBIN_DIR#systemConfigs.kant-pastebin-only
+```
+
+by default. Do not deploy from `/home/mdupont/pastebin/target/release`.
+
+If nix-daemon is dead after an OOM build:
+
+```bash
+sudo -n systemctl start nix-daemon.service
+./deploy.sh
+```
+
+## Verification Checklist
+
+Before finishing large-post split work:
+
+1. Build with `nix build .#kant-pastebin --print-out-paths`.
+2. Deploy with `./deploy.sh`.
+3. Confirm `kant-pastebin.service` is active.
+4. Open a split page and confirm there is no full raw `<textarea>`.
+5. Confirm `/api/split-paste` returns `preview_chunks`, not `contents`.
+6. Confirm `/api/split-download` returns a ZIP containing only `part_*.txt`.
+7. Confirm `/api/split-upload` creates chunk pastes and an index paste.
+8. Confirm Share opens the destination menu and Native Share falls back to URL copying when unavailable.
+9. Confirm Claude, OpenAI / ChatGPT, Grok, X, NightCafe, DeepSeek Chat, GitHub, and Hugging Face menu items generate the expected URLs or copy prompt fallback.
+
+## Known Caveats
+
+- The original post view still renders full content in a `<pre>`. For very large pastes, opening the post itself may still be expensive.
+- `api_split_paste` builds split chunks in memory. This is fine for ~10MB smoke tests, but much larger posts need streaming or hard chunk-count limits.
+- Add minimum chunk-size or maximum chunk-count validation if users can request tiny chunks that create thousands of files.

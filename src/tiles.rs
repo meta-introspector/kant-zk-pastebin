@@ -94,17 +94,13 @@ impl Plugin for TilePlugin {
             "url": input.url,
             "extra": input.extra,
         });
-        let req_str =
-            serde_json::to_string(&req).map_err(|e| format!("serialize: {}", e))?;
-        let cstr =
-            std::ffi::CString::new(req_str).map_err(|e| format!("CString: {}", e))?;
+        let req_str = serde_json::to_string(&req).map_err(|e| format!("serialize: {}", e))?;
+        let cstr = std::ffi::CString::new(req_str).map_err(|e| format!("CString: {}", e))?;
 
         // Call the tile's render function
         unsafe {
             let render: Symbol<
-                unsafe extern "C" fn(
-                    *const std::os::raw::c_char,
-                ) -> *mut std::os::raw::c_char,
+                unsafe extern "C" fn(*const std::os::raw::c_char) -> *mut std::os::raw::c_char,
             > = self
                 .lib
                 .get(TILE_RENDER_SYMBOL.as_bytes())
@@ -121,9 +117,7 @@ impl Plugin for TilePlugin {
                 .to_string();
 
             // Free the tile's allocated string
-            let free: Symbol<
-                unsafe extern "C" fn(*mut std::os::raw::c_char),
-            > = self
+            let free: Symbol<unsafe extern "C" fn(*mut std::os::raw::c_char)> = self
                 .lib
                 .get(TILE_FREE_SYMBOL.as_bytes())
                 .unwrap_or(std::mem::zeroed());
@@ -173,21 +167,14 @@ fn discover_tiles_in(tiles_dir: &Path) -> Vec<LoadedTile> {
     let mut tiles = Vec::new();
 
     if !tiles_dir.is_dir() {
-        log::warn!(
-            "TILES_DIR not found: {}",
-            tiles_dir.display()
-        );
+        log::warn!("TILES_DIR not found: {}", tiles_dir.display());
         return tiles;
     }
 
     let entries = match std::fs::read_dir(tiles_dir) {
         Ok(e) => e,
         Err(e) => {
-            log::error!(
-                "Cannot read TILES_DIR {}: {}",
-                tiles_dir.display(),
-                e
-            );
+            log::error!("Cannot read TILES_DIR {}: {}", tiles_dir.display(), e);
             return tiles;
         }
     };
@@ -195,9 +182,7 @@ fn discover_tiles_in(tiles_dir: &Path) -> Vec<LoadedTile> {
     for entry in entries.flatten() {
         let path = entry.path();
         // Look for lib*.so files (cdylib output)
-        if path
-            .extension()
-            .map_or(false, |e| e == "so")
+        if path.extension().map_or(false, |e| e == "so")
             && path
                 .file_name()
                 .and_then(|n| n.to_str())

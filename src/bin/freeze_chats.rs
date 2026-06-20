@@ -6,7 +6,10 @@ use std::path::PathBuf;
 use walkdir::WalkDir;
 
 #[derive(Parser)]
-#[command(name = "freeze-chats", about = "Convert kiro-cli chat JSON to eRDFa CBOR shards")]
+#[command(
+    name = "freeze-chats",
+    about = "Convert kiro-cli chat JSON to eRDFa CBOR shards"
+)]
 struct Cli {
     /// Input directory or files containing chat JSON
     inputs: Vec<PathBuf>,
@@ -20,7 +23,11 @@ fn extract_turns(history: &[Value]) -> Vec<(String, String)> {
     for h in history {
         // user
         if let Some(uc) = h.get("user").and_then(|u| u.get("content")) {
-            let text = if let Some(p) = uc.get("Prompt").and_then(|p| p.get("prompt")).and_then(|p| p.as_str()) {
+            let text = if let Some(p) = uc
+                .get("Prompt")
+                .and_then(|p| p.get("prompt"))
+                .and_then(|p| p.as_str())
+            {
                 Some(p.to_string())
             } else if uc.is_string() {
                 Some(uc.as_str().unwrap().to_string())
@@ -37,11 +44,17 @@ fn extract_turns(history: &[Value]) -> Vec<(String, String)> {
         }
         // assistant
         if let Some(a) = h.get("assistant") {
-            let text = a.get("content").or(a.get("message")).or(a.get("Text"))
+            let text = a
+                .get("content")
+                .or(a.get("message"))
+                .or(a.get("Text"))
                 .and_then(|v| v.as_str())
                 .map(String::from)
                 .or_else(|| {
-                    a.get("ToolUse").and_then(|tu| tu.get("content")).and_then(|v| v.as_str()).map(String::from)
+                    a.get("ToolUse")
+                        .and_then(|tu| tu.get("content"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
                 });
             if let Some(t) = text {
                 if !t.is_empty() {
@@ -55,30 +68,49 @@ fn extract_turns(history: &[Value]) -> Vec<(String, String)> {
 
 fn process_chat(path: &PathBuf, out: &PathBuf) -> Option<()> {
     let data: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    let cid = data.get("conversation_id").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let cid = data
+        .get("conversation_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     let history = data.get("history").and_then(|v| v.as_array())?;
     let turns = extract_turns(history);
-    if turns.is_empty() { return None; }
+    if turns.is_empty() {
+        return None;
+    }
 
-    let summary = data.get("latest_summary").and_then(|v| v.as_str()).unwrap_or("");
+    let summary = data
+        .get("latest_summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let stem = path.file_stem()?.to_string_lossy().to_string();
 
     let mut shards = Vec::new();
 
     // summary shard
     if !summary.is_empty() {
-        shards.push(Shard::new(
-            format!("{stem}/summary"),
-            Component::Paragraph { text: summary.chars().take(5000).collect() },
-        ).with_tags(vec!["chat-summary".into(), cid.into()]));
+        shards.push(
+            Shard::new(
+                format!("{stem}/summary"),
+                Component::Paragraph {
+                    text: summary.chars().take(5000).collect(),
+                },
+            )
+            .with_tags(vec!["chat-summary".into(), cid.into()]),
+        );
     }
 
     // turn shards
     for (i, (role, text)) in turns.iter().enumerate() {
-        shards.push(Shard::new(
-            format!("{stem}/turn-{i}"),
-            Component::Code { language: role.clone(), source: text.chars().take(10000).collect() },
-        ).with_tags(vec!["chat-turn".into(), role.clone(), cid.into()]));
+        shards.push(
+            Shard::new(
+                format!("{stem}/turn-{i}"),
+                Component::Code {
+                    language: role.clone(),
+                    source: text.chars().take(10000).collect(),
+                },
+            )
+            .with_tags(vec!["chat-turn".into(), role.clone(), cid.into()]),
+        );
     }
 
     // write shards

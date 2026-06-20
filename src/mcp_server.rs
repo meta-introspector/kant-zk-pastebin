@@ -14,7 +14,7 @@ use std::sync::Mutex;
 #[derive(Deserialize)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
-    pub id: Value,                    // string | number | null
+    pub id: Value, // string | number | null
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
@@ -207,11 +207,15 @@ fn handle_tools_list() -> Result<Value, String> {
 }
 
 async fn handle_tools_call(params: &Option<Value>) -> Result<Value, String> {
-    let p = params.as_ref().ok_or_else(|| "Missing params".to_string())?;
-    let name = p.get("name")
+    let p = params
+        .as_ref()
+        .ok_or_else(|| "Missing params".to_string())?;
+    let name = p
+        .get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing tool name".to_string())?;
-    let args: HashMap<String, Value> = p.get("arguments")
+    let args: HashMap<String, Value> = p
+        .get("arguments")
         .and_then(|v| v.as_object())
         .cloned()
         .unwrap_or_default()
@@ -230,24 +234,33 @@ async fn handle_tools_call(params: &Option<Value>) -> Result<Value, String> {
 }
 
 async fn handle_mcp_search(args: HashMap<String, Value>) -> Result<Value, String> {
-    let query = args.get("query")
+    let query = args
+        .get("query")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing 'query' parameter".to_string())?;
-    let limit = args.get("limit")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(10) as usize;
-    let search_dirs = args.get("search_dirs")
+    let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(10) as usize;
+    let search_dirs = args
+        .get("search_dirs")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
     // Call our own HTTP API
     let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
-    let url = format!("{}/api/search?q={}&dirs={}&limit={}", base_url, query, if search_dirs { "1" } else { "0" }, limit);
+    let url = format!(
+        "{}/api/search?q={}&dirs={}&limit={}",
+        base_url,
+        query,
+        if search_dirs { "1" } else { "0" },
+        limit
+    );
 
     let client = reqwest::blocking::Client::new();
-    let resp = client.get(&url).send()
+    let resp = client
+        .get(&url)
+        .send()
         .map_err(|e| format!("Search request failed: {}", e))?;
-    let body: Value = resp.json()
+    let body: Value = resp
+        .json()
         .map_err(|e| format!("Search parse failed: {}", e))?;
 
     Ok(json!({
@@ -257,7 +270,8 @@ async fn handle_mcp_search(args: HashMap<String, Value>) -> Result<Value, String
 }
 
 async fn handle_mcp_create_paste(args: HashMap<String, Value>) -> Result<Value, String> {
-    let content = args.get("content")
+    let content = args
+        .get("content")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing 'content' parameter".to_string())?;
     let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("MCP");
@@ -272,11 +286,13 @@ async fn handle_mcp_create_paste(args: HashMap<String, Value>) -> Result<Value, 
         "content": content,
         "keywords": keywords
     });
-    let resp = client.post(&url)
+    let resp = client
+        .post(&url)
         .json(&payload)
         .send()
         .map_err(|e| format!("Create paste failed: {}", e))?;
-    let body: Value = resp.json()
+    let body: Value = resp
+        .json()
         .map_err(|e| format!("Parse response failed: {}", e))?;
 
     Ok(json!({
@@ -286,7 +302,8 @@ async fn handle_mcp_create_paste(args: HashMap<String, Value>) -> Result<Value, 
 }
 
 async fn handle_mcp_get_paste(args: HashMap<String, Value>) -> Result<Value, String> {
-    let paste_id = args.get("paste_id")
+    let paste_id = args
+        .get("paste_id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing 'paste_id' parameter".to_string())?;
 
@@ -322,10 +339,11 @@ async fn handle_mcp_browse(args: HashMap<String, Value>) -> Result<Value, String
     }
 
     let client = reqwest::blocking::Client::new();
-    let resp = client.get(&url).send()
+    let resp = client
+        .get(&url)
+        .send()
         .map_err(|e| format!("Browse request failed: {}", e))?;
-    let body: Value = resp.json()
-        .map_err(|e| format!("Parse failed: {}", e))?;
+    let body: Value = resp.json().map_err(|e| format!("Parse failed: {}", e))?;
 
     Ok(json!({
         "content": serde_json::to_string_pretty(&body).unwrap_or_default(),
@@ -334,7 +352,8 @@ async fn handle_mcp_browse(args: HashMap<String, Value>) -> Result<Value, String
 }
 
 fn handle_mcp_analyze_flake(args: HashMap<String, Value>) -> Result<Value, String> {
-    let path = args.get("path")
+    let path = args
+        .get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing 'path' parameter".to_string())?;
 
@@ -347,22 +366,26 @@ fn handle_mcp_analyze_flake(args: HashMap<String, Value>) -> Result<Value, Strin
 }
 
 fn handle_mcp_find_flakes(args: HashMap<String, Value>) -> Result<Value, String> {
-    let directory = args.get("directory")
+    let directory = args
+        .get("directory")
         .and_then(|v| v.as_str())
         .unwrap_or("~/dasl")
         .to_string();
-    let max_depth: usize = args.get("max_depth")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(4) as usize;
+    let max_depth: usize = args.get("max_depth").and_then(|v| v.as_i64()).unwrap_or(4) as usize;
 
-    let dir = directory.replace("~", &env::var("HOME").unwrap_or_else(|_| "/home/mdupont".to_string()));
+    let dir = directory.replace(
+        "~",
+        &env::var("HOME").unwrap_or_else(|_| "/home/mdupont".to_string()),
+    );
 
     // Find all flake.nix files up to max_depth
     let mut paths = Vec::new();
     let mut dirs_to_check = vec![(dir.clone(), 0)];
 
     while let Some((current_dir, depth)) = dirs_to_check.pop() {
-        if depth > max_depth { continue; }
+        if depth > max_depth {
+            continue;
+        }
         let entries = match std::fs::read_dir(&current_dir) {
             Ok(e) => e,
             Err(_) => continue,
@@ -391,21 +414,26 @@ fn handle_mcp_find_flakes(args: HashMap<String, Value>) -> Result<Value, String>
 }
 
 async fn handle_resources_read(params: &Option<Value>) -> Result<Value, String> {
-    let p = params.as_ref().ok_or_else(|| "Missing params".to_string())?;
-    let uri = p.get("uri")
+    let p = params
+        .as_ref()
+        .ok_or_else(|| "Missing params".to_string())?;
+    let uri = p
+        .get("uri")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing URI".to_string())?;
 
     match uri {
         "pastebin://recent" => {
-            let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
+            let base_url =
+                env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
             let url = format!("{}/api/search?limit=20&dirs=0&q=", base_url);
 
             let client = reqwest::blocking::Client::new();
-            let resp = client.get(&url).send()
+            let resp = client
+                .get(&url)
+                .send()
                 .map_err(|e| format!("Request failed: {}", e))?;
-            let body: Value = resp.json()
-                .map_err(|e| format!("Parse failed: {}", e))?;
+            let body: Value = resp.json().map_err(|e| format!("Parse failed: {}", e))?;
 
             Ok(json!({
                 "contents": [{

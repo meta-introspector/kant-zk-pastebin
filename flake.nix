@@ -13,11 +13,6 @@
       url = "path:/mnt/data1/time-2026/05-may/19/crane";
     };
 
-    pastebin-src = {
-      url = "git+file:///mnt/data1/git/github.com/meta-introspector/kant-zk-pastebin?ref=main-clean";
-      flake = false;
-    };
-
     nora-cargo = {
       url = "path:/mnt/data1/nora/storage/cargo";
       flake = false;
@@ -29,12 +24,12 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, common-inputs, crane, pastebin-src, nora-cargo, system-manager }:
+  outputs = { self, nixpkgs, flake-utils, common-inputs, crane, nora-cargo, system-manager }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         craneLib = crane.mkLib pkgs;
-        src = pastebin-src;
+        src = self;
 
         noraCargoPackage = p: pkgs.runCommand "cargo-package-${p.name}-${p.version}" {
           nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
@@ -46,7 +41,7 @@
         '';
 
         cargoVendorDir = craneLib.vendorCargoDeps {
-          src = pastebin-src;
+          src = self;
           overrideVendorCargoPackage = p: drv:
             if p.name == "erdfa-publish" || p.name == "rust-unixfs" then
               noraCargoPackage p
