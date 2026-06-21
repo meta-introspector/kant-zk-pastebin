@@ -277,6 +277,20 @@ print(all(n.endswith('.txt') for n in z.namelist()))
 PY
 ```
 
+## Operational Lessons Learned
+
+- Existing archive aggregate pastes may have generic `allm.txt` / `_allm_...` filenames and headers even when newer archive upload code can derive better metadata.
+- The allm rename tool should preview first and only apply after confirming the derived titles/descriptions:
+  ```bash
+  make rename-allm-pastes
+  make rename-allm-pastes-apply
+  ```
+- The allm tool preserves existing paste URLs by default. Use `--rename-files` only when physical filenames and paste IDs should change too.
+- The first allm index rewrite implementation dropped malformed/legacy `index.jsonl` lines. The fixed implementation stores raw index lines and only replaces matching parsed records.
+- Spool writes must be run as the user that owns `/mnt/data1/spool/uucp/pastebin`; do not use `sudo` for the tool itself.
+- Deploy through `./deploy.sh` from the current repo checkout and local branch. Do not deploy from `/home/mdupont/pastebin/target/release`.
+- `deploy.sh` may report unrelated legacy-service or nginx warnings. The important pastebin check is that `kant-pastebin.service` is active and `http://127.0.0.1:8090/` returns HTTP 200.
+
 ## Known Caveats
 
 - The original post view still renders the full content in a `<pre>`. If opening a ~10MB paste hangs, the next step is lazy-loading or capped preview rendering for the post view itself.

@@ -292,6 +292,15 @@ nix develop -c cargo run --bin kant-pastebin -- rename-allm-pastes --apply --ren
 
 `--rename-files` also rewrites the physical filename/id to include the archive title slug; leave it off to preserve existing paste URLs.
 
+## Operational Lessons Learned
+
+- Preview allm renames first with `make rename-allm-pastes`; apply only after the derived titles/descriptions look correct.
+- The tool preserves existing paste URLs by default. Use `--rename-files` only when IDs and filenames should change too.
+- Preserve malformed/legacy `index.jsonl` lines by storing raw index records and replacing only matching parsed entries.
+- Run the allm tool as the user that owns `/mnt/data1/spool/uucp/pastebin`; do not wrap the tool itself in `sudo`.
+- Deploy through `./deploy.sh` from the current repo checkout and local branch. Do not deploy from `/home/mdupont/pastebin/target/release`.
+- Treat unrelated legacy-service or nginx warnings from `deploy.sh` separately from the pastebin health check: `kant-pastebin.service` should be active and `http://127.0.0.1:8090/` should return HTTP 200.
+
 ## Deployment
 
 Use the flake and repo deploy script:

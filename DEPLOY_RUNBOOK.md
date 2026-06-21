@@ -114,3 +114,12 @@ nix build .#kant-pastebin --no-link --print-out-paths
 - **Symptoms**: Split page stalled or returned oversized responses; Share failed in browsers without `navigator.share`.
 - **Fix**: Added server-side `POST /api/split-paste`, made `split-download` and `split-upload` accept `paste_id`, limited split previews to metadata plus a small excerpt, and added `sharePost()` fallback URL copying.
 - **Prevention**: Post split page now keeps raw content server-side, exposes chunk-size and boundary dropdowns, and downloads a ZIP containing only `part_*.txt` files.
+
+### 2026-06-21: allm Aggregate Rename and Local Branch Deployment
+
+- **Cause**: Older archive aggregate pastes were generated with generic `allm.txt` / `_allm_...` names and headers, so their index entries lacked useful titles and descriptions.
+- **Symptoms**: 126 existing aggregate pastes were candidates for metadata cleanup; an initial rewrite also dropped malformed/legacy `index.jsonl` lines.
+- **Fix**: Added `kant-pastebin rename-allm-pastes`, which derives titles/descriptions from `Source archive:`, updates paste headers and index entries, and preserves malformed/legacy index lines by storing raw records.
+- **Deployment note**: Deploy from the repo checkout with `./deploy.sh` using the current local branch (`git+file://${PASTEBIN_DIR}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only`). Do not deploy from `/home/mdupont/pastebin/target/release`.
+- **Operational note**: The allm tool updates titles/descriptions by default and preserves URLs. Use `--rename-files` only when physical filenames and paste IDs should change too.
+- **Prevention**: Keep `make rename-allm-pastes` as preview and `make rename-allm-pastes-apply` as apply. Confirm index validity after any metadata migration.
