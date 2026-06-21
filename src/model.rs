@@ -7,6 +7,7 @@ pub struct Paste {
     pub content: Option<String>,
     pub cid: Option<String>,
     pub title: Option<String>,
+    pub description: Option<String>,
     pub keywords: Option<Vec<String>>,
     pub reply_to: Option<String>,
 }

@@ -160,6 +160,93 @@ Equivalent direct command:
 nix develop -c cargo run --bin kant-pastebin -- test-share-menu
 ```
 
+## Upload and Paste Metadata
+
+Normal paste, file upload, archive upload, and archive aggregate flows now carry title and description metadata through the stored paste header, `.meta` sidecar, `index.jsonl`, and JSON responses.
+
+### Home form
+
+The home form includes `title` and `description` fields. When no file is selected, `/paste` receives:
+
+- `content`
+- `title`
+- `description`
+- `keywords`
+- `reply_to`
+
+For JSON paste creation:
+
+1. Use the user-provided `title` when present.
+2. Otherwise use the HTML `<title>` if the content is HTML.
+3. Otherwise use `tagging::auto_describe(content)` when tags exist.
+4. Otherwise fall back to `untitled`.
+5. Use the user-provided `description` when present.
+6. Otherwise use `tagging::auto_describe(content)`.
+7. Store `Description:` in the paste header.
+8. Store `description` in the paste index entry.
+
+### File upload
+
+`POST /upload` accepts multipart fields:
+
+- `file`
+- `title`
+- `description`
+
+Behavior:
+
+1. Derive the title from `title` if present.
+2. Otherwise derive it from the uploaded filename with `archive_name_title()`.
+3. Derive the description from `description` if present.
+4. Otherwise derive it from text/HTML/JSON content with `file_description()`.
+5. Write `Title:` and `Description:` to the `filename.meta` sidecar.
+6. Write `description` to `index.jsonl`.
+7. Return `title` and `description` in the JSON response.
+
+### Archive upload
+
+`POST /upload-archive` accepts multipart fields:
+
+- `file`
+- `title`
+- `description`
+
+Behavior:
+
+1. Extract the archive with `crate::archive::extract()`.
+2. Derive the archive title from `title` if present, otherwise from the archive filename.
+3. Derive the archive description from `description` if present, otherwise from the filename, entry count, and byte size.
+4. Store the derived title and description on `ArchiveResult`.
+5. Write the raw archive file and `Title:` / `Description:` metadata to the spool.
+6. Write `description` to `index.jsonl`.
+7. Return `title` and `description` in the JSON response.
+
+### Archive aggregate generation
+
+`POST /archive-generate/{session_id}` now creates aggregate paste files named from the source archive/post title instead of generic `allm_...` names:
+
+```text
+YYYYMMDD_HHMMSS_all_<slug>.txt
+```
+
+The generated aggregate paste:
+
+1. Uses the archive result `title`.
+2. Uses the archive result `description`.
+3. Stores both values in the paste header.
+4. Stores `description` in the paste index entry.
+5. Returns `title` and `description` in the JSON response.
+
+### Archive file posting
+
+`POST /archive-post-file/{session_id}/{idx}` creates a paste from a single extracted archive entry. Its description is currently derived as:
+
+```text
+From archive: <archive title>
+```
+
+The generated paste stores that description in the header and index entry.
+
 ## Deployment
 
 Use the flake and repo deploy script:
@@ -169,13 +256,13 @@ nix build .#kant-pastebin --print-out-paths
 ./deploy.sh
 ```
 
-`deploy.sh` resolves its physical script directory and uses:
+`deploy.sh` resolves its physical script directory and uses local branch deployment by default:
 
 ```text
-$PASTEBIN_DIR#systemConfigs.kant-pastebin-only
+git+file://${PASTEBIN_DIR}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only
 ```
 
-by default. Do not deploy from `/home/mdupont/pastebin/target/release`.
+Do not deploy from `/home/mdupont/pastebin/target/release`.
 
 If nix-daemon is dead after an OOM build:
 
@@ -186,17 +273,21 @@ sudo -n systemctl start nix-daemon.service
 
 ## Verification Checklist
 
-Before finishing large-post split work:
+Before finishing large-post split, share, upload, and archive metadata work:
 
 1. Build with `nix build .#kant-pastebin --print-out-paths`.
-2. Deploy with `./deploy.sh`.
-3. Confirm `kant-pastebin.service` is active.
-4. Open a split page and confirm there is no full raw `<textarea>`.
-5. Confirm `/api/split-paste` returns `preview_chunks`, not `contents`.
-6. Confirm `/api/split-download` returns a ZIP containing only `part_*.txt`.
-7. Confirm `/api/split-upload` creates chunk pastes and an index paste.
-8. Confirm Share opens the destination menu and Native Share falls back to URL copying when unavailable.
-9. Confirm Claude, OpenAI / ChatGPT, Grok, X, NightCafe, DeepSeek Chat, GitHub, and Hugging Face menu items generate the expected URLs or copy prompt fallback.
+2. Run `make test-share-menu`.
+3. Deploy with `./deploy.sh`.
+4. Confirm `kant-pastebin.service` is active.
+5. Open a split page and confirm there is no full raw `<textarea>`.
+6. Confirm `/api/split-paste` returns `preview_chunks`, not `contents`.
+7. Confirm `/api/split-download` returns a ZIP containing only `part_*.txt`.
+8. Confirm `/api/split-upload` creates chunk pastes and an index paste.
+9. Confirm Share opens the destination menu and Native Share falls back to URL copying when unavailable.
+10. Confirm Claude, OpenAI / ChatGPT, Grok, X, NightCafe, DeepSeek Chat, GitHub, and Hugging Face menu items generate the expected URLs or copy prompt fallback.
+11. Confirm the home form includes `title` and `description` fields.
+12. Confirm `/paste`, `/upload`, `/upload-archive`, and `/archive-generate/{session_id}` store title and description in headers, metadata, index entries, and JSON responses.
+13. Confirm archive aggregate paste filenames use the source archive/post title slug instead of generic `allm_...` names.
 
 ## Known Caveats
 

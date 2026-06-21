@@ -16,6 +16,8 @@ pub struct ArchiveEntry {
 #[derive(serde::Serialize)]
 pub struct ArchiveResult {
     pub filename: String,
+    pub title: String,
+    pub description: String,
     pub entries: Vec<ArchiveEntry>,
     pub total_size: u64,
     pub entry_count: usize,
@@ -133,8 +135,21 @@ fn extract_single_compressed<D: Decoder>(
         None
     };
 
+    let title = filename
+        .trim_end_matches(".gz")
+        .trim_end_matches(".bz2")
+        .trim_end_matches(".xz")
+        .trim_end_matches(".tar")
+        .rsplit('/')
+        .next()
+        .unwrap_or(filename)
+        .trim_end_matches('.')
+        .to_string();
+
     Ok(ArchiveResult {
         filename: filename.to_string(),
+        title,
+        description: format!("Single compressed file extracted from {}", filename),
         entries: vec![ArchiveEntry {
             path: out_name,
             size: content.len() as u64,
@@ -221,8 +236,29 @@ fn extract_tar_from_reader<R: Read>(reader: R, filename: &str) -> Result<Archive
         });
     }
 
+    let title = filename
+        .rsplit('/')
+        .next()
+        .unwrap_or(filename)
+        .trim_end_matches(".tar.gz")
+        .trim_end_matches(".tgz")
+        .trim_end_matches(".tar.bz2")
+        .trim_end_matches(".tbz2")
+        .trim_end_matches(".tbz")
+        .trim_end_matches(".tar.xz")
+        .trim_end_matches(".txz")
+        .trim_end_matches(".tar")
+        .trim_end_matches('.')
+        .to_string();
+
     Ok(ArchiveResult {
         filename: filename.to_string(),
+        title,
+        description: format!(
+            "Archive extracted from {} with {} entries",
+            filename,
+            entries.len()
+        ),
         entry_count: entries.len(),
         total_size,
         entries,
@@ -280,8 +316,22 @@ fn extract_zip(data: &[u8], filename: &str) -> Result<ArchiveResult, String> {
         });
     }
 
+    let title = filename
+        .rsplit('/')
+        .next()
+        .unwrap_or(filename)
+        .trim_end_matches(".zip")
+        .trim_end_matches('.')
+        .to_string();
+
     Ok(ArchiveResult {
         filename: filename.to_string(),
+        title,
+        description: format!(
+            "Zip archive extracted from {} with {} entries",
+            filename,
+            entries.len()
+        ),
         entry_count: entries.len(),
         total_size,
         entries,

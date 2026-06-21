@@ -54,6 +54,53 @@ fn write_index_entry(
         .ok();
 }
 
+fn clean_field(value: &str) -> String {
+    value.trim().to_string()
+}
+
+fn archive_name_title(name: &str) -> String {
+    Path::new(name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name)
+        .trim_end_matches(".tar.gz")
+        .trim_end_matches(".tgz")
+        .trim_end_matches(".tar.bz2")
+        .trim_end_matches(".tbz2")
+        .trim_end_matches(".tbz")
+        .trim_end_matches(".tar.xz")
+        .trim_end_matches(".txz")
+        .trim_end_matches(".tar")
+        .trim_end_matches(".zip")
+        .trim_end_matches(".gz")
+        .trim_end_matches(".bz2")
+        .trim_end_matches(".xz")
+        .trim_end_matches('.')
+        .to_string()
+}
+
+fn archive_name_description(title: &str, name: &str, entries: usize, bytes: usize) -> String {
+    if title.is_empty() {
+        format!("Uploaded archive {} with {} entries and {} bytes", name, entries, bytes)
+    } else {
+        format!("{}: {} entries, {} bytes", title, entries, bytes)
+    }
+}
+
+fn file_description(name: &str, mime: &str, size: usize, data: &[u8]) -> String {
+    if mime.starts_with("text/") || name.to_lowercase().ends_with(".html") || name.to_lowercase().ends_with(".json") {
+        let text = String::from_utf8_lossy(data);
+        tagging::extract_html_title(&text)
+            .or_else(|| {
+                let desc = tagging::auto_describe(&text);
+                if desc.is_empty() { None } else { Some(desc) }
+            })
+            .unwrap_or_else(|| format!("Uploaded file: {} ({} bytes)", name, size))
+    } else {
+        format!("Uploaded file: {} ({} bytes, {})", name, size, mime)
+    }
+}
+
 /// GET / - Home page
 pub async fn index(
     query: web::Query<std::collections::HashMap<String, String>>,
@@ -86,6 +133,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <p>UUCP + zkTLS + IPFS</p>
 <form id="form">
 <input type="text" id="title" placeholder="Title" value=""><br><br>
+<input type="text" id="description" placeholder="Description" value=""><br><br>
 <textarea id="content" placeholder="Paste content here..."></textarea><br><br>
 <input type="file" id="file" accept="image/*,.html,.json,.svg,.tar.gz,.tar.bz2,.tar.xz,.zip,.gz,.bz2,.xz"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
@@ -133,13 +181,15 @@ form.onsubmit = async (e) => {{
       const fd = new FormData();
       const fn = fileInput.files[0].name;
       fd.append('file', fileInput.files[0]);
-      fd.append('title', document.getElementById('title').value || fn);
+      fd.append('title', document.getElementById('title').value || '');
+      fd.append('description', document.getElementById('description').value || '');
       const isArchive = fn.endsWith('.tar.gz') || fn.endsWith('.tar.bz2') || fn.endsWith('.tar.xz') || fn.endsWith('.zip') || fn.endsWith('.gz') || fn.endsWith('.bz2') || fn.endsWith('.xz');
       res = await fetch(basePath + (isArchive ? '/upload-archive' : '/upload'), {{ method: 'POST', body: fd }});
     }} else {{
       const data = {{
         content: content.value,
         title: document.getElementById('title').value || undefined,
+        description: document.getElementById('description').value || undefined,
         keywords: document.getElementById('keywords').value.split(',').map(s=>s.trim()).filter(s=>s),
         reply_to: document.getElementById('reply_to').value || undefined
       }};
@@ -208,16 +258,21 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     let auto_tags = tagging::auto_tag(content);
     let html_title = tagging::extract_html_title(content);
     let auto_desc = tagging::auto_describe(content);
-    let title_owned = paste.title.clone().unwrap_or_else(|| {
+    let title_owned = paste.title.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
         html_title.unwrap_or_else(|| {
             if !auto_tags.is_empty() {
-                auto_desc
+                auto_desc.clone()
             } else {
                 "untitled".to_string()
             }
         })
     });
     let title = title_owned.as_str();
+    let description = paste
+        .description
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| auto_desc.clone());
     let keywords = paste.keywords.clone().unwrap_or_else(|| auto_tags);
 
     let mut hasher = Sha256::new();
@@ -264,8 +319,8 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
 
     let reply_to_str = paste.reply_to.as_deref().unwrap_or("");
     let section = erdfa_publish::sheaf::Section::new(content.as_bytes(), erdfa_publish::sheaf::Encoding::Raw);
-    let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: {}\n{}\n\n{}\n\n{}\n",
-        id, title, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), dasl_cid, reply_to_str,
+    let paste_content = format!("--- {} ---\nTitle: {}\nDescription: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: {}\n{}\n\n{}\n\n{}\n",
+        id, title, description, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), dasl_cid, reply_to_str,
         erdfa_publish::sheaf::sheaf_header(&section),
         content, section.to_rdfa());
     fs::write(&uucp, paste_content).ok();
@@ -280,7 +335,7 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
         } else {
             title.to_string()
         },
-        description: Some(tagging::auto_describe(content)),
+        description: Some(description),
         keywords,
         cid: local_cid.clone(),
         witness: witness.clone(),
@@ -325,6 +380,7 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     let mut file_data: Vec<u8> = Vec::new();
     let mut orig_name = String::new();
     let mut title = String::new();
+    let mut description = String::new();
 
     while let Some(item) = payload.next().await {
         let mut field = item.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
@@ -343,7 +399,10 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
                 file_data = buf;
             }
             "title" => {
-                title = String::from_utf8_lossy(&buf).to_string();
+                title = clean_field(&String::from_utf8_lossy(&buf));
+            }
+            "description" => {
+                description = clean_field(&String::from_utf8_lossy(&buf));
             }
             _ => {}
         }
@@ -356,8 +415,13 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     let ext = orig_name.rsplit('.').next().unwrap_or("bin");
     let mime = mime_guess::from_ext(ext).first_or_octet_stream();
     if title.is_empty() {
-        title = orig_name.clone();
+        title = archive_name_title(&orig_name);
     }
+    let description = if description.is_empty() {
+        file_description(&orig_name, &mime.to_string(), file_data.len(), &file_data)
+    } else {
+        description
+    };
     let slug = tagging::slugify(&title);
 
     let mut hasher = Sha256::new();
@@ -379,9 +443,10 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
 
     // Write metadata sidecar
     let meta = format!(
-        "--- {} ---\nTitle: {}\nMime: {}\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\n",
+        "--- {} ---\nTitle: {}\nDescription: {}\nMime: {}\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\n",
         id,
         title,
+        description,
         mime,
         local_cid,
         witness,
@@ -394,9 +459,26 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
     fs::write(&cid_file, &id).ok();
 
+    write_index_entry(
+        &uucp_dir,
+        &id,
+        &title,
+        Some(&description),
+        vec!["upload".to_string(), ext.to_string()],
+        &local_cid,
+        &witness,
+        &filename,
+        file_data.len(),
+        ipfs_cid.clone(),
+        None,
+        None,
+    );
+
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "id": id,
         "filename": filename,
+        "title": title,
+        "description": description,
         "cid": local_cid,
         "ipfs_cid": ipfs_cid,
         "witness": witness,
@@ -2112,7 +2194,8 @@ pub async fn api_search_results_bundle(body: web::Json<serde_json::Value>) -> Re
     }
 
     let paste = Paste {
-        title: Some(title),
+        title: Some(title.clone()),
+        description: Some(format!("Search results bundle from {} entries", title)),
         content: Some(bundle),
         keywords: Some(vec!["search".to_string(), "bundle".to_string(), "results".to_string()]),
         cid: None,
@@ -2720,6 +2803,7 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     let mut file_data: Vec<u8> = Vec::new();
     let mut orig_name = String::new();
     let mut title = String::new();
+    let mut description = String::new();
 
     while let Some(item) = payload.next().await {
         let mut field = item.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
@@ -2738,7 +2822,10 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
                 file_data = buf;
             }
             "title" => {
-                title = String::from_utf8_lossy(&buf).to_string();
+                title = clean_field(&String::from_utf8_lossy(&buf));
+            }
+            "description" => {
+                description = clean_field(&String::from_utf8_lossy(&buf));
             }
             _ => {}
         }
@@ -2749,10 +2836,18 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     }
 
     // Extract the archive
-    let result = match crate::archive::extract(&file_data, &orig_name) {
+    let mut result = match crate::archive::extract(&file_data, &orig_name) {
         Ok(r) => r,
         Err(e) => return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": e}))),
     };
+    if title.is_empty() {
+        title = result.title.clone();
+    }
+    if description.is_empty() {
+        description = archive_name_description(&title, &orig_name, result.entry_count, file_data.len());
+    }
+    result.title = title.clone();
+    result.description = description.clone();
 
     // Generate a session ID
     let mut hasher = Sha256::new();
@@ -2788,8 +2883,8 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     // Write the raw archive file to spool
     fs::write(&uucp, &file_data).ok();
     // Write metadata sidecar
-    let meta = format!("--- {} ---\nTitle: {}\nMime: application/octet-stream\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\nEntries: {}\n",
-        steam_id, orig_name, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), file_data.len(), entry_count);
+    let meta = format!("--- {} ---\nTitle: {}\nDescription: {}\nMime: application/octet-stream\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\nEntries: {}\n",
+        steam_id, title, description, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), file_data.len(), entry_count);
     fs::write(format!("{}.meta", uucp), &meta).ok();
     // CID dedup file
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
@@ -2798,12 +2893,8 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     write_index_entry(
         &uucp_dir,
         &steam_id,
-        &format!("Archive: {}", orig_name),
-        Some(&format!(
-            "{} entries · {} bytes",
-            entry_count,
-            file_data.len()
-        )),
+        &title,
+        Some(&description),
         vec!["archive".to_string(), ext.to_string()],
         &local_cid,
         &witness,
@@ -2817,6 +2908,8 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "session_id": session_id,
         "filename": orig_name,
+        "title": title,
+        "description": description,
         "entry_count": entry_count,
         "id": steam_id,
         "cid": local_cid,
@@ -3060,9 +3153,20 @@ pub async fn archive_generate(
         }
     };
 
+    let post_title = if result.title.trim().is_empty() {
+        archive_name_title(&result.filename)
+    } else {
+        result.title.clone()
+    };
+    let post_description = if result.description.trim().is_empty() {
+        archive_name_description(&post_title, &result.filename, result.entry_count, result.total_size as usize)
+    } else {
+        result.description.clone()
+    };
+
     // Build a table of contents
     let mut allm = String::new();
-    allm.push_str("=== ALLM.TXT ===\n");
+    allm.push_str(&format!("=== {}.TXT ===\n", post_title.to_uppercase()));
     allm.push_str(&format!("Source archive: {}\n", result.filename));
     allm.push_str(&format!(
         "Generated: {}\n",
@@ -3092,9 +3196,13 @@ pub async fn archive_generate(
     // Save as a paste
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let slug_title = format!("allm_{}", ts);
-    let filename = format!("{}_{}.txt", ts, slug_title);
-    let id = format!("{}_{}", ts, slug_title);
+    let slug_title = if post_title.trim().is_empty() {
+        "all".to_string()
+    } else {
+        tagging::slugify(&post_title)
+    };
+    let filename = format!("{}_all_{}.txt", ts, slug_title);
+    let id = filename.trim_end_matches(".txt").to_string();
     let uucp = format!("{}/{}", uucp_dir, filename);
 
     // Generate hash and CID
@@ -3105,8 +3213,8 @@ pub async fn archive_generate(
     let witness = hex::encode(&hash);
     let ipfs_cid = ipfs::ipfs_add(&allm);
 
-    let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: allm, archive, {}\nCID: {}\nWitness: {}\nIPFS: {}\n\n{}\n",
-        id, "allm.txt", result.filename, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), allm);
+    let paste_content = format!("--- {} ---\nTitle: {}\nDescription: {}\nKeywords: allm, archive, {}\nCID: {}\nWitness: {}\nIPFS: {}\n\n{}\n",
+        id, post_title, post_description, result.filename, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), allm);
 
     fs::write(&uucp, &paste_content).ok();
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
@@ -3115,12 +3223,8 @@ pub async fn archive_generate(
     write_index_entry(
         &uucp_dir,
         &id,
-        "allm.txt",
-        Some(&format!(
-            "Concatenated {} files from {}",
-            files.len(),
-            result.filename
-        )),
+        &post_title,
+        Some(&post_description),
         vec!["allm".to_string(), "archive".to_string()],
         &local_cid,
         &witness,
@@ -3133,6 +3237,8 @@ pub async fn archive_generate(
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "id": id,
+        "title": post_title,
+        "description": post_description,
         "cid": local_cid,
         "witness": witness,
         "url": format!("/paste/{}", id),
@@ -3308,8 +3414,9 @@ pub async fn archive_post_file(path: web::Path<(String, usize)>) -> Result<HttpR
     let witness = hex::encode(&hash);
     let ipfs_cid = ipfs::ipfs_add(content);
 
-    let paste_content = format!("--- {} ---\nTitle: {}\nKeywords: archive, {}\nCID: {}\nWitness: {}\nIPFS: {}\n\n--- From archive: {} ---\n\n{}\n",
-        id, entry.path, result.filename, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), result.filename, content);
+    let post_description = format!("From archive: {}", result.title);
+    let paste_content = format!("--- {} ---\nTitle: {}\nDescription: {}\nKeywords: archive, {}\nCID: {}\nWitness: {}\nIPFS: {}\n\n--- From archive: {} ---\n\n{}\n",
+        id, entry.path, post_description, result.title, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), result.filename, content);
 
     fs::write(&uucp, &paste_content).ok();
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
@@ -3320,7 +3427,7 @@ pub async fn archive_post_file(path: web::Path<(String, usize)>) -> Result<HttpR
         &uucp_dir,
         &id,
         &entry.path,
-        Some(&format!("From archive: {}", result.filename)),
+        Some(&post_description),
         vec!["archive".to_string(), "paste".to_string()],
         &local_cid,
         &witness,
