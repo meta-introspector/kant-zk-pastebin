@@ -247,6 +247,51 @@ From archive: <archive title>
 
 The generated paste stores that description in the header and index entry.
 
+## allm Rename Tool
+
+Existing archive aggregate pastes generated as generic `allm.txt` / `_allm_...` files can be renamed in-place with the CLI tool:
+
+```bash
+make rename-allm-pastes
+```
+
+Equivalent direct command:
+
+```bash
+nix develop -c cargo run --bin kant-pastebin -- rename-allm-pastes
+```
+
+Behavior:
+
+1. Scan `index.jsonl` for entries whose title or filename indicates an `allm` aggregate.
+2. Read each paste header and body.
+3. Derive a nicer title from the `Source archive:` line.
+4. Derive a description from the selected file count, archive title, and paste size.
+5. Update `Title:` and `Description:` in the paste file header.
+6. Update `title`, `description`, `cid`, and `witness` in the matching index entry.
+7. Preserve malformed or legacy index lines unchanged.
+
+Preview only:
+
+```bash
+make rename-allm-pastes
+```
+
+Apply changes:
+
+```bash
+make rename-allm-pastes-apply
+```
+
+Optional flags:
+
+```bash
+nix develop -c cargo run --bin kant-pastebin -- rename-allm-pastes --apply --limit 20
+nix develop -c cargo run --bin kant-pastebin -- rename-allm-pastes --apply --rename-files
+```
+
+`--rename-files` also rewrites the physical filename/id to include the archive title slug; leave it off to preserve existing paste URLs.
+
 ## Deployment
 
 Use the flake and repo deploy script:
@@ -273,7 +318,7 @@ sudo -n systemctl start nix-daemon.service
 
 ## Verification Checklist
 
-Before finishing large-post split, share, upload, and archive metadata work:
+Before finishing large-post split, share, upload, archive metadata, and allm rename work:
 
 1. Build with `nix build .#kant-pastebin --print-out-paths`.
 2. Run `make test-share-menu`.
@@ -288,6 +333,8 @@ Before finishing large-post split, share, upload, and archive metadata work:
 11. Confirm the home form includes `title` and `description` fields.
 12. Confirm `/paste`, `/upload`, `/upload-archive`, and `/archive-generate/{session_id}` store title and description in headers, metadata, index entries, and JSON responses.
 13. Confirm archive aggregate paste filenames use the source archive/post title slug instead of generic `allm_...` names.
+14. Run `make rename-allm-pastes` and confirm it previews derived titles/descriptions from `Source archive:`.
+15. Run `make rename-allm-pastes-apply` only after confirming the preview, then confirm `index.jsonl` and paste headers contain the new title/description values.
 
 ## Known Caveats
 

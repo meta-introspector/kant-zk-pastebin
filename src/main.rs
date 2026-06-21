@@ -13,6 +13,7 @@ mod ipfs;
 mod model;
 mod plugin;
 mod plugins;
+mod rename;
 mod share;
 mod sheaf;
 mod storage;
@@ -44,6 +45,7 @@ enum Commands {
     SplitUrl(SplitUrlArgs),
     Profiles,
     TestShareMenu,
+    RenameAllmPastes(RenameAllmPastesArgs),
 }
 
 #[derive(Parser)]
@@ -69,6 +71,20 @@ struct SplitUrlArgs {
     url: String,
     #[arg(short, long)]
     profile: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Parser)]
+struct RenameAllmPastesArgs {
+    #[arg(long)]
+    uucp_dir: Option<String>,
+    #[arg(long)]
+    apply: bool,
+    #[arg(long)]
+    rename_files: bool,
+    #[arg(long)]
+    limit: Option<usize>,
     #[arg(long)]
     json: bool,
 }
@@ -114,6 +130,10 @@ async fn run_cli(cli: Cli) -> Result<bool, String> {
         Some(Commands::TestShareMenu) => {
             share::run_share_menu_test()?;
             println!("share menu test passed");
+            Ok(true)
+        }
+        Some(Commands::RenameAllmPastes(args)) => {
+            run_rename_allm_pastes_cli(args)?;
             Ok(true)
         }
         None => Ok(false),
@@ -189,6 +209,53 @@ fn print_mem(label: &str) {
     if let Some(rss_kb) = rss_kb {
         eprintln!("mem {}: {} KB", label, rss_kb);
     }
+}
+
+fn run_rename_allm_pastes_cli(args: RenameAllmPastesArgs) -> Result<(), String> {
+    let options = rename::RenameOptions {
+        uucp_dir: args.uucp_dir.unwrap_or_else(rename::default_uucp_dir),
+        apply: args.apply,
+        rename_files: args.rename_files,
+        limit: args.limit,
+    };
+    let report = rename::rename_allm_pastes(&options)?;
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+
+    println!(
+        "allm rename: total={} renamed={} skipped={} errors={}",
+        report.total,
+        report.renamed,
+        report.skipped,
+        report.errors.len()
+    );
+    if !report.errors.is_empty() {
+        for error in report.errors.iter().take(20) {
+            eprintln!("error {} {}: {}", error.id, error.filename, error.error);
+        }
+    }
+    for item in report.items.iter().take(20) {
+        println!(
+            "{}: {} -> {} | {} | {} files | {}",
+            if item.applied { "applied" } else { "planned" },
+            item.old_title,
+            item.title,
+            item.old_filename,
+            item.selected_files,
+            item.description
+        );
+    }
+    if report.items.len() > 20 {
+        println!("... {} more", report.items.len() - 20);
+    }
+
+    Ok(())
 }
 
 async fn run_split_url_cli(args: SplitUrlArgs) -> Result<(), String> {
@@ -473,7 +540,10 @@ async fn main() -> std::io::Result<()> {
             .route("/splitter", web::get().to(handlers::splitter_page))
             .route("/splitter/", web::get().to(handlers::splitter_page))
             .route("/api/split", web::post().to(handlers::api_split))
-            .route("/api/split-paste", web::post().to(handlers::api_split_paste))
+            .route(
+                "/api/split-paste",
+                web::post().to(handlers::api_split_paste),
+            )
             .route(
                 "/api/split-download",
                 web::post().to(handlers::api_split_download),
@@ -496,8 +566,14 @@ async fn main() -> std::io::Result<()> {
             )
             .route("/api/search", web::get().to(handlers::api_search))
             .route("/search", web::get().to(handlers::search_page))
-            .route("/api/search-results-bundle", web::post().to(handlers::api_search_results_bundle))
-            .route("/api/search-results-chunks", web::post().to(handlers::api_search_results_chunks))
+            .route(
+                "/api/search-results-bundle",
+                web::post().to(handlers::api_search_results_bundle),
+            )
+            .route(
+                "/api/search-results-chunks",
+                web::post().to(handlers::api_search_results_chunks),
+            )
             .route("/api/search-doc", web::get().to(handlers::search_doc))
             .route("/api/similar/{id}", web::get().to(handlers::api_similar))
             .route("/api/bundle", web::post().to(handlers::api_bundle))

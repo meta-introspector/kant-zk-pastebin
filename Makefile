@@ -1,4 +1,4 @@
-.PHONY: build deploy run test-share-menu clean help tiles
+.PHONY: build deploy run test-share-menu rename-allm-pastes rename-allm-pastes-apply clean help tiles
 
 help:
 	@echo "Kant Pastebin"
@@ -6,6 +6,8 @@ help:
 	@echo "  make build       — Build (nix build)"
 	@echo "  make run         — Run with cargo"
 	@echo "  make test-share-menu — Run offline share menu test"
+	@echo "  make rename-allm-pastes — Preview allm.txt metadata renames"
+	@echo "  make rename-allm-pastes-apply — Apply allm.txt metadata renames"
 	@echo "  make deploy      — Deploy with systemd"
 	@echo "  make tiles       — Copy DAG-CBOR tiles from dasl-testing"
 	@echo "  make clean       — Clean build artifacts"
@@ -21,6 +23,12 @@ run:
 
 test-share-menu:
 	nix develop -c cargo run --bin kant-pastebin -- test-share-menu
+
+rename-allm-pastes:
+	nix develop -c cargo run --bin kant-pastebin -- rename-allm-pastes
+
+rename-allm-pastes-apply:
+	nix develop -c cargo run --bin kant-pastebin -- rename-allm-pastes --apply
 
 deploy: build
 	bash deploy.sh

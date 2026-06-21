@@ -81,19 +81,29 @@ fn archive_name_title(name: &str) -> String {
 
 fn archive_name_description(title: &str, name: &str, entries: usize, bytes: usize) -> String {
     if title.is_empty() {
-        format!("Uploaded archive {} with {} entries and {} bytes", name, entries, bytes)
+        format!(
+            "Uploaded archive {} with {} entries and {} bytes",
+            name, entries, bytes
+        )
     } else {
         format!("{}: {} entries, {} bytes", title, entries, bytes)
     }
 }
 
 fn file_description(name: &str, mime: &str, size: usize, data: &[u8]) -> String {
-    if mime.starts_with("text/") || name.to_lowercase().ends_with(".html") || name.to_lowercase().ends_with(".json") {
+    if mime.starts_with("text/")
+        || name.to_lowercase().ends_with(".html")
+        || name.to_lowercase().ends_with(".json")
+    {
         let text = String::from_utf8_lossy(data);
         tagging::extract_html_title(&text)
             .or_else(|| {
                 let desc = tagging::auto_describe(&text);
-                if desc.is_empty() { None } else { Some(desc) }
+                if desc.is_empty() {
+                    None
+                } else {
+                    Some(desc)
+                }
             })
             .unwrap_or_else(|| format!("Uploaded file: {} ({} bytes)", name, size))
     } else {
@@ -258,15 +268,19 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     let auto_tags = tagging::auto_tag(content);
     let html_title = tagging::extract_html_title(content);
     let auto_desc = tagging::auto_describe(content);
-    let title_owned = paste.title.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
-        html_title.unwrap_or_else(|| {
-            if !auto_tags.is_empty() {
-                auto_desc.clone()
-            } else {
-                "untitled".to_string()
-            }
-        })
-    });
+    let title_owned = paste
+        .title
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            html_title.unwrap_or_else(|| {
+                if !auto_tags.is_empty() {
+                    auto_desc.clone()
+                } else {
+                    "untitled".to_string()
+                }
+            })
+        });
     let title = title_owned.as_str();
     let description = paste
         .description
@@ -318,7 +332,8 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     let dasl_cid = crate::dasl::dasl_cid(content.as_bytes());
 
     let reply_to_str = paste.reply_to.as_deref().unwrap_or("");
-    let section = erdfa_publish::sheaf::Section::new(content.as_bytes(), erdfa_publish::sheaf::Encoding::Raw);
+    let section =
+        erdfa_publish::sheaf::Section::new(content.as_bytes(), erdfa_publish::sheaf::Encoding::Raw);
     let paste_content = format!("--- {} ---\nTitle: {}\nDescription: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: {}\n{}\n\n{}\n\n{}\n",
         id, title, description, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), dasl_cid, reply_to_str,
         erdfa_publish::sheaf::sheaf_header(&section),
@@ -1190,14 +1205,22 @@ pub async fn browse(
 
     let items = match paste_search_results(&req, 200, true)? {
         Some((_search_q, _mode, _scope, _limit, results)) => {
-            let items: String = results.iter().map(|r| render_search_result_entry(r, &base_path)).collect();
+            let items: String = results
+                .iter()
+                .map(|r| render_search_result_entry(r, &base_path))
+                .collect();
             render_browse_page(&base_path, &_search_q, &items, "Full-text search", true)
         }
         None => {
-            let uucp_dir =
-                env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+            let uucp_dir = env::var("UUCP_SPOOL")
+                .unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
             let entries = read_index_entries(&uucp_dir);
-            let items: String = entries.iter().rev().take(50).map(|e| render_paste_entry(e, &base_path)).collect();
+            let items: String = entries
+                .iter()
+                .rev()
+                .take(50)
+                .map(|e| render_paste_entry(e, &base_path))
+                .collect();
             render_browse_page(&base_path, "", &items, "", false)
         }
     };
@@ -1253,10 +1276,7 @@ fn render_search_result_entry(r: &SearchResult, base_path: &str) -> String {
     let excerpt = if r.excerpt.is_empty() {
         String::new()
     } else {
-        format!(
-            r#"<div class="excerpt">{}</div>"#,
-            html_escape(&r.excerpt)
-        )
+        format!(r#"<div class="excerpt">{}</div>"#, html_escape(&r.excerpt))
     };
     format!(
         r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a> <span style="color:#666">{} · {} · {}</span>{}</div>"#,
@@ -1270,7 +1290,13 @@ fn render_search_result_entry(r: &SearchResult, base_path: &str) -> String {
     )
 }
 
-fn render_browse_page(base_path: &str, q: &str, items: &str, note: &str, export_visible: bool) -> String {
+fn render_browse_page(
+    base_path: &str,
+    q: &str,
+    items: &str,
+    note: &str,
+    export_visible: bool,
+) -> String {
     let search_box = format!(
         r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#,
         html_escape(q)
@@ -1346,14 +1372,27 @@ if (exportBtn) exportBtn.onclick = exportVisible;
 if (exportChunkedBtn) exportChunkedBtn.onclick = exportChunkedVisible;
 </script>
 </body></html>"#,
-        base_path, search_box, note, export_button, items, base_path, title, base_path, base_path, base_path, base_path, base_path, base_path
+        base_path,
+        search_box,
+        note,
+        export_button,
+        items,
+        base_path,
+        title,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path
     )
 }
 
 /// Helper: extract raw paste content from a stored paste file
 /// The stored format wraps content with metadata headers and sheaf RDFa.
 fn read_paste_content_by_id(paste_id: &str) -> Option<String> {
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     read_index_entries(&uucp_dir)
         .into_iter()
         .find(|e| e.id == paste_id)
@@ -1381,7 +1420,10 @@ fn resolve_split_content(body: &serde_json::Value) -> std::result::Result<String
         .and_then(|v| v.as_str())
         .map(str::to_string)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| HttpResponse::BadRequest().json(serde_json::json!({"error": "missing content or paste_id"})))
+        .ok_or_else(|| {
+            HttpResponse::BadRequest()
+                .json(serde_json::json!({"error": "missing content or paste_id"}))
+        })
 }
 
 fn read_paste_content(uucp_path: &str) -> Option<String> {
@@ -1410,7 +1452,11 @@ fn read_paste_content(uucp_path: &str) -> Option<String> {
                 content_start += 1;
             }
             if let Some(rdfa_start) = raw[content_start..].find("<div") {
-                return Some(raw[content_start..content_start + rdfa_start].trim().to_string());
+                return Some(
+                    raw[content_start..content_start + rdfa_start]
+                        .trim()
+                        .to_string(),
+                );
             }
             return Some(raw[content_start..].trim().to_string());
         }
@@ -1418,7 +1464,11 @@ fn read_paste_content(uucp_path: &str) -> Option<String> {
         if let Some(body_start2) = raw[body_start + 2..].find("\n\n") {
             let content_start = body_start + 2 + body_start2 + 2;
             if let Some(rdfa_start) = raw[content_start..].find("<div") {
-                return Some(raw[content_start..content_start + rdfa_start].trim().to_string());
+                return Some(
+                    raw[content_start..content_start + rdfa_start]
+                        .trim()
+                        .to_string(),
+                );
             }
             return Some(raw[content_start..].trim().to_string());
         }
@@ -1490,7 +1540,11 @@ struct SearchResult {
 /// Parse query string manually from the raw URI (handles `(`, `)`, etc.)
 /// Parse query string manually from the raw URI (handles `(`, `)`, etc.)
 fn parse_query_param(uri: &str, key: &str) -> Option<String> {
-    let uri = if let Some(idx) = uri.find('?') { &uri[idx + 1..] } else { uri };
+    let uri = if let Some(idx) = uri.find('?') {
+        &uri[idx + 1..]
+    } else {
+        uri
+    };
     for pair in uri.split('&') {
         let mut parts = pair.splitn(2, '=');
         let k = parts.next().unwrap_or("").trim();
@@ -1553,8 +1607,16 @@ fn best_excerpt(content: &str, terms: &[String], context: usize) -> String {
     if let Some(start) = best_start {
         let char_start = content[..start].chars().count().saturating_sub(context);
         let char_end = char_start + content[start..start + best_len].chars().count() + context;
-        let byte_start = content.char_indices().nth(char_start).map(|(i, _)| i).unwrap_or(0);
-        let byte_end = content.char_indices().nth(char_end).map(|(i, _)| i).unwrap_or(content.len());
+        let byte_start = content
+            .char_indices()
+            .nth(char_start)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        let byte_end = content
+            .char_indices()
+            .nth(char_end)
+            .map(|(i, _)| i)
+            .unwrap_or(content.len());
         let prefix = if char_start > 0 { "…" } else { "" };
         let suffix = if byte_end < content.len() { "…" } else { "" };
         format!("{}{}{}", prefix, &content[byte_start..byte_end], suffix)
@@ -1569,11 +1631,12 @@ fn best_excerpt(content: &str, terms: &[String], context: usize) -> String {
 /// Optional: &scope=all|metadata|content
 /// Optional: &limit=N to control result count (default: 50)
 pub async fn api_search(req: HttpRequest) -> Result<HttpResponse> {
-    let Some((search_q, mode, scope, limit, results)) = paste_search_results(&req, 50, true)? else {
+    let Some((search_q, mode, scope, limit, results)) = paste_search_results(&req, 50, true)?
+    else {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Missing query parameter: q",
             "usage": "curl 'http://localhost:8090/api/search?q=<query>'"
-        })))
+        })));
     };
     let terms = search_terms(&search_q);
 
@@ -1596,7 +1659,8 @@ fn paste_search_results(
     let uucp_dir =
         env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let uri = req.uri().to_string();
-    let Some((raw_query, mode, scope, limit)) = parse_search_query(&uri, default_limit, require_q) else {
+    let Some((raw_query, mode, scope, limit)) = parse_search_query(&uri, default_limit, require_q)
+    else {
         return Ok(None);
     };
     let search_q = raw_query.to_lowercase();
@@ -2145,7 +2209,11 @@ pub async fn api_search_results_bundle(body: web::Json<serde_json::Value>) -> Re
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|v| v.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+                .filter_map(|v| {
+                    v.get("id")
+                        .and_then(|id| id.as_str())
+                        .map(|s| s.to_string())
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -2153,7 +2221,7 @@ pub async fn api_search_results_bundle(body: web::Json<serde_json::Value>) -> Re
     if ids.is_empty() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Missing or empty 'results' array"
-        })))
+        })));
     }
 
     let uucp_dir =
@@ -2172,14 +2240,20 @@ pub async fn api_search_results_bundle(body: web::Json<serde_json::Value>) -> Re
         .to_string();
 
     let mut bundle = String::new();
-    bundle.push_str(&format!("=== Search Results Bundle ===\nTitle: {}\nCreated: {}\nTotal results: {}\n\n", title, Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), ids.len()));
+    bundle.push_str(&format!(
+        "=== Search Results Bundle ===\nTitle: {}\nCreated: {}\nTotal results: {}\n\n",
+        title,
+        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        ids.len()
+    ));
 
     for (idx, pid) in ids.iter().enumerate() {
         let entry = entries.iter().find(|e| e.id == *pid);
         let uucp_path = entry
             .map(|e| e.uucp_path.clone())
             .unwrap_or_else(|| format!("{}/{}.txt", uucp_dir, pid));
-        let content = read_paste_content(&uucp_path).unwrap_or_else(|| "[content unavailable]".to_string());
+        let content =
+            read_paste_content(&uucp_path).unwrap_or_else(|| "[content unavailable]".to_string());
         bundle.push_str(&format!(
             "\n\n===== Result {}/{} =====\nID: {}\nTitle: {}\nTimestamp: {}\nKeywords: {}\nURL: /paste/{}\n\n{}\n",
             idx + 1,
@@ -2197,7 +2271,11 @@ pub async fn api_search_results_bundle(body: web::Json<serde_json::Value>) -> Re
         title: Some(title.clone()),
         description: Some(format!("Search results bundle from {} entries", title)),
         content: Some(bundle),
-        keywords: Some(vec!["search".to_string(), "bundle".to_string(), "results".to_string()]),
+        keywords: Some(vec![
+            "search".to_string(),
+            "bundle".to_string(),
+            "results".to_string(),
+        ]),
         cid: None,
         reply_to: None,
     };
@@ -2211,7 +2289,11 @@ struct StoredChunkPaste {
     byte_len: usize,
 }
 
-async fn create_chunked_paste(title: &str, content: String, keywords: Vec<String>) -> Result<StoredChunkPaste> {
+async fn create_chunked_paste(
+    title: &str,
+    content: String,
+    keywords: Vec<String>,
+) -> Result<StoredChunkPaste> {
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let trimmed = content.trim();
     let html_title = tagging::extract_html_title(&content);
@@ -2219,20 +2301,29 @@ async fn create_chunked_paste(title: &str, content: String, keywords: Vec<String
     let title_owned = if title.is_empty() {
         html_title.unwrap_or_else(|| {
             let auto_tags = tagging::auto_tag(&content);
-            if !auto_tags.is_empty() { auto_desc } else { "untitled".to_string() }
+            if !auto_tags.is_empty() {
+                auto_desc
+            } else {
+                "untitled".to_string()
+            }
         })
     } else {
         title.to_string()
     };
     let slug_title = tagging::slugify(&title_owned);
-    let slug_keywords = keywords.iter().map(|k| tagging::slugify(k)).collect::<Vec<_>>().join("_");
+    let slug_keywords = keywords
+        .iter()
+        .map(|k| tagging::slugify(k))
+        .collect::<Vec<_>>()
+        .join("_");
     let filename = if slug_keywords.is_empty() {
         format!("{}_{}.txt", ts, slug_title)
     } else {
         format!("{}_{}_{}.txt", ts, slug_title, slug_keywords)
     };
     let id = filename.trim_end_matches(".txt").to_string();
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let uucp = format!("{}/{}", uucp_dir, filename);
 
     let mut hasher = Sha256::new();
@@ -2241,7 +2332,8 @@ async fn create_chunked_paste(title: &str, content: String, keywords: Vec<String
     let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
     let witness = hex::encode(hash);
     let dasl_cid = crate::dasl::dasl_cid(content.as_bytes());
-    let section = erdfa_publish::sheaf::Section::new(content.as_bytes(), erdfa_publish::sheaf::Encoding::Raw);
+    let section =
+        erdfa_publish::sheaf::Section::new(content.as_bytes(), erdfa_publish::sheaf::Encoding::Raw);
     let paste_content = format!(
         "--- {} ---\nTitle: {}\nKeywords: {}\nCID: {}\nWitness: {}\nIPFS: {}\nDASL: {}\nReply-To: \n{}\n\n{}\n\n{}\n",
         id,
@@ -2260,7 +2352,11 @@ async fn create_chunked_paste(title: &str, content: String, keywords: Vec<String
 
     let index_entry = PasteIndex {
         id: id.clone(),
-        title: if title_owned == "untitled" { tagging::auto_describe(&content) } else { title_owned },
+        title: if title_owned == "untitled" {
+            tagging::auto_describe(&content)
+        } else {
+            title_owned
+        },
         description: Some(tagging::auto_describe(&content)),
         keywords: keywords.clone(),
         cid: local_cid.clone(),
@@ -2296,7 +2392,11 @@ pub async fn api_search_results_chunks(body: web::Json<serde_json::Value>) -> Re
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|v| v.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+                .filter_map(|v| {
+                    v.get("id")
+                        .and_then(|id| id.as_str())
+                        .map(|s| s.to_string())
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -2304,13 +2404,14 @@ pub async fn api_search_results_chunks(body: web::Json<serde_json::Value>) -> Re
     if ids.is_empty() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Missing or empty 'results' array"
-        })))
+        })));
     }
 
     let uucp_dir =
         env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
     let entries: Vec<PasteIndex> = read_index_entries(&uucp_dir);
-    let entry_map: HashMap<String, PasteIndex> = entries.into_iter().map(|e| (e.id.clone(), e)).collect();
+    let entry_map: HashMap<String, PasteIndex> =
+        entries.into_iter().map(|e| (e.id.clone(), e)).collect();
     let title = body
         .get("title")
         .and_then(|v| v.as_str())
@@ -2434,7 +2535,11 @@ fn with_base_url(url: &str) -> String {
     if base_path.is_empty() || !url.starts_with("/paste/") {
         url.to_string()
     } else {
-        format!("{}/{}", base_path.trim_end_matches('/'), url.trim_start_matches('/'))
+        format!(
+            "{}/{}",
+            base_path.trim_end_matches('/'),
+            url.trim_start_matches('/')
+        )
     }
 }
 
@@ -2471,7 +2576,11 @@ fn build_line_chunks(lines: &[String], chunk_size: usize, overlap: usize) -> Vec
             end = start + 1;
         }
         let line_ids: Vec<usize> = (start..end).collect();
-        chunks.push(LineChunk { start_line: start, end_line: end, line_ids });
+        chunks.push(LineChunk {
+            start_line: start,
+            end_line: end,
+            line_ids,
+        });
         if end == lines.len() {
             break;
         }
@@ -2481,7 +2590,12 @@ fn build_line_chunks(lines: &[String], chunk_size: usize, overlap: usize) -> Vec
 }
 
 fn chunk_text(lines: &[String], chunk: &LineChunk) -> String {
-    chunk.line_ids.iter().map(|idx| lines[*idx].as_str()).collect::<Vec<_>>().join("\n")
+    chunk
+        .line_ids
+        .iter()
+        .map(|idx| lines[*idx].as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn render_chunk_json(index: usize, chunk: &LineChunk, text: &str) -> String {
@@ -2844,7 +2958,8 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
         title = result.title.clone();
     }
     if description.is_empty() {
-        description = archive_name_description(&title, &orig_name, result.entry_count, file_data.len());
+        description =
+            archive_name_description(&title, &orig_name, result.entry_count, file_data.len());
     }
     result.title = title.clone();
     result.description = description.clone();
@@ -3159,7 +3274,12 @@ pub async fn archive_generate(
         result.title.clone()
     };
     let post_description = if result.description.trim().is_empty() {
-        archive_name_description(&post_title, &result.filename, result.entry_count, result.total_size as usize)
+        archive_name_description(
+            &post_title,
+            &result.filename,
+            result.entry_count,
+            result.total_size as usize,
+        )
     } else {
         result.description.clone()
     };
@@ -3762,7 +3882,13 @@ pub async fn api_split_paste(body: web::Json<serde_json::Value>) -> Result<HttpR
         Ok(options) => options,
         Err(response) => return Ok(response),
     };
-    let (effective_chunk_size, effective_overlap, effective_unit, effective_split_mode, profile_name) = split_options;
+    let (
+        effective_chunk_size,
+        effective_overlap,
+        effective_unit,
+        effective_split_mode,
+        profile_name,
+    ) = split_options;
 
     let chunks = crate::splitter::split_text(
         &content,
@@ -3826,7 +3952,8 @@ pub async fn api_split_download(body: web::Json<serde_json::Value>) -> Result<Ht
         Ok(options) => options,
         Err(response) => return Ok(response),
     };
-    let (effective_chunk_size, effective_overlap, effective_unit, effective_split_mode, _) = split_options;
+    let (effective_chunk_size, effective_overlap, effective_unit, effective_split_mode, _) =
+        split_options;
 
     if content.is_empty() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "empty content"})));
@@ -3856,7 +3983,10 @@ pub async fn api_split_download(body: web::Json<serde_json::Value>) -> Result<Ht
 
     Ok(HttpResponse::Ok()
         .content_type("application/zip")
-        .insert_header(("Content-Disposition", format!("attachment; filename=\"{}\"", filename)))
+        .insert_header((
+            "Content-Disposition",
+            format!("attachment; filename=\"{}\"", filename),
+        ))
         .body(zip_bytes))
 }
 

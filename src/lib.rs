@@ -10,6 +10,7 @@ pub mod model;
 pub mod nix_skill;
 pub mod plugin;
 pub mod plugins;
+pub mod rename;
 pub mod share;
 pub mod splitter;
 pub mod storage;
