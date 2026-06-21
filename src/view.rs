@@ -1,5 +1,5 @@
 // View - HTML rendering for kant-pastebin
-use crate::model::PasteIndex;
+use crate::model::{PasteIndex, ThreadPost};
 
 /// Render paste view page
 pub fn render_paste(paste: &PasteIndex, content: &str, base_path: &str) -> String {
@@ -198,6 +198,198 @@ pub fn render_split_paste(paste: &PasteIndex, _content: &str, base_path: &str) -
         pid = paste.id,
         ts = paste.timestamp
     )
+}
+
+/// Render thread roots page
+pub fn render_threads_page(
+    base_path: &str,
+    page: usize,
+    total_pages: usize,
+    total: usize,
+    roots: &[PasteIndex],
+) -> String {
+    let rows = roots
+        .iter()
+        .map(|entry| {
+            let title = if entry.title.is_empty() || entry.title == "untitled" {
+                entry.description.as_deref().unwrap_or("untitled")
+            } else {
+                &entry.title
+            };
+            format!(
+                r#"<div class="thread-root"><a href="{bp}/thread/{id}">{title}</a><div class="meta">{ts} · {size} bytes</div><div class="meta">ID: {id}</div></div>"#,
+                bp = base_path,
+                id = html_escape(&entry.id),
+                title = html_escape(title),
+                ts = html_escape(&entry.timestamp),
+                size = entry.size
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    let pager = render_thread_pager(base_path, "/threads", page, total_pages);
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Threads - kant-pastebin</title>
+<style>
+body{{background:#000;color:#0f0;font-family:monospace;padding:20px}}
+a{{color:#0ff;text-decoration:none;margin-right:10px}}
+.nav{{background:#111;padding:10px;margin:10px 0;border:1px solid #0f0}}
+.thread-root{{border-bottom:1px solid #333;padding:12px 0}}
+.meta{{color:#888;font-size:12px}}
+.pager{{margin:15px 0}}
+</style>
+</head>
+<body>
+<div class="nav"><a href="{bp}/">🏠 Home</a> <a href="{bp}/browse">📚 Browse</a> <a href="{bp}/threads">🧵 Threads</a></div>
+<h1>🧵 Thread Roots</h1>
+<p class="meta">{total} threads · page {page}/{total_pages}</p>
+{pager}
+<div id="threads">{rows}</div>
+{pager}
+</body>
+</html>"#,
+        bp = base_path,
+        total = total,
+        page = page,
+        total_pages = total_pages,
+        rows = rows,
+        pager = pager
+    )
+}
+
+/// Render paginated threaded view
+pub fn render_thread_page(
+    base_path: &str,
+    thread_id: &str,
+    page: usize,
+    total_pages: usize,
+    total: usize,
+    posts: &[ThreadPost],
+) -> String {
+    let rows = posts
+        .iter()
+        .map(|post| {
+            let indent = post.depth * 24;
+            let reply = post
+                .reply_to
+                .as_ref()
+                .map(|rid| format!(r#" <span class="meta">↩ {rid}</span>"#))
+                .unwrap_or_default();
+            let desc = post
+                .description
+                .as_ref()
+                .map(|d| format!(r#"<div class="meta">{}</div>"#, html_escape(d)))
+                .unwrap_or_default();
+            let excerpt = if post.content_excerpt.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    r#"<div class="excerpt">{}</div>"#,
+                    html_escape(&post.content_excerpt)
+                )
+            };
+            format!(
+                r#"<article class="post" style="margin-left:{indent}px"><h2><a href="{bp}/paste/{id}">{title}</a></h2><div class="meta">{ts} · {size} bytes · ID: {id}{reply}</div>{desc}{excerpt}<button class="similar-btn" data-id="{id}">Find similar</button><div id="similar-{id}" class="similar-results"></div></article>"#,
+                bp = base_path,
+                id = html_escape(&post.id),
+                title = html_escape(&post.title),
+                ts = html_escape(&post.timestamp),
+                size = post.size,
+                reply = reply,
+                desc = desc,
+                excerpt = excerpt,
+                indent = indent
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    let pager = render_thread_pager(
+        base_path,
+        &format!("/thread/{}", thread_id),
+        page,
+        total_pages,
+    );
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Thread - kant-pastebin</title>
+<style>
+body{{background:#000;color:#0f0;font-family:monospace;padding:20px}}
+a{{color:#0ff;text-decoration:none;margin-right:10px}}
+.nav{{background:#111;padding:10px;margin:10px 0;border:1px solid #0f0}}
+.post{{border-left:3px solid #0f0;border-bottom:1px solid #333;padding:12px;margin:12px 0;background:#080808}}
+.meta{{color:#888;font-size:12px}}
+.excerpt{{color:#0a0;white-space:pre-wrap;word-wrap:break-word;margin:8px 0}}
+.pager{{margin:15px 0}}
+.similar-btn{{background:#0f0;color:#000;border:none;padding:5px 8px;cursor:pointer;margin-top:5px}}
+.similar-results{{margin:8px 0}}
+.similar-item{{border-left:2px solid #0ff;padding-left:8px;margin:6px 0}}
+</style>
+</head>
+<body>
+<div class="nav"><a href="{bp}/">🏠 Home</a> <a href="{bp}/browse">📚 Browse</a> <a href="{bp}/threads">🧵 Threads</a> <a href="{bp}/paste/{tid}">Paste</a> <a href="{bp}/raw/{tid}">Raw</a></div>
+<h1>🧵 Thread</h1>
+<p class="meta">ID: {tid} · {total} posts · page {page}/{total_pages}</p>
+{pager}
+<div id="thread">{rows}</div>
+{pager}
+<script>
+function esc(s) {{ return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }}
+document.querySelectorAll('.similar-btn').forEach(btn => {{
+  btn.onclick = async () => {{
+    const id = btn.dataset.id;
+    const box = document.getElementById('similar-' + id);
+    box.textContent = 'Searching...';
+    const res = await fetch('{bp}/api/similar/' + encodeURIComponent(id) + '?limit=5');
+    const data = await res.json();
+    const results = data.results || [];
+    if (!results.length) {{ box.textContent = 'No similar posts found.'; return; }}
+    box.innerHTML = results.map(r => '<div class="similar-item"><a href="' + esc(r.url) + '">' + esc(r.title || r.id) + '</a> <span class="meta">score ' + Number(r.score || 0).toFixed(1) + ' · ' + esc(r.timestamp) + '</span><div class="excerpt">' + esc(r.excerpt || '') + '</div></div>').join('');
+  }};
+}});
+</script>
+</body>
+</html>"#,
+        bp = base_path,
+        tid = html_escape(thread_id),
+        total = total,
+        page = page,
+        total_pages = total_pages,
+        rows = rows,
+        pager = pager
+    )
+}
+
+fn render_thread_pager(base_path: &str, path: &str, page: usize, total_pages: usize) -> String {
+    let mut parts = Vec::new();
+    if page > 1 {
+        parts.push(format!(
+            r#"<a href="{bp}{path}?page={}">← Prev</a>"#,
+            page - 1,
+            bp = base_path
+        ));
+    }
+    parts.push(format!(
+        r#"<span class="meta">Page {page}/{total_pages}</span>"#
+    ));
+    if page < total_pages {
+        parts.push(format!(
+            r#"<a href="{bp}{path}?page={}">Next →</a>"#,
+            page + 1,
+            bp = base_path
+        ));
+    }
+    parts.join(" ")
 }
 
 /// Render search page

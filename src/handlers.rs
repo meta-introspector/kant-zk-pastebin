@@ -1,6 +1,7 @@
 // Handlers - Request handlers for kant-pastebin microservice
 use crate::model::{
     Paste, PasteIndex, Response, SplitMode, SplitProfile, SplitProfileRequest, SplitUnit,
+    ThreadPost,
 };
 use crate::plugins;
 use crate::plugins::pipelight;
@@ -134,6 +135,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <div class="nav">
 <a href="{}/">🏠 Home</a>
 <a href="{}/browse">📚 Browse</a>
+<a href="{}/threads">🧵 Threads</a>
 <a href="{}/gallery">🖼️ Gallery</a>
 <a href="{}/git-browse">📁 Git</a>
 <a href="{}/splitter/">✂️ Splitter</a>
@@ -228,6 +230,7 @@ form.onsubmit = async (e) => {{
         base_path,
         base_path,
         reply_to,
+        base_path,
         base_path,
         base_path,
         base_path,
@@ -725,7 +728,7 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 .pipelight-btn{{padding:8px 16px;border-radius:4px;border:none;cursor:pointer;font-size:14px}}
 </style>
 </head><body>
-<div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/raw/{}">📄 Raw</a> | {} {}</div>
+<div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/threads">🧵 Threads</a> <a href="{}/thread/{}">Thread</a> <a href="{}/raw/{}">📄 Raw</a> | {} {}</div>
 <h1>{}</h1>
 <a class="reply-btn" href="{}/?reply_to={}">Reply</a>
 <button class="reply-btn" onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent);this.textContent='Copied'">Copy</button>
@@ -863,11 +866,13 @@ function bundleSelected() {{
     .catch(e => alert('Bundle error: ' + e));
 }}
 </script>
-<script src="{}/static/a11y.js"></script>
+<script src="{share_menu}/static/a11y.js"></script>
 </body></html>"#,
-                title,
                 base_path,
                 base_path,
+                base_path,
+                base_path,
+                id,
                 base_path,
                 id,
                 prev_link,
@@ -1109,81 +1114,124 @@ pub async fn upgrade_pastes() -> Result<HttpResponse> {
     })))
 }
 
-/// GET /thread/{id} - Get paste and all replies
-pub async fn get_thread(path: web::Path<String>) -> Result<HttpResponse> {
+/// GET /thread/{id} - Show a paginated threaded view of a paste and its replies
+pub async fn get_thread(
+    path: web::Path<String>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
     let parent_id = path.into_inner();
     let uucp_dir =
         env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let page = query
+        .get("page")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(1);
+    let limit = query
+        .get("limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(10);
 
-    let mut thread = Vec::new();
+    let posts = build_thread_posts(&uucp_dir, &parent_id);
+    if posts.is_empty() {
+        return Ok(HttpResponse::NotFound().body("Thread not found"));
+    }
+    let (page_posts, total_pages, page) = paged_thread_posts(&posts, page, limit);
 
-    if let Ok(entries) = fs::read_dir(&uucp_dir) {
-        for entry in entries.flatten() {
-            let fname = entry.file_name().to_string_lossy().to_string();
-            if !fname.ends_with(".txt") {
-                continue;
-            }
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                let lines: Vec<&str> = content.lines().collect();
-                if lines.is_empty() {
-                    continue;
-                }
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view::render_thread_page(
+            &base_path,
+            &parent_id,
+            page,
+            total_pages,
+            posts.len(),
+            page_posts,
+        )))
+}
 
-                // Parse header
-                let file_id = fname.trim_end_matches(".txt");
-                let mut title = String::new();
-                let mut reply_to = String::new();
-                let mut body_start = 0;
+/// GET /api/thread/{id} - JSON paginated thread data
+pub async fn api_thread(
+    path: web::Path<String>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
+    let parent_id = path.into_inner();
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let page = query
+        .get("page")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(1);
+    let limit = query
+        .get("limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(10);
+    let posts = build_thread_posts(&uucp_dir, &parent_id);
+    let (page_posts, total_pages, page) = paged_thread_posts(&posts, page, limit);
 
-                for (i, line) in lines.iter().enumerate() {
-                    if line.is_empty() && i > 0 {
-                        body_start = i + 1;
-                        break;
-                    }
-                    if let Some(t) = line.strip_prefix("Title: ") {
-                        title = t.to_string();
-                    }
-                    if let Some(r) = line.strip_prefix("Reply-To: ") {
-                        reply_to = r.to_string();
-                    }
-                }
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "thread_id": &parent_id,
+        "page": page,
+        "limit": limit.clamp(1, 50),
+        "total_pages": total_pages,
+        "total": posts.len(),
+        "posts": page_posts,
+    })))
+}
 
-                // Include if this IS the parent or replies TO the parent
-                if file_id == parent_id || reply_to == parent_id {
-                    let body = if body_start < lines.len() {
-                        lines[body_start..].join("\n")
-                    } else {
-                        String::new()
-                    };
-                    thread.push(serde_json::json!({
-                        "id": file_id,
-                        "title": title,
-                        "reply_to": reply_to,
-                        "content": body,
-                    }));
-                }
+/// GET /threads - List thread roots with pagination
+pub async fn threads(
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let page = query
+        .get("page")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(1);
+    let limit = query
+        .get("limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(20);
+    let entries = read_index_entries(&uucp_dir);
+    let entries_by_id: HashMap<String, PasteIndex> = entries
+        .iter()
+        .map(|entry| (entry.id.clone(), entry.clone()))
+        .collect();
+    let mut roots: HashMap<String, PasteIndex> = entries
+        .iter()
+        .map(|entry| (entry.id.clone(), entry.clone()))
+        .collect();
+
+    for entry in &entries {
+        if let Some(parent) = entry_reply_to(entry, &uucp_dir) {
+            if entries_by_id.contains_key(&parent) {
+                roots.remove(&entry.id);
             }
         }
     }
 
-    // Sort: parent first, then replies by id (chronological)
-    thread.sort_by(|a, b| {
-        let a_id = a["id"].as_str().unwrap_or("");
-        let b_id = b["id"].as_str().unwrap_or("");
-        if a_id == parent_id {
-            std::cmp::Ordering::Less
-        } else if b_id == parent_id {
-            std::cmp::Ordering::Greater
-        } else {
-            a_id.cmp(b_id)
-        }
-    });
+    let mut roots: Vec<PasteIndex> = roots.into_values().collect();
+    roots.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "thread_id": parent_id,
-        "count": thread.len(),
-        "posts": thread,
-    })))
+    let page = page.max(1);
+    let limit = limit.clamp(1, 50);
+    let total_pages = roots.len().div_ceil(limit).max(1);
+    let page = page.min(total_pages);
+    let start = (page - 1) * limit;
+    let end = (start + limit).min(roots.len());
+    let page_roots = &roots[start..end];
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view::render_threads_page(
+            &base_path,
+            page,
+            total_pages,
+            roots.len(),
+            page_roots,
+        )))
 }
 
 /// GET /browse - List pastes
@@ -1239,6 +1287,168 @@ fn read_index_entries(uucp_dir: &str) -> Vec<PasteIndex> {
         .collect()
 }
 
+fn read_paste_header_fields(content: &str) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            break;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            headers.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+    headers
+}
+
+fn entry_reply_to(entry: &PasteIndex, uucp_dir: &str) -> Option<String> {
+    entry
+        .reply_to
+        .clone()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| entry.root.clone().filter(|v| !v.trim().is_empty()))
+        .or_else(|| {
+            read_paste_content(&entry.uucp_path)
+                .map(|content| read_paste_header_fields(&content))
+                .and_then(|headers| {
+                    headers
+                        .get("Reply-To")
+                        .cloned()
+                        .filter(|v| !v.trim().is_empty())
+                })
+                .or_else(|| {
+                    fs::read_to_string(format!("{}/{}.txt", uucp_dir, entry.id))
+                        .ok()
+                        .map(|content| read_paste_header_fields(&content))
+                        .and_then(|headers| {
+                            headers
+                                .get("Reply-To")
+                                .cloned()
+                                .filter(|v| !v.trim().is_empty())
+                        })
+                })
+        })
+}
+
+fn paste_excerpt(uucp_path: &str, max_chars: usize) -> String {
+    read_paste_content(uucp_path)
+        .unwrap_or_default()
+        .chars()
+        .take(max_chars)
+        .collect()
+}
+
+fn collect_thread_ids(
+    parent_id: &str,
+    children_by_parent: &HashMap<String, Vec<String>>,
+    entries_by_id: &HashMap<String, PasteIndex>,
+    visited: &mut std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut ids = Vec::new();
+    if !entries_by_id.contains_key(parent_id) {
+        return ids;
+    }
+    if !visited.insert(parent_id.to_string()) {
+        return ids;
+    }
+    ids.push(parent_id.to_string());
+    let mut children = children_by_parent
+        .get(parent_id)
+        .cloned()
+        .unwrap_or_default();
+    children.sort();
+    for child_id in children {
+        ids.extend(collect_thread_ids(
+            &child_id,
+            children_by_parent,
+            entries_by_id,
+            visited,
+        ));
+    }
+    ids
+}
+
+fn thread_depths(
+    parent_id: &str,
+    children_by_parent: &HashMap<String, Vec<String>>,
+    depths: &mut HashMap<String, usize>,
+) {
+    depths.insert(parent_id.to_string(), 0);
+    let mut children = children_by_parent
+        .get(parent_id)
+        .cloned()
+        .unwrap_or_default();
+    children.sort();
+    for child_id in children {
+        if !depths.contains_key(&child_id) {
+            depths.insert(child_id.clone(), depths[parent_id] + 1);
+            thread_depths(&child_id, children_by_parent, depths);
+        }
+    }
+}
+
+fn build_thread_posts(uucp_dir: &str, parent_id: &str) -> Vec<ThreadPost> {
+    let entries = read_index_entries(uucp_dir);
+    let entries_by_id: HashMap<String, PasteIndex> = entries
+        .iter()
+        .map(|entry| (entry.id.clone(), entry.clone()))
+        .collect();
+    let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
+
+    for entry in &entries {
+        if entry.id == parent_id {
+            continue;
+        }
+        if let Some(parent) = entry_reply_to(entry, uucp_dir) {
+            children_by_parent
+                .entry(parent)
+                .or_default()
+                .push(entry.id.clone());
+        }
+    }
+
+    let mut visited = std::collections::HashSet::new();
+    let ids = collect_thread_ids(parent_id, &children_by_parent, &entries_by_id, &mut visited);
+    let mut depths = HashMap::new();
+    thread_depths(parent_id, &children_by_parent, &mut depths);
+
+    ids.into_iter()
+        .filter_map(|id| {
+            let entry = entries_by_id.get(&id)?;
+            let reply_to = entry_reply_to(entry, uucp_dir);
+            let title = if entry.title.is_empty() || entry.title == "untitled" {
+                entry.description.clone().unwrap_or_else(|| id.clone())
+            } else {
+                entry.title.clone()
+            };
+            Some(ThreadPost {
+                id: entry.id.clone(),
+                title,
+                description: entry.description.clone(),
+                reply_to,
+                timestamp: entry.timestamp.clone(),
+                size: entry.size,
+                url: format!("/paste/{}", entry.id),
+                depth: depths.get(&id).copied().unwrap_or(0),
+                content_excerpt: paste_excerpt(&entry.uucp_path, 240),
+            })
+        })
+        .collect()
+}
+
+fn paged_thread_posts(
+    posts: &[ThreadPost],
+    page: usize,
+    limit: usize,
+) -> (&[ThreadPost], usize, usize) {
+    let page = page.max(1);
+    let limit = limit.clamp(1, 50);
+    let total_pages = posts.len().div_ceil(limit).max(1);
+    let page = page.min(total_pages);
+    let start = (page - 1) * limit;
+    let end = (start + limit).min(posts.len());
+    (&posts[start..end], total_pages, page)
+}
+
 fn render_paste_entry(e: &PasteIndex, base_path: &str) -> String {
     let display_title = if e.title == "untitled" || e.title.is_empty() {
         e.description.as_deref().unwrap_or("untitled")
@@ -1258,12 +1468,14 @@ fn render_paste_entry(e: &PasteIndex, base_path: &str) -> String {
         String::new()
     };
     format!(
-        r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a>{} <span style="color:#666">{}</span></div>"#,
+        r#"<div style="border-bottom:1px solid #333;padding:10px"><a href="{}/paste/{}">{}</a>{} <span style="color:#666">{}</span> <a href="{}/thread/{}" style="font-size:12px">Thread</a></div>"#,
         base_path,
         html_escape(&e.id),
         html_escape(display_title),
         tags,
-        html_escape(&e.timestamp)
+        html_escape(&e.timestamp),
+        base_path,
+        html_escape(&e.id)
     )
 }
 
@@ -1921,9 +2133,95 @@ code{{font-family:monospace}}
     }
 }
 
-#[derive(serde::Deserialize)]
-struct SimilarQuery {
-    limit: Option<usize>,
+#[derive(serde::Serialize)]
+struct SimilarResult {
+    id: String,
+    title: String,
+    description: Option<String>,
+    keywords: Vec<String>,
+    match_type: String,
+    excerpt: String,
+    url: String,
+    timestamp: String,
+    size: usize,
+    score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_path: Option<String>,
+}
+
+fn similarity_terms(content: &str) -> Vec<String> {
+    let mut terms = content
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|s| s.trim().to_string())
+        .filter(|s| s.len() >= 4)
+        .collect::<Vec<_>>();
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn similarity_score(
+    source_terms: &[String],
+    source_keywords: &[String],
+    source_ngrams: &[(String, usize)],
+    entry: &PasteIndex,
+    entry_content: Option<&str>,
+) -> f64 {
+    let entry_terms = similarity_terms(&format!(
+        "{} {} {}",
+        entry.title,
+        entry.description.as_deref().unwrap_or(""),
+        entry.keywords.join(" ")
+    ));
+    let entry_keywords_lc = entry
+        .keywords
+        .iter()
+        .map(|k| k.to_lowercase())
+        .collect::<Vec<_>>();
+    let source_keywords_lc = source_keywords
+        .iter()
+        .map(|k| k.to_lowercase())
+        .collect::<Vec<_>>();
+
+    let keyword_score = source_keywords_lc
+        .iter()
+        .filter(|k| entry_keywords_lc.contains(k))
+        .count() as f64
+        * 3.0;
+    let metadata_score = source_terms
+        .iter()
+        .filter(|term| entry_terms.contains(term))
+        .count() as f64
+        * 2.0;
+
+    let source_ngram_counts: HashMap<String, usize> = source_ngrams
+        .iter()
+        .map(|(term, count)| (term.to_lowercase(), *count))
+        .collect();
+    let mut ngram_score = 0.0;
+    for (term, count) in source_ngram_counts {
+        if let Some((_, entry_count)) = entry.ngrams.iter().find(|(t, _)| t == &term) {
+            ngram_score += (*entry_count).min(count).min(3) as f64;
+        }
+    }
+
+    let mut content_score = 0.0;
+    if let Some(content) = entry_content {
+        let lower_content = content.to_lowercase();
+        for term in source_terms.iter().take(120) {
+            if lower_content.contains(term) {
+                content_score += 1.0;
+                if content_score >= 25.0 {
+                    break;
+                }
+            }
+        }
+    }
+
+    keyword_score + metadata_score + ngram_score + content_score
 }
 
 /// GET /api/similar/{id} - Find similar pastes by searching the content of the given paste
@@ -1939,96 +2237,92 @@ pub async fn api_similar(
     let limit: usize = query
         .get("limit")
         .and_then(|s| s.parse().ok())
-        .unwrap_or(10);
+        .unwrap_or(10)
+        .min(50);
 
-    // Get the content of the current paste
-    let content = read_paste_content(&format!("{}/{}.txt", uucp_dir, id));
-    let search_text = match content {
-        Some(c) => {
-            // Take first 200 chars for search (enough to find good matches)
-            let text: String = c.chars().take(200).collect();
-            text.to_lowercase()
-        }
-        None => {
-            return Ok(HttpResponse::NotFound().json(serde_json::json!({
-                "error": format!("Paste {} not found or has no readable content", id)
-            })))
-        }
-    };
-
-    // Search via same logic as api_search but against the extracted search text
     let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
         .unwrap_or_default()
         .lines()
         .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
         .collect();
+    let Some(source) = entries.iter().find(|entry| entry.id == id) else {
+        return Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": format!("Paste {} not found", id)
+        })));
+    };
 
-    // Extract significant terms from search text (words >= 4 chars)
-    let terms: Vec<String> = search_text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() >= 4)
-        .map(|w| w.to_string())
-        .collect();
-
-    let mut results: Vec<SearchResult> = Vec::new();
+    let source_content = read_paste_content(&source.uucp_path)
+        .or_else(|| read_paste_content(&format!("{}/{}.txt", uucp_dir, id)))
+        .unwrap_or_default();
+    let source_terms = similarity_terms(&format!(
+        "{} {} {}",
+        source.title,
+        source.description.as_deref().unwrap_or(""),
+        source_content
+    ));
+    let source_ngrams = tagging::extract_ngrams(&source_content, 3, 20);
+    let mut results: Vec<SimilarResult> = Vec::new();
 
     for entry in entries.iter().rev() {
-        if results.len() >= limit {
-            break;
-        }
         if entry.id == id {
             continue;
         }
-
-        let lower_title = entry.title.to_lowercase();
-        let lower_desc = entry.description.as_deref().unwrap_or("").to_lowercase();
-        let kw_match = entry.keywords.iter().any(|k| {
-            let kl = k.to_lowercase();
-            terms.iter().any(|t| kl.contains(t))
-        });
-        let title_match = terms
-            .iter()
-            .any(|t| lower_title.contains(t) || lower_desc.contains(t));
-
-        if title_match || kw_match {
-            results.push(SearchResult {
-                id: entry.id.clone(),
-                title: entry.title.clone(),
-                description: entry.description.clone(),
-                keywords: entry.keywords.clone(),
-                match_type: "similarity".to_string(),
-                excerpt: String::new(),
-                url: format!("/paste/{}", entry.id),
-                timestamp: entry.timestamp.clone(),
-                size: entry.size,
-                source: Some("paste".to_string()),
-                file_path: None,
-            });
+        let entry_content = read_paste_content(&entry.uucp_path)
+            .or_else(|| read_paste_content(&format!("{}/{}.txt", uucp_dir, &entry.id)));
+        let score = similarity_score(
+            &source_terms,
+            &source.keywords,
+            &source_ngrams,
+            entry,
+            entry_content.as_deref(),
+        );
+        if score <= 0.0 {
             continue;
         }
 
-        // Content search for deeper similarity
-        if let Some(content) = read_paste_content(&entry.uucp_path) {
-            let lower = content.to_lowercase();
-            let content_match = terms.iter().any(|t| lower.contains(t));
-            if content_match {
-                let excerpt = excerpt_around(&content, &terms[0], 60);
-                results.push(SearchResult {
-                    id: entry.id.clone(),
-                    title: entry.title.clone(),
-                    description: entry.description.clone(),
-                    keywords: entry.keywords.clone(),
-                    match_type: "similarity".to_string(),
-                    excerpt,
-                    url: format!("/paste/{}", entry.id),
-                    timestamp: entry.timestamp.clone(),
-                    size: entry.size,
-                    source: Some("paste".to_string()),
-                    file_path: None,
-                });
-            }
-        }
+        let best_term = source_terms
+            .iter()
+            .find(|term| {
+                let metadata = format!(
+                    "{} {} {}",
+                    entry.title,
+                    entry.description.as_deref().unwrap_or(""),
+                    entry.keywords.join(" ")
+                )
+                .to_lowercase();
+                metadata.contains(*term)
+            })
+            .cloned()
+            .or_else(|| source_terms.first().cloned())
+            .unwrap_or_default();
+        let excerpt = entry_content
+            .as_deref()
+            .map(|content| best_excerpt(content, &[best_term.clone()], 80))
+            .unwrap_or_default();
+
+        results.push(SimilarResult {
+            id: entry.id.clone(),
+            title: entry.title.clone(),
+            description: entry.description.clone(),
+            keywords: entry.keywords.clone(),
+            match_type: "similarity".to_string(),
+            excerpt,
+            url: format!("/paste/{}", entry.id),
+            timestamp: entry.timestamp.clone(),
+            size: entry.size,
+            score,
+            source: Some("paste".to_string()),
+            file_path: None,
+        });
     }
+
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.timestamp.cmp(&a.timestamp))
+    });
+    results.truncate(limit);
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "source_id": &id,
@@ -4723,4 +5017,52 @@ pub async fn api_git_reindex() -> Result<HttpResponse> {
         "status": "ok",
         "stats": cache.stats(),
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn similarity_score_prefers_shared_keywords_and_content_terms() {
+        let source_terms = vec!["rust".to_string(), "nix".to_string(), "flake".to_string()];
+        let source_keywords = vec!["rust".to_string(), "nix".to_string()];
+        let source_ngrams = vec![("nix rust flake".to_string(), 2)];
+
+        let shared = PasteIndex {
+            id: "shared".to_string(),
+            title: "Rust Nix Flake".to_string(),
+            description: Some("nix rust flake notes".to_string()),
+            keywords: vec!["rust".to_string(), "nix".to_string()],
+            ngrams: vec![("nix rust flake".to_string(), 2)],
+            timestamp: "2".to_string(),
+            ..PasteIndex::default()
+        };
+        let unrelated = PasteIndex {
+            id: "unrelated".to_string(),
+            title: "Unrelated Paste".to_string(),
+            description: Some("different topic".to_string()),
+            keywords: vec!["other".to_string()],
+            ngrams: vec![("other topic".to_string(), 2)],
+            timestamp: "1".to_string(),
+            ..PasteIndex::default()
+        };
+
+        let shared_score = similarity_score(
+            &source_terms,
+            &source_keywords,
+            &source_ngrams,
+            &shared,
+            Some("this paste also discusses nix rust flake"),
+        );
+        let unrelated_score = similarity_score(
+            &source_terms,
+            &source_keywords,
+            &source_ngrams,
+            &unrelated,
+            Some("this paste discusses unrelated topics"),
+        );
+
+        assert!(shared_score > unrelated_score);
+    }
 }

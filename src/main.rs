@@ -497,6 +497,7 @@ async fn main() -> std::io::Result<()> {
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url("/openapi.json", openapi.clone()))
             .route("/", web::get().to(handlers::index))
             .route("/browse", web::get().to(handlers::browse))
+            .route("/threads", web::get().to(handlers::threads))
             .route("/paste", web::post().to(handlers::create_paste))
             .route("/paste/{id}", web::get().to(handlers::get_paste))
             .route(
@@ -507,6 +508,7 @@ async fn main() -> std::io::Result<()> {
             .route("/raw/{id}", web::get().to(handlers::get_raw))
             .route("/upgrade", web::post().to(handlers::upgrade_pastes))
             .route("/thread/{id}", web::get().to(handlers::get_thread))
+            .route("/api/thread/{id}", web::get().to(handlers::api_thread))
             .route("/upload", web::post().to(handlers::upload_file))
             .route("/file/{id}", web::get().to(handlers::get_file))
             .route("/ipfs/{cid}", web::get().to(handlers::ipfs_proxy))

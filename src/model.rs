@@ -42,6 +42,19 @@ pub struct PasteIndex {
     pub root: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ThreadPost {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub reply_to: Option<String>,
+    pub timestamp: String,
+    pub size: usize,
+    pub url: String,
+    pub depth: usize,
+    pub content_excerpt: String,
+}
+
 // ─── Split Profiles ───────────────────────────────────────────────────
 
 /// How to split at chunk boundaries.

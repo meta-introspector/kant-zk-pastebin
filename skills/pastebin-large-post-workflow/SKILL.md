@@ -292,6 +292,25 @@ nix develop -c cargo run --bin kant-pastebin -- rename-allm-pastes --apply --ren
 
 `--rename-files` also rewrites the physical filename/id to include the archive title slug; leave it off to preserve existing paste URLs.
 
+## Threaded View and Similar Posts
+
+Threaded views use `Reply-To` metadata from the paste index and paste headers.
+
+Routes:
+
+- `GET /threads?page=N&limit=N` lists paginated thread roots.
+- `GET /thread/{id}?page=N&limit=N` renders a paginated threaded view.
+- `GET /api/thread/{id}?page=N&limit=N` returns the same paginated thread as JSON.
+- `GET /api/similar/{id}?limit=N` returns scored similar posts using shared keywords, metadata terms, ngrams, and content overlap.
+
+Implementation notes:
+
+- `build_thread_posts()` recursively follows `Reply-To` / `root` links from `index.jsonl`.
+- Thread depth is computed from the parent/root ID and rendered as indentation.
+- Thread pages include a "Find similar" button for each post, backed by `/api/similar/{id}`.
+- Similarity scores are exposed as `score` in the JSON response and shown in the thread UI.
+- `/threads` treats entries as roots when their parent is missing from the index.
+
 ## Operational Lessons Learned
 
 - Preview allm renames first with `make rename-allm-pastes`; apply only after the derived titles/descriptions look correct.

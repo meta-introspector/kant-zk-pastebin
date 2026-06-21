@@ -291,6 +291,19 @@ PY
 - Deploy through `./deploy.sh` from the current repo checkout and local branch. Do not deploy from `/home/mdupont/pastebin/target/release`.
 - `deploy.sh` may report unrelated legacy-service or nginx warnings. The important pastebin check is that `kant-pastebin.service` is active and `http://127.0.0.1:8090/` returns HTTP 200.
 
+## Threaded View and Similar Posts
+
+Threaded views are built from `Reply-To` metadata in `index.jsonl` and paste headers.
+
+Routes:
+
+- `GET /threads?page=N&limit=N` lists paginated thread roots.
+- `GET /thread/{id}?page=N&limit=N` renders a paginated threaded view.
+- `GET /api/thread/{id}?page=N&limit=N` returns the same paginated thread as JSON.
+- `GET /api/similar/{id}?limit=N` returns scored similar posts using shared keywords, metadata terms, ngrams, and content overlap.
+
+The thread page includes a "Find similar" button for each post. The similarity API returns a numeric `score` so the UI can rank posts instead of relying only on keyword matches.
+
 ## Known Caveats
 
 - The original post view still renders the full content in a `<pre>`. If opening a ~10MB paste hangs, the next step is lazy-loading or capped preview rendering for the post view itself.
