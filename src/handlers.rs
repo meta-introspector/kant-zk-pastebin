@@ -10,6 +10,7 @@ use actix_web::{web, HttpRequest, HttpResponse, Result};
 use chrono::Utc;
 use ciborium;
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::path::Path;
 use std::{collections::HashMap, env, fs};
 
@@ -1150,6 +1151,62 @@ pub async fn get_thread(
         )))
 }
 
+/// GET /thread/{id}/export - Download a thread as text, or zip-split it if too large
+pub async fn export_thread(
+    path: web::Path<String>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponse> {
+    let parent_id = path.into_inner();
+    let uucp_dir =
+        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let max_bytes = query
+        .get("max_bytes")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(5_000_000)
+        .clamp(1, 50_000_000);
+    let Some((_posts, content)) = build_thread_export(&uucp_dir, &parent_id) else {
+        return Ok(HttpResponse::NotFound().body("Thread not found"));
+    };
+    let parts = split_export_text(&parent_id, &content, max_bytes);
+    let base = safe_thread_export_filename(&parent_id);
+
+    if parts.len() == 1 {
+        let filename = format!("thread-{}.txt", base);
+        return Ok(HttpResponse::Ok()
+            .insert_header((
+                "Content-Disposition",
+                format!("attachment; filename=\"{}\"", filename),
+            ))
+            .content_type("text/plain; charset=utf-8")
+            .body(parts[0].1.clone()));
+    }
+
+    let mut buf = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut buf);
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let options: zip::write::FileOptions<'_, ()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for (name, content) in parts {
+            zip.start_file(name, options)
+                .map_err(actix_web::error::ErrorInternalServerError)?;
+            zip.write_all(content.as_bytes())
+                .map_err(actix_web::error::ErrorInternalServerError)?;
+        }
+        zip.finish()
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+    }
+
+    let filename = format!("thread-{}.zip", base);
+    Ok(HttpResponse::Ok()
+        .insert_header((
+            "Content-Disposition",
+            format!("attachment; filename=\"{}\"", filename),
+        ))
+        .content_type("application/zip")
+        .body(buf))
+}
+
 /// GET /api/thread/{id} - JSON paginated thread data
 pub async fn api_thread(
     path: web::Path<String>,
@@ -1447,6 +1504,94 @@ fn paged_thread_posts(
     let start = (page - 1) * limit;
     let end = (start + limit).min(posts.len());
     (&posts[start..end], total_pages, page)
+}
+
+fn safe_thread_export_filename(id: &str) -> String {
+    let slug: String = id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    slug.trim_matches('-').to_string()
+}
+
+fn build_thread_export(uucp_dir: &str, parent_id: &str) -> Option<(Vec<ThreadPost>, String)> {
+    let posts = build_thread_posts(uucp_dir, parent_id);
+    if posts.is_empty() {
+        return None;
+    }
+
+    let mut exported = String::new();
+    exported.push_str(&format!(
+        "Thread: {}\nGenerated: {}\nPosts: {}\n\n",
+        parent_id,
+        Utc::now().to_rfc3339(),
+        posts.len()
+    ));
+
+    for post in &posts {
+        exported.push_str(&format!(
+            "--- Paste: {} ---\nTitle: {}\nTimestamp: {}\nReply-To: {}\nURL: /paste/{}\nSize: {} bytes\nDepth: {}\n\n",
+            post.id,
+            post.title,
+            post.timestamp,
+            post.reply_to.as_deref().unwrap_or(""),
+            post.id,
+            post.size,
+            post.depth
+        ));
+        if let Some(description) = &post.description {
+            exported.push_str(&format!("Description: {}\n\n", description));
+        }
+        let content = read_paste_content(&format!("{}/{}.txt", uucp_dir, post.id))
+            .or_else(|| {
+                read_paste_content(&format!(
+                    "{}/{}.txt",
+                    uucp_dir,
+                    post.url.trim_start_matches("/paste/")
+                ))
+            })
+            .unwrap_or_default();
+        exported.push_str(&content);
+        if !exported.ends_with('\n') {
+            exported.push('\n');
+        }
+        exported.push_str("\n\n");
+    }
+
+    Some((posts, exported))
+}
+
+fn split_export_text(thread_id: &str, content: &str, max_bytes: usize) -> Vec<(String, String)> {
+    let base = safe_thread_export_filename(thread_id);
+    let max_bytes = max_bytes.max(1);
+    let mut parts = Vec::new();
+    let mut current = String::new();
+
+    for line in content.split_inclusive('\n') {
+        if !current.is_empty() && current.len() + line.len() > max_bytes {
+            parts.push((
+                format!("thread-{}-part-{:03}.txt", base, parts.len() + 1),
+                std::mem::take(&mut current),
+            ));
+            current.clear();
+        }
+        current.push_str(line);
+    }
+
+    if !current.is_empty() {
+        parts.push((
+            format!("thread-{}-part-{:03}.txt", base, parts.len() + 1),
+            current,
+        ));
+    }
+
+    parts
 }
 
 fn render_paste_entry(e: &PasteIndex, base_path: &str) -> String {
@@ -5064,5 +5209,17 @@ mod tests {
         );
 
         assert!(shared_score > unrelated_score);
+    }
+
+    #[test]
+    fn split_export_text_respects_max_bytes_on_line_boundaries() {
+        let content = "alpha\nbeta\ngamma\n";
+        let parts = split_export_text("abc/123", content, 8);
+
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].0, "thread-abc-123-part-001.txt");
+        assert_eq!(parts[0].1, "alpha\n");
+        assert_eq!(parts[1].1, "beta\n");
+        assert_eq!(parts[2].1, "gamma\n");
     }
 }

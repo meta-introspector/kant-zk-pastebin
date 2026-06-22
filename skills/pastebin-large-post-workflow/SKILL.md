@@ -310,6 +310,10 @@ Implementation notes:
 - Thread pages include a "Find similar" button for each post, backed by `/api/similar/{id}`.
 - Similarity scores are exposed as `score` in the JSON response and shown in the thread UI.
 - `/threads` treats entries as roots when their parent is missing from the index.
+- Thread pages include an "Export" link backed by `/thread/{id}/export`.
+- `build_thread_export()` concatenates full thread contents with per-post headers.
+- `split_export_text()` returns either one text file or multiple `thread-{id}-part-NNN.txt` files when the export exceeds `max_bytes`.
+- The default export split threshold is 5 MB, clamped between 1 byte and 50 MB.
 
 ## Operational Lessons Learned
 

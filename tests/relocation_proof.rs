@@ -39,6 +39,7 @@ fn registered_routes() -> Vec<&'static str> {
         "/preview/{id}",
         "/raw/{id}",
         "/upgrade",
+        "/thread/{id}/export",
         "/thread/{id}",
         "/api/thread/{id}",
         "/upload",

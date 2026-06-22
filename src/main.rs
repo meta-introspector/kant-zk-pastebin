@@ -507,6 +507,10 @@ async fn main() -> std::io::Result<()> {
             .route("/preview/{id}", web::get().to(handlers::preview_paste))
             .route("/raw/{id}", web::get().to(handlers::get_raw))
             .route("/upgrade", web::post().to(handlers::upgrade_pastes))
+            .route(
+                "/thread/{id}/export",
+                web::get().to(handlers::export_thread),
+            )
             .route("/thread/{id}", web::get().to(handlers::get_thread))
             .route("/api/thread/{id}", web::get().to(handlers::api_thread))
             .route("/upload", web::post().to(handlers::upload_file))

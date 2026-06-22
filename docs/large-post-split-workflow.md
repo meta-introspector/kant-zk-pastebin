@@ -304,6 +304,12 @@ Routes:
 
 The thread page includes a "Find similar" button for each post. The similarity API returns a numeric `score` so the UI can rank posts instead of relying only on keyword matches.
 
+The thread page also includes an "Export" link:
+
+- `GET /thread/{id}/export?max_bytes=N` downloads the full thread as `thread-{id}.txt`.
+- If the exported text exceeds `max_bytes`, the route returns a zip file containing `thread-{id}-part-001.txt`, `thread-{id}-part-002.txt`, and so on.
+- The default split threshold is 5 MB, clamped between 1 byte and 50 MB.
+
 ## Known Caveats
 
 - The original post view still renders the full content in a `<pre>`. If opening a ~10MB paste hangs, the next step is lazy-loading or capped preview rendering for the post view itself.

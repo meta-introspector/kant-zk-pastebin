@@ -337,7 +337,7 @@ a{{color:#0ff;text-decoration:none;margin-right:10px}}
 </style>
 </head>
 <body>
-<div class="nav"><a href="{bp}/">🏠 Home</a> <a href="{bp}/browse">📚 Browse</a> <a href="{bp}/threads">🧵 Threads</a> <a href="{bp}/paste/{tid}">Paste</a> <a href="{bp}/raw/{tid}">Raw</a></div>
+<div class="nav"><a href="{bp}/">🏠 Home</a> <a href="{bp}/browse">📚 Browse</a> <a href="{bp}/threads">🧵 Threads</a> <a href="{bp}/paste/{tid}">Paste</a> <a href="{bp}/thread/{tid}/export">Export</a> <a href="{bp}/raw/{tid}">Raw</a></div>
 <h1>🧵 Thread</h1>
 <p class="meta">ID: {tid} · {total} posts · page {page}/{total_pages}</p>
 {pager}
