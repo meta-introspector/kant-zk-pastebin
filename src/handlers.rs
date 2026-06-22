@@ -433,7 +433,11 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     }
 
     let ext = orig_name.rsplit('.').next().unwrap_or("bin");
-    let mime = mime_guess::from_ext(ext).first_or_octet_stream();
+    let mime = if orig_name.to_lowercase().ends_with(".mth") || orig_name.to_lowercase().ends_with(".html") {
+        "text/html".parse::<mime_guess::Mime>().unwrap_or_else(|_| mime_guess::from_ext(ext).first_or_octet_stream())
+    } else {
+        mime_guess::from_ext(ext).first_or_octet_stream()
+    };
     let mime_str = mime.to_string();
 
     let save_title = if user_title.is_empty() {
