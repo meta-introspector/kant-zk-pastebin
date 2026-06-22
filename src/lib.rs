@@ -14,5 +14,6 @@ pub mod rename;
 pub mod share;
 pub mod splitter;
 pub mod storage;
+pub mod summary;
 pub mod tagging;
 pub mod view;

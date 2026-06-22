@@ -17,6 +17,7 @@ mod rename;
 mod share;
 mod sheaf;
 mod storage;
+mod summary;
 mod tagging;
 mod tiles;
 mod view;

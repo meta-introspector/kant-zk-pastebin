@@ -9,6 +9,7 @@ use crate::{ipfs, plugin, storage, tagging, view};
 use actix_web::{web, HttpRequest, HttpResponse, Result};
 use chrono::Utc;
 use ciborium;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Path;
@@ -148,7 +149,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <input type="text" id="title" placeholder="Title" value=""><br><br>
 <input type="text" id="description" placeholder="Description" value=""><br><br>
 <textarea id="content" placeholder="Paste content here..."></textarea><br><br>
-<input type="file" id="file" accept="image/*,.html,.json,.svg,.tar.gz,.tar.bz2,.tar.xz,.zip,.gz,.bz2,.xz"><br><br>
+<input type="file" id="file" accept="image/*,.html,.json,.svg,.mth,.tar.gz,.tar.bz2,.tar.xz,.zip,.gz,.bz2,.xz"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
 <input type="hidden" id="reply_to" value="{}">
 <button type="submit">📤 Share</button>
@@ -433,14 +434,57 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
 
     let ext = orig_name.rsplit('.').next().unwrap_or("bin");
     let mime = mime_guess::from_ext(ext).first_or_octet_stream();
+    let mime_str = mime.to_string();
     if title.is_empty() {
         title = archive_name_title(&orig_name);
     }
-    let description = if description.is_empty() {
-        file_description(&orig_name, &mime.to_string(), file_data.len(), &file_data)
+    let mut description = if description.is_empty() {
+        file_description(&orig_name, &mime_str, file_data.len(), &file_data)
     } else {
         description
     };
+    let is_plain_text = mime_str.starts_with("text/")
+        || orig_name.to_lowercase().ends_with(".txt")
+        || orig_name.to_lowercase().ends_with(".md")
+        || orig_name.to_lowercase().ends_with(".json")
+        || orig_name.to_lowercase().ends_with(".html")
+        || orig_name.to_lowercase().ends_with(".mth")
+        || orig_name.to_lowercase().ends_with(".csv")
+        || orig_name.to_lowercase().ends_with(".rs")
+        || orig_name.to_lowercase().ends_with(".py")
+        || orig_name.to_lowercase().ends_with(".js")
+        || orig_name.to_lowercase().ends_with(".ts")
+        || orig_name.to_lowercase().ends_with(".java")
+        || orig_name.to_lowercase().ends_with(".c")
+        || orig_name.to_lowercase().ends_with(".cpp")
+        || orig_name.to_lowercase().ends_with(".h");
+
+    if is_plain_text {
+        let raw_text = String::from_utf8_lossy(&file_data);
+        let text = if mime_str.contains("html") || orig_name.to_lowercase().ends_with(".mth") || orig_name.to_lowercase().ends_with(".html") {
+            crate::tagging::extract_html_text(&raw_text)
+        } else {
+            raw_text.to_string()
+        };
+        if let Some(summary) = crate::summary::summarize_upload(&orig_name, &text) {
+            if title.is_empty() || title == archive_name_title(&orig_name) {
+                title = summary.title;
+            }
+            if description.is_empty() {
+                description = summary.description;
+            }
+            let body_text = format!(
+                "Title: {}\nDescription: {}\nMime: {}\nSize: {}\n\n{}\n",
+                title,
+                description,
+                mime,
+                file_data.len(),
+                summary.body
+            );
+            file_data = body_text.into_bytes();
+        }
+    }
+
     let slug = tagging::slugify(&title);
 
     let mut hasher = Sha256::new();
@@ -721,6 +765,7 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 .share-menu button:hover{{background:#0f0;color:#000}}
 .cmd{{background:#111;padding:10px;margin:5px 0;border-left:3px solid #ff0;cursor:pointer;font-size:12px}}
 .cmd:hover{{background:#222}}
+<a href="contextURL">
 .qr-modal{{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:20px;border:3px solid #0f0;z-index:1000;display:none}}
 .qr-modal h3{{color:#000}}
 .preview-modal{{position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:2000;overflow:auto;display:none}}
@@ -745,7 +790,7 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 <div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
 
 <h3>Content:</h3>
-<pre>{}</pre>
+<pre onclick="navigator.clipboard.writeText(this.textContent);this.style.borderColor='#0ff';setTimeout(()=>this.style.borderColor='#0f0',1500)" style="cursor:pointer">{}</pre>
 {}
 {}
 {}
@@ -1035,7 +1080,7 @@ pub async fn preview_paste(path: web::Path<String>) -> Result<HttpResponse> {
 /// GET /raw/{id} - Raw text
 pub async fn get_raw(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
-    let content = storage::load_content(&id).unwrap_or_else(|| "Paste not found".to_string());
+    let content = read_paste_content_by_id(&id).unwrap_or_else(|| "Paste not found".to_string());
     Ok(HttpResponse::Ok().content_type("text/plain").body(content))
 }
 
@@ -1252,24 +1297,20 @@ pub async fn threads(
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(20);
     let entries = read_index_entries(&uucp_dir);
-    let entries_by_id: HashMap<String, PasteIndex> = entries
-        .iter()
-        .map(|entry| (entry.id.clone(), entry.clone()))
-        .collect();
-    let mut roots: HashMap<String, PasteIndex> = entries
-        .iter()
-        .map(|entry| (entry.id.clone(), entry.clone()))
-        .collect();
-
-    for entry in &entries {
-        if let Some(parent) = entry_reply_to(entry, &uucp_dir) {
-            if entries_by_id.contains_key(&parent) {
-                roots.remove(&entry.id);
-            }
+    let index_len = entries.len();
+    let mut roots: Vec<PasteIndex> = if let Some((cached_entries, cached_len)) = read_threads_cache(&uucp_dir) {
+        if cached_len == index_len {
+            cached_entries
+                .into_iter()
+                .map(|entry| PasteIndex::from(&entry))
+                .collect()
+        } else {
+            compute_and_save_thread_roots(&entries, &uucp_dir, index_len)
         }
-    }
+    } else {
+        compute_and_save_thread_roots(&entries, &uucp_dir, index_len)
+    };
 
-    let mut roots: Vec<PasteIndex> = roots.into_values().collect();
     roots.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
 
     let page = page.max(1);
@@ -1445,13 +1486,37 @@ fn thread_depths(
 
 fn build_thread_posts(uucp_dir: &str, parent_id: &str) -> Vec<ThreadPost> {
     let entries = read_index_entries(uucp_dir);
+    let index_len = entries.len();
+
+    if let Some((cached_posts, cached_len)) = read_thread_posts_cache_with_meta(uucp_dir, parent_id) {
+        if cached_len == index_len {
+            let mut posts: Vec<ThreadPost> = cached_posts.into_iter().map(|p| ThreadPost::from(&p)).collect();
+            for post in &mut posts {
+                post.content_excerpt =
+                    paste_excerpt(&format!("{}/{}.txt", uucp_dir, post.id), 240);
+            }
+            return posts;
+        }
+    }
+
+    let posts = build_thread_posts_inner(&entries, uucp_dir, parent_id);
+    let cache_entries: Vec<ThreadCachePostEntry> = posts.iter().map(|p| p.into()).collect();
+    write_thread_posts_cache_with_meta(uucp_dir, parent_id, &cache_entries, index_len);
+    posts
+}
+
+fn build_thread_posts_inner(
+    entries: &[PasteIndex],
+    uucp_dir: &str,
+    parent_id: &str,
+) -> Vec<ThreadPost> {
     let entries_by_id: HashMap<String, PasteIndex> = entries
         .iter()
         .map(|entry| (entry.id.clone(), entry.clone()))
         .collect();
     let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
 
-    for entry in &entries {
+    for entry in entries {
         if entry.id == parent_id {
             continue;
         }
@@ -1464,7 +1529,12 @@ fn build_thread_posts(uucp_dir: &str, parent_id: &str) -> Vec<ThreadPost> {
     }
 
     let mut visited = std::collections::HashSet::new();
-    let ids = collect_thread_ids(parent_id, &children_by_parent, &entries_by_id, &mut visited);
+    let ids = collect_thread_ids(
+        parent_id,
+        &children_by_parent,
+        &entries_by_id,
+        &mut visited,
+    );
     let mut depths = HashMap::new();
     thread_depths(parent_id, &children_by_parent, &mut depths);
 
@@ -1592,6 +1662,312 @@ fn split_export_text(thread_id: &str, content: &str, max_bytes: usize) -> Vec<(S
     }
 
     parts
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+pub(crate) struct ThreadCacheMeta {
+    #[serde(rename = "indexLen")]
+    pub index_len: usize,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+pub(crate) struct ThreadCacheRootEntry {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub timestamp: String,
+    pub size: usize,
+    #[serde(rename = "replyCount")]
+    pub reply_count: usize,
+    #[serde(rename = "lastTimestamp")]
+    pub last_timestamp: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+pub(crate) struct ThreadCachePostEntry {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    #[serde(rename = "replyTo")]
+    pub reply_to: Option<String>,
+    pub timestamp: String,
+    pub size: usize,
+    pub depth: usize,
+}
+
+impl From<&ThreadPost> for ThreadCachePostEntry {
+    fn from(v: &ThreadPost) -> Self {
+        ThreadCachePostEntry {
+            id: v.id.clone(),
+            title: v.title.clone(),
+            description: v.description.clone(),
+            reply_to: v.reply_to.clone(),
+            timestamp: v.timestamp.clone(),
+            size: v.size,
+            depth: v.depth,
+        }
+    }
+}
+
+impl From<&ThreadCachePostEntry> for ThreadPost {
+    fn from(v: &ThreadCachePostEntry) -> Self {
+        ThreadPost {
+            id: v.id.clone(),
+            title: v.title.clone(),
+            description: v.description.clone(),
+            reply_to: v.reply_to.clone(),
+            timestamp: v.timestamp.clone(),
+            size: v.size,
+            url: format!("/paste/{}", v.id),
+            depth: v.depth,
+            content_excerpt: String::new(),
+        }
+    }
+}
+
+impl From<&ThreadCacheRootEntry> for PasteIndex {
+    fn from(v: &ThreadCacheRootEntry) -> Self {
+        PasteIndex {
+            id: v.id.clone(),
+            title: v.title.clone(),
+            description: v.description.clone(),
+            timestamp: v.last_timestamp.clone(),
+            size: v.size,
+            ..Default::default()
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn thread_cache_dir(uucp_dir: &str) -> String {
+    format!("{}/.thread-cache", uucp_dir)
+}
+
+#[allow(dead_code)]
+fn threads_cache_path(uucp_dir: &str) -> String {
+    format!("{}/threads.jsonl", thread_cache_dir(uucp_dir))
+}
+
+#[allow(dead_code)]
+fn thread_posts_cache_path(uucp_dir: &str, thread_id: &str) -> String {
+    format!("{}/thread-{}.jsonl", thread_cache_dir(uucp_dir), thread_id)
+}
+
+#[allow(dead_code)]
+fn write_threads_cache(
+    entries: &[ThreadCacheRootEntry],
+    uucp_dir: &str,
+    index_len: usize,
+) {
+    let path = threads_cache_path(uucp_dir);
+    let _ = fs::create_dir_all(thread_cache_dir(uucp_dir));
+    let mut file = match fs::File::create(&path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    let _ = writeln!(
+        file,
+        "{}",
+        serde_json::to_string(&ThreadCacheMeta { index_len }).unwrap()
+    );
+    for entry in entries {
+        let _ = writeln!(file, "{}", serde_json::to_string(entry).unwrap());
+    }
+}
+
+#[allow(dead_code)]
+fn read_threads_cache(
+    uucp_dir: &str,
+) -> Option<(Vec<ThreadCacheRootEntry>, usize)> {
+    let path = threads_cache_path(uucp_dir);
+    let content = fs::read_to_string(&path).ok()?;
+    let mut lines = content.lines();
+    let meta: ThreadCacheMeta = serde_json::from_str(lines.next()?).ok()?;
+    let mut entries = Vec::new();
+    for line in lines {
+        if let Ok(entry) = serde_json::from_str::<ThreadCacheRootEntry>(line) {
+            entries.push(entry);
+        }
+    }
+    Some((entries, meta.index_len))
+}
+
+#[allow(dead_code)]
+fn read_thread_posts_cache(
+    uucp_dir: &str,
+    thread_id: &str,
+) -> Option<Vec<ThreadCachePostEntry>> {
+    let path = thread_posts_cache_path(uucp_dir, thread_id);
+    let content = fs::read_to_string(&path).ok()?;
+    content
+        .lines()
+        .filter_map(|line| serde_json::from_str::<ThreadCachePostEntry>(line).ok())
+        .collect::<Vec<_>>()
+        .into()
+}
+
+#[allow(dead_code)]
+fn write_thread_posts_cache(
+    uucp_dir: &str,
+    thread_id: &str,
+    posts: &[ThreadCachePostEntry],
+) {
+    let path = thread_posts_cache_path(uucp_dir, thread_id);
+    let _ = fs::create_dir_all(thread_cache_dir(uucp_dir));
+    let mut file = match fs::File::create(&path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    for entry in posts {
+        let _ = writeln!(file, "{}", serde_json::to_string(entry).unwrap());
+    }
+}
+
+#[allow(dead_code)]
+fn append_thread_posts_cache(
+    uucp_dir: &str,
+    thread_id: &str,
+    posts: &[ThreadCachePostEntry],
+) {
+    let path = thread_posts_cache_path(uucp_dir, thread_id);
+    let _ = fs::create_dir_all(thread_cache_dir(uucp_dir));
+    let mut file = match fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    for entry in posts {
+        let _ = writeln!(file, "{}", serde_json::to_string(entry).unwrap());
+    }
+}
+
+#[allow(dead_code)]
+fn read_thread_posts_cache_with_meta(
+    uucp_dir: &str,
+    thread_id: &str,
+) -> Option<(Vec<ThreadCachePostEntry>, usize)> {
+    let path = thread_posts_cache_path(uucp_dir, thread_id);
+    let content = fs::read_to_string(&path).ok()?;
+    let mut lines = content.lines();
+    let meta_line = lines.next()?;
+    let meta: ThreadCacheMeta = serde_json::from_str(meta_line).ok()?;
+    let posts = lines
+        .filter_map(|line| serde_json::from_str::<ThreadCachePostEntry>(line).ok())
+        .collect();
+    Some((posts, meta.index_len))
+}
+
+#[allow(dead_code)]
+fn write_thread_posts_cache_with_meta(
+    uucp_dir: &str,
+    thread_id: &str,
+    posts: &[ThreadCachePostEntry],
+    index_len: usize,
+) {
+    let path = thread_posts_cache_path(uucp_dir, thread_id);
+    let _ = fs::create_dir_all(thread_cache_dir(uucp_dir));
+    let mut file = match fs::File::create(&path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    let _ = writeln!(
+        file,
+        "{}",
+        serde_json::to_string(&ThreadCacheMeta { index_len }).unwrap()
+    );
+    for entry in posts {
+        let _ = writeln!(file, "{}", serde_json::to_string(entry).unwrap());
+    }
+}
+
+#[allow(dead_code)]
+fn compute_and_save_thread_roots(
+    entries: &[PasteIndex],
+    uucp_dir: &str,
+    index_len: usize,
+) -> Vec<PasteIndex> {
+    let info = compute_thread_root_info(entries, uucp_dir);
+    write_threads_cache(&info, uucp_dir, index_len);
+    info.iter().map(|entry| PasteIndex::from(entry)).collect()
+}
+
+#[allow(dead_code)]
+fn compute_thread_root_info(entries: &[PasteIndex], uucp_dir: &str) -> Vec<ThreadCacheRootEntry> {
+    let entries_by_id: HashMap<String, PasteIndex> = entries
+        .iter()
+        .map(|entry| (entry.id.clone(), entry.clone()))
+        .collect();
+    let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
+
+    for entry in entries {
+        if let Some(parent) = entry_reply_to(entry, uucp_dir) {
+            children_by_parent
+                .entry(parent)
+                .or_default()
+                .push(entry.id.clone());
+        }
+    }
+
+    let roots: Vec<String> = entries
+        .iter()
+        .filter(|e| {
+            if let Some(parent) = entry_reply_to(e, uucp_dir) {
+                entries_by_id.contains_key(&parent)
+            } else {
+                true
+            }
+        })
+        .map(|e| e.id.clone())
+        .collect();
+
+    let mut visited = std::collections::HashSet::new();
+    let mut root_sizes: HashMap<String, usize> = HashMap::new();
+    let mut root_max_times: HashMap<String, String> = HashMap::new();
+
+    for root in &roots {
+        if !visited.insert(root.clone()) {
+            continue;
+        }
+        let mut stack = vec![root.clone()];
+        let mut count = 0usize;
+        let mut max_ts = String::new();
+        while let Some(id) = stack.pop() {
+            count += 1;
+            if let Some(entry) = entries_by_id.get(&id) {
+                if entry.timestamp > max_ts {
+                    max_ts = entry.timestamp.clone();
+                }
+            }
+            for child in children_by_parent.get(&id).into_iter().flatten() {
+                if visited.insert(child.clone()) {
+                    stack.push(child.clone());
+                }
+            }
+        }
+        root_sizes.insert(root.clone(), count);
+        root_max_times.insert(root.clone(), max_ts);
+    }
+
+    roots
+        .into_iter()
+        .filter_map(|id| {
+            let entry = entries_by_id.get(&id)?;
+            Some(ThreadCacheRootEntry {
+                id: entry.id.clone(),
+                title: entry.title.clone(),
+                description: entry.description.clone(),
+                timestamp: entry.timestamp.clone(),
+                size: entry.size,
+                reply_count: *root_sizes.get(&id).unwrap_or(&1),
+                last_timestamp: root_max_times
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(|| entry.timestamp.clone()),
+            })
+        })
+        .collect()
 }
 
 fn render_paste_entry(e: &PasteIndex, base_path: &str) -> String {

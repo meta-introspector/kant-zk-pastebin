@@ -149,3 +149,41 @@ pub fn auto_describe(content: &str) -> String {
         preview
     }
 }
+
+pub fn extract_html_text(html: &str) -> String {
+    let mut text = String::new();
+    let mut chars = html.chars().peekable();
+    let mut skip_until_close = false;
+
+    while let Some(ch) = chars.next() {
+        if ch == '<' {
+            let mut tag = String::new();
+            for c in chars.by_ref() {
+                tag.push(c);
+                if c == '>' {
+                    break;
+                }
+            }
+            let lower = tag.to_lowercase();
+            if lower.starts_with("script") || lower.starts_with("style") {
+                skip_until_close = true;
+            } else if lower.starts_with("/script") || lower.starts_with("/style") {
+                skip_until_close = false;
+            } else if !skip_until_close {
+                if tag == "br" || tag == "br/" || tag == "br /" {
+                    text.push('\n');
+                } else if tag == "p" || tag == "/p" || tag == "div" || tag == "/div" {
+                    text.push('\n');
+                }
+            }
+        } else if !skip_until_close {
+            text.push(ch);
+        }
+    }
+
+    text.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}

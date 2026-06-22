@@ -83,11 +83,28 @@ function copyShareUrl() {
   }
 }
 
-function sharePost() {
-  if (navigator.share) {
-    navigator.share({title: title, url: pasteUrl, text: 'Check out this paste: ' + pasteUrl}).catch(copyShareUrl);
+function copyShareBody() {
+  const pre = document.querySelector('pre');
+  const content = pre ? (pre.textContent || '') : '';
+  if (content) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(content).then(() => alert('Paste content copied.')).catch(() => alert(content.slice(0, 1000)));
+    } else {
+      alert(content.slice(0, 1000));
+    }
   } else {
     copyShareUrl();
+  }
+}
+
+function sharePost() {
+  const pre = document.querySelector('pre');
+  const content = pre ? (pre.textContent || '') : '';
+  if (navigator.share) {
+    const shareText = content || 'Check out this paste: ' + pasteUrl;
+    navigator.share({title: title, url: pasteUrl, text: shareText}).catch(copyShareBody);
+  } else {
+    copyShareBody();
   }
 }
 
