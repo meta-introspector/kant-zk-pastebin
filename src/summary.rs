@@ -1,5 +1,7 @@
-// Summary - AI-powered auto-population of title, description, and body via Ollama
-use std::env;
+// Summary - Deterministic NLP-based auto-population of title, description, and body
+// No external ML services, pure Rust, no syscalls
+
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Summary {
@@ -8,24 +10,13 @@ pub struct Summary {
     pub body: String,
 }
 
-pub async fn summarize_upload(name: &str, content: &str) -> Option<Summary> {
-    let ollama_url =
-        env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
-    let model = env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3".to_string());
-
-    let chunks = chunk_text(content, 250);
+pub fn summarize_upload(name: &str, content: &str) -> Option<Summary> {
+    let chunks = chunk_text(content, 350);
     if chunks.len() == 1 {
-        summarize_chunk(&ollama_url, &model, name, &chunks[0]).await
+        summarize_chunk(name, &chunks[0])
     } else {
-        let mut combined = String::new();
-        for (i, chunk) in chunks.iter().enumerate() {
-            if let Some(s) = summarize_chunk_brief(&ollama_url, &model, name, i + 1, chunk).await {
-                combined.push_str(&format!("[Part {}]: {}\n", i + 1, s));
-            } else {
-                combined.push_str(&format!("[Part {}]: {}\n", i + 1, truncate(chunk, 300)));
-            }
-        }
-        summarize_combined(&ollama_url, &model, name, &combined).await
+        let combined = chunks.join("\n---\n");
+        summarize_chunk(name, &combined)
     }
 }
 
@@ -127,98 +118,200 @@ fn recursive_split(text: &str, max_chars: usize) -> Vec<String> {
     vec![text.to_string()]
 }
 
-async fn summarize_chunk(ollama_url: &str, model: &str, name: &str, chunk: &str) -> Option<Summary> {
-    let prompt = format!(
-        "You are a summarization assistant. Summarize the following file named '{}' for use in an AI knowledge base.\n\nContent:\n{}\n\nRules:\n- Title: max 80 chars, descriptive\n- Description: 1-2 sentences only\n- Body: concise summary targeting ~400 tokens (max 1500 chars)\n\nReturn ONLY valid JSON with no markdown fences and no extra text:\n{{\"title\":\"...\",\"description\":\"...\",\"body\":\"...\"}}\n",
-        name, chunk
-    );
-    call_ollama_summary(ollama_url, model, &prompt, 1200).await
-}
+fn summarize_chunk(name: &str, chunk: &str) -> Option<Summary> {
+    let lines: Vec<&str> = chunk.lines().collect();
+    let word_count = chunk.split_whitespace().count();
 
-async fn summarize_chunk_brief(
-    ollama_url: &str,
-    model: &str,
-    name: &str,
-    idx: usize,
-    chunk: &str,
-) -> Option<String> {
-    let prompt = format!(
-        "Summarize this chunk (part {} of file '{}') in 1-2 sentences only. No JSON, no extra text:\n\n{}\n",
-        idx, name, chunk
-    );
-    call_ollama_text(ollama_url, model, &prompt, 120).await
-}
+    let title = generate_title(name, &lines, chunk);
+    let description = generate_description(&lines, chunk);
+    let body = generate_body(chunk);
 
-async fn summarize_combined(
-    ollama_url: &str,
-    model: &str,
-    name: &str,
-    combined: &str,
-) -> Option<Summary> {
-    let prompt = format!(
-        "You are a summarization assistant. These are chunk summaries from file '{}'.\n\n{}\n\nRules:\n- Title: max 80 chars, descriptive\n- Description: 1-2 sentences only\n- Body: concise combined summary targeting ~400 tokens (max 1500 chars)\n\nReturn ONLY valid JSON with no markdown fences and no extra text:\n{{\"title\":\"...\",\"description\":\"...\",\"body\":\"...\"}}\n",
-        name, combined
-    );
-    call_ollama_summary(ollama_url, model, &prompt, 1200).await
-}
-
-async fn call_ollama_text(
-    ollama_url: &str,
-    model: &str,
-    prompt: &str,
-    max_tokens: usize,
-) -> Option<String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .ok()?;
-
-    let url = format!("{}/api/generate", ollama_url);
-    let body = serde_json::json!({
-        "model": model,
-        "prompt": prompt,
-        "stream": false,
-        "options": {"num_predict": max_tokens, "temperature": 0.3}
-    });
-
-    let resp = client.post(&url).json(&body).send().await.ok()?;
-    let json: serde_json::Value = resp.json().await.ok()?;
-    json.get("response")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-}
-
-async fn call_ollama_summary(
-    ollama_url: &str,
-    model: &str,
-    prompt: &str,
-    max_tokens: usize,
-) -> Option<Summary> {
-    let text = call_ollama_text(ollama_url, model, prompt, max_tokens).await?;
-    parse_summary(&text)
-}
-
-fn parse_summary(text: &str) -> Option<Summary> {
-    let cleaned = text
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-    let json: serde_json::Value = serde_json::from_str(cleaned).ok()?;
     Some(Summary {
-        title: json.get("title")?.as_str()?.trim().to_string(),
-        description: json.get("description")?.as_str()?.trim().to_string(),
-        body: json.get("body")?.as_str()?.trim().to_string(),
+        title,
+        description,
+        body,
     })
 }
 
-fn truncate(s: &str, max_chars: usize) -> String {
-    if s.len() <= max_chars {
-        s.to_string()
+fn generate_title(name: &str, lines: &[&str], full: &str) -> String {
+    let base = if name.is_empty() || name == "upload" {
+        extract_first_meaningful_line(lines)
     } else {
-        let mut t = s[..max_chars].to_string();
-        t.push_str("...");
-        t
+        clean_filename(name)
+    };
+
+    if base.len() > 80 {
+        base.chars().take(77).collect::<String>() + "..."
+    } else if base.len() < 3 {
+        let keywords = top_keywords(full, 3);
+        if keywords.is_empty() {
+            "Untitled Paste".to_string()
+        } else {
+            keywords
+                .iter()
+                .map(|w| capitalize(w))
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+    } else {
+        base
     }
+}
+
+fn generate_description(lines: &[&str], full: &str) -> String {
+    let mut candidates = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.len() > 20
+            && trimmed.len() < 200
+            && !trimmed.starts_with("#")
+            && !trimmed.starts_with("//")
+        {
+            if !trimmed.contains("http") || trimmed.contains("://") {
+                candidates.push(trimmed);
+            }
+        }
+        if candidates.len() >= 5 {
+            break;
+        }
+    }
+
+    if candidates.is_empty() {
+        return format!("Document with {} words", full.split_whitespace().count());
+    }
+
+    let mut desc = candidates[0].to_string();
+    if candidates.len() > 1 {
+        desc.push_str(". ");
+        desc.push_str(candidates[1]);
+    }
+    if desc.len() > 180 {
+        desc.truncate(177);
+        desc.push_str("...");
+    }
+    desc
+}
+
+fn generate_body(full: &str) -> String {
+    let words: Vec<&str> = full.split_whitespace().take(400).collect();
+    let mut body = words.join(" ");
+    let word_count = full.split_whitespace().count();
+    if word_count > 400 {
+        body.push_str(" ... [truncated for context window]");
+    }
+    body
+}
+
+fn extract_first_meaningful_line(lines: &[&str]) -> String {
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.len() > 10
+            && !trimmed.starts_with('#')
+            && !trimmed.starts_with("//")
+            && !trimmed.starts_with("/*")
+        {
+            return clean_line(trimmed);
+        }
+    }
+    "Untitled Paste".to_string()
+}
+
+fn clean_filename(name: &str) -> String {
+    let stem = name.rsplit('.').next().unwrap_or(name);
+    stem.replace('_', " ")
+        .split_whitespace()
+        .map(capitalize)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn clean_line(line: &str) -> String {
+    line.trim_start_matches(|c: char| !c.is_alphanumeric())
+        .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '.')
+        .to_string()
+}
+
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
+fn top_keywords(text: &str, n: usize) -> Vec<String> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for word in text.split_whitespace() {
+        let w = word
+            .to_lowercase()
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_string();
+        if w.len() > 3 && !is_stopword(&w) {
+            *counts.entry(w).or_insert(0) += 1;
+        }
+    }
+    let mut items: Vec<_> = counts.into_iter().collect();
+    items.sort_by(|a, b| b.1.cmp(&a.1));
+    items.truncate(n);
+    items.into_iter().map(|(w, _)| w).collect()
+}
+
+fn is_stopword(w: &str) -> bool {
+    matches!(
+        w,
+        "the"
+            | "and"
+            | "for"
+            | "with"
+            | "this"
+            | "that"
+            | "from"
+            | "have"
+            | "been"
+            | "were"
+            | "was"
+            | "are"
+            | "but"
+            | "not"
+            | "you"
+            | "all"
+            | "can"
+            | "her"
+            | "his"
+            | "him"
+            | "our"
+            | "out"
+            | "who"
+            | "what"
+            | "when"
+            | "where"
+            | "why"
+            | "how"
+            | "each"
+            | "which"
+            | "their"
+            | "than"
+            | "them"
+            | "then"
+            | "some"
+            | "would"
+            | "make"
+            | "like"
+            | "into"
+            | "time"
+            | "very"
+            | "just"
+            | "over"
+            | "such"
+            | "after"
+            | "also"
+            | "only"
+            | "more"
+            | "most"
+            | "other"
+            | "should"
+            | "could"
+            | "would"
+            | "there"
+    )
 }

@@ -466,10 +466,7 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
         } else {
             raw_text.to_string()
         };
-        if let Ok(Ok(Some(summary))) = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            crate::summary::summarize_upload(&orig_name, &text)
-        ).await {
+        if let Some(summary) = crate::summary::summarize_upload(&orig_name, &text) {
             if title.is_empty() || title == archive_name_title(&orig_name) {
                 title = summary.title;
             }
