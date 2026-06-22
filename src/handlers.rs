@@ -399,8 +399,8 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let mut file_data: Vec<u8> = Vec::new();
     let mut orig_name = String::new();
-    let mut title = String::new();
-    let mut description = String::new();
+    let mut user_title = String::new();
+    let mut user_description = String::new();
 
     while let Some(item) = payload.next().await {
         let mut field = item.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
@@ -419,10 +419,10 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
                 file_data = buf;
             }
             "title" => {
-                title = clean_field(&String::from_utf8_lossy(&buf));
+                user_title = clean_field(&String::from_utf8_lossy(&buf));
             }
             "description" => {
-                description = clean_field(&String::from_utf8_lossy(&buf));
+                user_description = clean_field(&String::from_utf8_lossy(&buf));
             }
             _ => {}
         }
@@ -435,14 +435,39 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     let ext = orig_name.rsplit('.').next().unwrap_or("bin");
     let mime = mime_guess::from_ext(ext).first_or_octet_stream();
     let mime_str = mime.to_string();
-    if title.is_empty() {
-        title = archive_name_title(&orig_name);
-    }
-    let mut description = if description.is_empty() {
-        file_description(&orig_name, &mime_str, file_data.len(), &file_data)
+
+    let save_title = if user_title.is_empty() {
+        archive_name_title(&orig_name)
     } else {
-        description
+        user_title.clone()
     };
+
+    let save_slug = tagging::slugify(&save_title);
+    let filename = format!("{}_{}.{}", ts, save_slug, ext);
+    let id = filename
+        .rsplit_once('.')
+        .map(|(s, _)| s)
+        .unwrap_or(&filename)
+        .to_string();
+    let uucp = format!("{}/{}", uucp_dir, filename);
+
+    fs::write(&uucp, &file_data).ok();
+    log::info!("[upload] saved file: {} ({} bytes)", uucp, file_data.len());
+
+    let mut hasher = Sha256::new();
+    hasher.update(&file_data);
+    let hash = hasher.finalize();
+    let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
+    let witness = hex::encode(&hash);
+    let ipfs_cid = ipfs::ipfs_add_bytes(&file_data);
+
+    let mut final_title = save_title.clone();
+    let mut final_description = user_description.clone();
+
+    if final_description.is_empty() {
+        final_description = file_description(&orig_name, &mime_str, file_data.len(), &file_data);
+    }
+
     let is_plain_text = mime_str.starts_with("text/")
         || orig_name.to_lowercase().ends_with(".txt")
         || orig_name.to_lowercase().ends_with(".md")
@@ -460,85 +485,79 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
         || orig_name.to_lowercase().ends_with(".h");
 
     if is_plain_text {
+        log::info!("[upload] file={} is plain text, running NLP summary", orig_name);
         let raw_text = String::from_utf8_lossy(&file_data);
         let text = if mime_str.contains("html") || orig_name.to_lowercase().ends_with(".mth") || orig_name.to_lowercase().ends_with(".html") {
+            log::info!("[upload] extracting HTML text from {}", orig_name);
             crate::tagging::extract_html_text(&raw_text)
         } else {
             raw_text.to_string()
         };
-        if let Some(summary) = crate::summary::summarize_upload(&orig_name, &text) {
-            if title.is_empty() || title == archive_name_title(&orig_name) {
-                title = summary.title;
+
+        match crate::summary::summarize_upload(&orig_name, &text) {
+            Some(summary) => {
+                log::info!("[upload] NLP summary generated for {}: title='{}'", orig_name, summary.title);
+                if user_title.is_empty() && !summary.title.is_empty() {
+                    final_title = summary.title;
+                }
+                if final_description.is_empty() && !summary.description.is_empty() {
+                    final_description = summary.description;
+                }
             }
-            if description.is_empty() {
-                description = summary.description;
+            None => {
+                log::info!("[upload] NLP summary returned no result for {}", orig_name);
             }
         }
+    } else {
+        log::info!("[upload] file={} is binary, skipping NLP", orig_name);
     }
 
-    let slug = tagging::slugify(&title);
-
-    let mut hasher = Sha256::new();
-    hasher.update(&file_data);
-    let hash = hasher.finalize();
-    let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
-    let witness = hex::encode(&hash);
-    let ipfs_cid = ipfs::ipfs_add_bytes(&file_data);
-
-    let filename = format!("{}_{}.{}", ts, slug, ext);
-    let id = filename
+    let final_slug = tagging::slugify(&final_title);
+    let final_filename = format!("{}_{}.{}", ts, final_slug, ext);
+    let final_id = final_filename
         .rsplit_once('.')
         .map(|(s, _)| s)
-        .unwrap_or(&filename)
+        .unwrap_or(&final_filename)
         .to_string();
-    let uucp = format!("{}/{}", uucp_dir, filename);
+    let final_uucp = format!("{}/{}", uucp_dir, final_filename);
 
-    fs::write(&uucp, &file_data).ok();
-
-    // Write metadata sidecar
-    let meta = format!(
-        "--- {} ---\nTitle: {}\nDescription: {}\nMime: {}\nCID: {}\nWitness: {}\nIPFS: {}\nSize: {}\n",
-        id,
-        title,
-        description,
-        mime,
-        local_cid,
-        witness,
-        ipfs_cid.as_deref().unwrap_or(""),
-        file_data.len()
-    );
-    fs::write(format!("{}.meta", uucp), &meta).ok();
+    if final_uucp != uucp {
+        fs::rename(&uucp, &final_uucp).ok();
+        log::info!("[upload] renamed {} -> {}", uucp, final_uucp);
+    }
 
     // CID dedup file
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
-    fs::write(&cid_file, &id).ok();
+    fs::write(&cid_file, &final_id).ok();
 
     write_index_entry(
         &uucp_dir,
-        &id,
-        &title,
-        Some(&description),
+        &final_id,
+        &final_title,
+        Some(&final_description),
         vec!["upload".to_string(), ext.to_string()],
         &local_cid,
         &witness,
-        &filename,
+        &final_filename,
         file_data.len(),
         ipfs_cid.clone(),
         None,
         None,
     );
 
+    log::info!("[upload] completed: id={} title='{}'", final_id, final_title);
+
     Ok(HttpResponse::Ok().json(serde_json::json!({
-        "id": id,
-        "filename": filename,
-        "title": title,
-        "description": description,
+        "id": final_id,
+        "filename": final_filename,
+        "title": final_title,
+        "description": final_description,
         "cid": local_cid,
         "ipfs_cid": ipfs_cid,
         "witness": witness,
         "mime": mime.to_string(),
         "size": file_data.len(),
-        "url": format!("/paste/{}", id),
+        "url": format!("/paste/{}", final_id),
     })))
 }
 

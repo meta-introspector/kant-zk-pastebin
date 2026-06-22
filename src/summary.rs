@@ -195,8 +195,8 @@ fn generate_description(lines: &[&str], full: &str) -> String {
 fn generate_body(full: &str) -> String {
     let words: Vec<&str> = full.split_whitespace().take(400).collect();
     let mut body = words.join(" ");
-    let word_count = full.split_whitespace().count();
-    if word_count > 400 {
+    let total_words = full.split_whitespace().count();
+    if total_words > 400 {
         body.push_str(" ... [truncated for context window]");
     }
     body
@@ -311,7 +311,6 @@ fn is_stopword(w: &str) -> bool {
             | "other"
             | "should"
             | "could"
-            | "would"
             | "there"
     )
 }
