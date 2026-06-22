@@ -8,24 +8,24 @@ pub struct Summary {
     pub body: String,
 }
 
-pub fn summarize_upload(name: &str, content: &str) -> Option<Summary> {
+pub async fn summarize_upload(name: &str, content: &str) -> Option<Summary> {
     let ollama_url =
         env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let model = env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3".to_string());
 
     let chunks = chunk_text(content, 250);
     if chunks.len() == 1 {
-        summarize_chunk(&ollama_url, &model, name, &chunks[0])
+        summarize_chunk(&ollama_url, &model, name, &chunks[0]).await
     } else {
         let mut combined = String::new();
         for (i, chunk) in chunks.iter().enumerate() {
-            if let Some(s) = summarize_chunk_brief(&ollama_url, &model, name, i + 1, chunk) {
+            if let Some(s) = summarize_chunk_brief(&ollama_url, &model, name, i + 1, chunk).await {
                 combined.push_str(&format!("[Part {}]: {}\n", i + 1, s));
             } else {
                 combined.push_str(&format!("[Part {}]: {}\n", i + 1, truncate(chunk, 300)));
             }
         }
-        summarize_combined(&ollama_url, &model, name, &combined)
+        summarize_combined(&ollama_url, &model, name, &combined).await
     }
 }
 
@@ -127,15 +127,15 @@ fn recursive_split(text: &str, max_chars: usize) -> Vec<String> {
     vec![text.to_string()]
 }
 
-fn summarize_chunk(ollama_url: &str, model: &str, name: &str, chunk: &str) -> Option<Summary> {
+async fn summarize_chunk(ollama_url: &str, model: &str, name: &str, chunk: &str) -> Option<Summary> {
     let prompt = format!(
         "You are a summarization assistant. Summarize the following file named '{}' for use in an AI knowledge base.\n\nContent:\n{}\n\nRules:\n- Title: max 80 chars, descriptive\n- Description: 1-2 sentences only\n- Body: concise summary targeting ~400 tokens (max 1500 chars)\n\nReturn ONLY valid JSON with no markdown fences and no extra text:\n{{\"title\":\"...\",\"description\":\"...\",\"body\":\"...\"}}\n",
         name, chunk
     );
-    call_ollama_summary(ollama_url, model, &prompt, 1200)
+    call_ollama_summary(ollama_url, model, &prompt, 1200).await
 }
 
-fn summarize_chunk_brief(
+async fn summarize_chunk_brief(
     ollama_url: &str,
     model: &str,
     name: &str,
@@ -146,10 +146,10 @@ fn summarize_chunk_brief(
         "Summarize this chunk (part {} of file '{}') in 1-2 sentences only. No JSON, no extra text:\n\n{}\n",
         idx, name, chunk
     );
-    call_ollama_text(ollama_url, model, &prompt, 120)
+    call_ollama_text(ollama_url, model, &prompt, 120).await
 }
 
-fn summarize_combined(
+async fn summarize_combined(
     ollama_url: &str,
     model: &str,
     name: &str,
@@ -159,16 +159,16 @@ fn summarize_combined(
         "You are a summarization assistant. These are chunk summaries from file '{}'.\n\n{}\n\nRules:\n- Title: max 80 chars, descriptive\n- Description: 1-2 sentences only\n- Body: concise combined summary targeting ~400 tokens (max 1500 chars)\n\nReturn ONLY valid JSON with no markdown fences and no extra text:\n{{\"title\":\"...\",\"description\":\"...\",\"body\":\"...\"}}\n",
         name, combined
     );
-    call_ollama_summary(ollama_url, model, &prompt, 1200)
+    call_ollama_summary(ollama_url, model, &prompt, 1200).await
 }
 
-fn call_ollama_text(
+async fn call_ollama_text(
     ollama_url: &str,
     model: &str,
     prompt: &str,
     max_tokens: usize,
 ) -> Option<String> {
-    let client = reqwest::blocking::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .ok()?;
@@ -181,20 +181,20 @@ fn call_ollama_text(
         "options": {"num_predict": max_tokens, "temperature": 0.3}
     });
 
-    let resp = client.post(&url).json(&body).send().ok()?;
-    let json: serde_json::Value = resp.json().ok()?;
+    let resp = client.post(&url).json(&body).send().await.ok()?;
+    let json: serde_json::Value = resp.json().await.ok()?;
     json.get("response")
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
 }
 
-fn call_ollama_summary(
+async fn call_ollama_summary(
     ollama_url: &str,
     model: &str,
     prompt: &str,
     max_tokens: usize,
 ) -> Option<Summary> {
-    let text = call_ollama_text(ollama_url, model, prompt, max_tokens)?;
+    let text = call_ollama_text(ollama_url, model, prompt, max_tokens).await?;
     parse_summary(&text)
 }
 
