@@ -391,6 +391,8 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
 }
 
 /// POST /upload - Upload file (multipart)
+/// Save-first: write file to disk immediately, then return.
+/// No NLP, no HTML extraction, no blocking calls in this handler.
 pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
     use actix_web::web::BytesMut;
     use futures_util::StreamExt as _;
@@ -465,95 +467,37 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     let witness = hex::encode(&hash);
     let ipfs_cid = ipfs::ipfs_add_bytes(&file_data);
 
-    let mut final_title = save_title.clone();
-    let mut final_description = user_description.clone();
-
-    if final_description.is_empty() {
-        final_description = file_description(&orig_name, &mime_str, file_data.len(), &file_data);
-    }
-
-    let is_plain_text = mime_str.starts_with("text/")
-        || orig_name.to_lowercase().ends_with(".txt")
-        || orig_name.to_lowercase().ends_with(".md")
-        || orig_name.to_lowercase().ends_with(".json")
-        || orig_name.to_lowercase().ends_with(".html")
-        || orig_name.to_lowercase().ends_with(".mth")
-        || orig_name.to_lowercase().ends_with(".csv")
-        || orig_name.to_lowercase().ends_with(".rs")
-        || orig_name.to_lowercase().ends_with(".py")
-        || orig_name.to_lowercase().ends_with(".js")
-        || orig_name.to_lowercase().ends_with(".ts")
-        || orig_name.to_lowercase().ends_with(".java")
-        || orig_name.to_lowercase().ends_with(".c")
-        || orig_name.to_lowercase().ends_with(".cpp")
-        || orig_name.to_lowercase().ends_with(".h");
-
-    if is_plain_text {
-        log::info!("[upload] file={} is plain text, running NLP summary", orig_name);
-        let raw_text = String::from_utf8_lossy(&file_data);
-        let text = if mime_str.contains("html") || orig_name.to_lowercase().ends_with(".mth") || orig_name.to_lowercase().ends_with(".html") {
-            log::info!("[upload] extracting HTML text from {}", orig_name);
-            crate::tagging::extract_html_text(&raw_text)
-        } else {
-            raw_text.to_string()
-        };
-
-        match crate::summary::summarize_upload(&orig_name, &text) {
-            Some(summary) => {
-                log::info!("[upload] NLP summary generated for {}: title='{}'", orig_name, summary.title);
-                if user_title.is_empty() && !summary.title.is_empty() {
-                    final_title = summary.title;
-                }
-                if final_description.is_empty() && !summary.description.is_empty() {
-                    final_description = summary.description;
-                }
-            }
-            None => {
-                log::info!("[upload] NLP summary returned no result for {}", orig_name);
-            }
-        }
+    let final_title = save_title.clone();
+    let final_description = if user_description.is_empty() {
+        file_description(&orig_name, &mime_str, file_data.len(), &file_data)
     } else {
-        log::info!("[upload] file={} is binary, skipping NLP", orig_name);
-    }
-
-    let final_slug = tagging::slugify(&final_title);
-    let final_filename = format!("{}_{}.{}", ts, final_slug, ext);
-    let final_id = final_filename
-        .rsplit_once('.')
-        .map(|(s, _)| s)
-        .unwrap_or(&final_filename)
-        .to_string();
-    let final_uucp = format!("{}/{}", uucp_dir, final_filename);
-
-    if final_uucp != uucp {
-        fs::rename(&uucp, &final_uucp).ok();
-        log::info!("[upload] renamed {} -> {}", uucp, final_uucp);
-    }
+        user_description.clone()
+    };
 
     // CID dedup file
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
-    fs::write(&cid_file, &final_id).ok();
+    fs::write(&cid_file, &id).ok();
 
     write_index_entry(
         &uucp_dir,
-        &final_id,
+        &id,
         &final_title,
         Some(&final_description),
         vec!["upload".to_string(), ext.to_string()],
         &local_cid,
         &witness,
-        &final_filename,
+        &filename,
         file_data.len(),
         ipfs_cid.clone(),
         None,
         None,
     );
 
-    log::info!("[upload] completed: id={} title='{}'", final_id, final_title);
+    log::info!("[upload] completed: id={} title='{}'", id, final_title);
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
-        "id": final_id,
-        "filename": final_filename,
+        "id": id,
+        "filename": filename,
         "title": final_title,
         "description": final_description,
         "cid": local_cid,
@@ -561,7 +505,7 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
         "witness": witness,
         "mime": mime.to_string(),
         "size": file_data.len(),
-        "url": format!("/paste/{}", final_id),
+        "url": format!("/paste/{}", id),
     })))
 }
 
