@@ -9,11 +9,48 @@ use crate::{ipfs, plugin, storage, tagging, view};
 use actix_web::{web, HttpRequest, HttpResponse, Result};
 use chrono::Utc;
 use ciborium;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Path;
 use std::{collections::HashMap, env, fs};
+
+// ─── Helper: basic HTML lint ──────────────────────────────────────────
+fn lint_html(html: &str) -> Vec<String> {
+    let mut issues = Vec::new();
+    let lower = html.to_lowercase();
+    if !lower.contains("<html") || !lower.contains("</html>") {
+        issues.push("missing <html> root".to_string());
+    }
+    if !lower.contains("<head>") || !lower.contains("</head>") {
+        issues.push("missing <head>".to_string());
+    }
+    if !lower.contains("<body>") || !lower.contains("</body>") {
+        issues.push("missing <body>".to_string());
+    }
+    if !lower.contains("<title>") || !lower.contains("</title>") {
+        issues.push("missing <title>".to_string());
+    }
+    if !lower.contains("<meta charset") {
+        issues.push("missing charset meta".to_string());
+    }
+    if !lower.contains("<pre") && !lower.contains("<pre>") {
+        issues.push("missing <pre> content container".to_string());
+    }
+    let open_tags = html.matches("<select").count()
+        + html.matches("<div").count()
+        + html.matches("<script").count()
+        + html.matches("<style").count();
+    let close_tags = html.matches("</select>").count()
+        + html.matches("</div>").count()
+        + html.matches("</script>").count()
+        + html.matches("</style>").count();
+    if open_tags != close_tags {
+        issues.push(format!("unbalanced tags: open={} close={}", open_tags, close_tags));
+    }
+    issues
+}
 
 // ─── Helper: append an entry to index.jsonl ──────────────────────────
 fn write_index_entry(
@@ -723,7 +760,6 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 .share-menu button:hover{{background:#0f0;color:#000}}
 .cmd{{background:#111;padding:10px;margin:5px 0;border-left:3px solid #ff0;cursor:pointer;font-size:12px}}
 .cmd:hover{{background:#222}}
-<a href="contextURL">
 .qr-modal{{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:20px;border:3px solid #0f0;z-index:1000;display:none}}
 .qr-modal h3{{color:#000}}
 .preview-modal{{position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:2000;overflow:auto;display:none}}
@@ -770,6 +806,12 @@ const ipfsCid = '{}';
 const pasteUrl = window.location.href;
 const currentPasteId = '{}';
 const title = '{}';
+console.log('[pastebin][debug] page id=' + currentPasteId + ' title=' + title + ' base_path={}');
+console.log('[pastebin][debug] pre present=', !!document.querySelector('pre'));
+console.log('[pastebin][debug] pre count=', document.querySelectorAll('pre').length);
+if (!document.querySelector('pre')) console.error('[pastebin][lint] missing <pre> content container');
+if (!document.title) console.warn('[pastebin][lint] missing <title>');
+if (!document.querySelector('meta[charset]')) console.warn('[pastebin][lint] missing charset meta');
 
 {share_script}
 function showQR() {{
@@ -905,6 +947,12 @@ function bundleSelected() {{
                 base_path,
                 share_menu = crate::share::render_share_menu(),
                 share_script = crate::share::render_share_script()
+            );
+
+            let lint_issues = lint_html(&html);
+            debug!(
+                "paste={} title={} html_bytes={} lint={:?}",
+                id, title, html.len(), lint_issues
             );
 
             Ok(HttpResponse::Ok()

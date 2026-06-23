@@ -41,6 +41,12 @@ pub fn render_paste(paste: &PasteIndex, content: &str, base_path: &str) -> Strin
     <button class="reply-btn" onclick="copyRaw()">📋 Copy HTML</button>
     <pre id="src">{content}</pre>
     <script>
+    console.log('[pastebin][debug] render_paste id={pid} title={title} base_path={bp} content_len={content_len}');
+    console.log('[pastebin][debug] pre#src present=', !!document.getElementById('src'));
+    console.log('[pastebin][debug] document.querySelectorAll("pre").length=', document.querySelectorAll('pre').length);
+    if (!document.getElementById('src')) console.error('[pastebin][lint] missing #src pre');
+    if (!document.title) console.warn('[pastebin][lint] missing <title>');
+    if (!document.querySelector('meta[charset]')) console.warn('[pastebin][lint] missing charset meta');
     function copyRaw(){{
       var t=document.getElementById('src').textContent;
       navigator.clipboard.writeText(t).then(function(){{
@@ -56,7 +62,8 @@ pub fn render_paste(paste: &PasteIndex, content: &str, base_path: &str) -> Strin
         pid = paste.id,
         ts = paste.timestamp,
         reply = reply_info,
-        content = html_escape(content)
+        content = html_escape(content),
+        content_len = content.len()
     )
 }
 
