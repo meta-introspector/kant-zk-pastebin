@@ -63,8 +63,9 @@
 
           doInstallCargoArtifacts = false;
 
-          # Pass git revision into the build so build.rs can embed it
+          # Pass git revision and base path into the build so build.rs can embed them
           GIT_COMMIT = gitRev;
+          BASE_PATH = "/pastebin";
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;

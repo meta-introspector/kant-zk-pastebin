@@ -248,7 +248,7 @@ form.onsubmit = async (e) => {{
 /// POST /paste - Create paste
 #[utoipa::path(
     post,
-    path = "/paste",
+    path = concat!(env!("BASE_PATH"), "/paste"),
     request_body = Paste,
     responses(
         (status = 200, description = "Paste created", body = Response)
@@ -543,7 +543,7 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
 /// GET /paste/{id} - View paste
 #[utoipa::path(
     get,
-    path = "/paste/{id}",
+    path = concat!(env!("BASE_PATH"), "/paste/{id}"),
     params(
         ("id" = String, Path, description = "Paste ID")
     ),
@@ -1363,7 +1363,7 @@ pub async fn threads(
 /// GET /browse - List pastes
 #[utoipa::path(
     get,
-    path = "/browse",
+    path = concat!(env!("BASE_PATH"), "/browse"),
     params(
         ("q" = Option<String>, Query, description = "Search query")
     ),

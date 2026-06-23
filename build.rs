@@ -18,8 +18,6 @@ fn read_git_commit(dir: &Path) -> Option<String> {
 }
 
 fn main() {
-    // Nix passes GIT_COMMIT via the flake (gitRev = self.shortRev or "dirty").
-    // Fall back to reading .git/HEAD for local cargo builds.
     let git_commit = env::var("GIT_COMMIT")
         .ok()
         .or_else(|| {
@@ -34,5 +32,10 @@ fn main() {
         })
         .unwrap_or_else(|| "unknown".to_string());
 
+    let base_path = env::var("BASE_PATH")
+        .ok()
+        .unwrap_or_else(|| "/pastebin".to_string());
+
     println!("cargo:rustc-env=GIT_COMMIT={}", git_commit);
+    println!("cargo:rustc-env=BASE_PATH={}", base_path);
 }
