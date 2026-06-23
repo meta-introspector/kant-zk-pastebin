@@ -3410,36 +3410,22 @@ async fn create_chunk_line_store(title: &str, lines: &[String]) -> Result<Stored
     .await
 }
 
-/// GET /ipfs/{cid} - Proxy IPFS content
+/// GET /ipfs/{cid} - Proxy IPFS content (local flatfs only, no shell-out)
 pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
     let cid = path.into_inner();
 
-    // Try ipfs cat CLI (handles both CIDv0 Qm... and CIDv1)
-    if let Ok(output) = std::process::Command::new("ipfs")
-        .args(["cat", &cid])
-        .output()
-    {
-        if output.status.success() && !output.stdout.is_empty() {
-            let data = output.stdout;
-            let ct = match &data[..4.min(data.len())] {
-                [0x89, 0x50, 0x4E, 0x47] => "image/png",
-                [0xFF, 0xD8, ..] => "image/jpeg",
-                [0x3C, ..] => "text/html; charset=utf-8",
-                [0x7B, ..] => "application/json",
-                _ if data.starts_with(b"<!") || data.starts_with(b"<html") => {
-                    "text/html; charset=utf-8"
-                }
-                _ => "application/octet-stream",
-            };
-            return Ok(HttpResponse::Ok().content_type(ct).body(data));
-        }
-    }
-
-    // Fallback: try local flatfs
     if let Some(block) = ipfs::ipfs_cat(&cid) {
-        return Ok(HttpResponse::Ok()
-            .content_type("application/octet-stream")
-            .body(block));
+        let ct = match &block[..4.min(block.len())] {
+            [0x89, 0x50, 0x4E, 0x47] => "image/png",
+            [0xFF, 0xD8, ..] => "image/jpeg",
+            [0x3C, ..] => "text/html; charset=utf-8",
+            [0x7B, ..] => "application/json",
+            _ if block.starts_with(b"<!") || block.starts_with(b"<html") => {
+                "text/html; charset=utf-8"
+            }
+            _ => "application/octet-stream",
+        };
+        return Ok(HttpResponse::Ok().content_type(ct).body(block));
     }
 
     Ok(HttpResponse::NotFound().body(format!("IPFS CID not found: {}", cid)))
@@ -3562,65 +3548,12 @@ pub async fn gallery_image(path: web::Path<String>) -> Result<HttpResponse> {
     }
 }
 
-/// Enrich a Wikidata QID via the enrich-qid.sh pipeline
-async fn enrich_qid(qid: &str) -> Result<HttpResponse> {
-    let pipeline = env::var("ENRICH_PIPELINE").unwrap_or_else(|_| {
-        "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh".to_string()
-    });
-    let nft_dir = env::var("NFT_DIR")
-        .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
-
-    log::info!("🔮 QID detected: {} — running enrichment pipeline", qid);
-
-    let output = std::process::Command::new("bash")
-        .args([&pipeline, qid])
-        .output();
-
-    match output {
-        Ok(out) if out.status.success() => {
-            // Read metadata from enriched dir
-            let meta_path = format!("{}/{}/metadata.rdfa", nft_dir, qid);
-            let mut meta = std::collections::HashMap::new();
-            if let Ok(content) = fs::read_to_string(&meta_path) {
-                for line in content.lines() {
-                    if let Some((k, v)) = line.split_once('=') {
-                        meta.insert(k.to_string(), v.to_string());
-                    }
-                }
-            }
-
-            let name = meta.get("name").cloned().unwrap_or_else(|| qid.to_string());
-            let html_cid = meta.get("ipfs_html_cid").cloned().unwrap_or_default();
-            let nft_cid = meta.get("ipfs_nft_cid").cloned().unwrap_or_default();
-            let dir_cid = meta.get("ipfs_dir_cid").cloned().unwrap_or_default();
-            let witness = meta.get("witness").cloned().unwrap_or_default();
-
-            Ok(HttpResponse::Ok().json(serde_json::json!({
-                "id": qid,
-                "name": name,
-                "qid": qid,
-                "enriched": true,
-                "html_cid": html_cid,
-                "nft_cid": nft_cid,
-                "dir_cid": dir_cid,
-                "witness": witness,
-                "url": format!("/ipfs/{}", html_cid),
-                "nft_url": format!("/ipfs/{}", nft_cid),
-                "gallery": "/gallery",
-            })))
-        }
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            log::error!("Enrichment failed for {}: {}", qid, stderr);
-            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("Enrichment failed for {}", qid),
-                "detail": stderr.to_string(),
-            })))
-        }
-        Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": format!("Pipeline not found: {}", e),
-        }))),
-    }
+/// Enrich a Wikidata QID — disabled, no shell-out allowed.
+async fn enrich_qid(_qid: &str) -> Result<HttpResponse> {
+    log::warn!("enrich_qid called but shell-out is disabled by requirements");
+    Ok(HttpResponse::ServiceUnavailable().json(serde_json::json!({
+        "error": "enrichment pipeline disabled: no shell-out allowed",
+    })))
 }
 
 /// GET /plugins - List available plugins

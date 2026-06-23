@@ -1,15 +1,8 @@
 // Pipelight plugin — interactive pipeline tile for the pastebin.
-//
-// When pasted content looks like a pipelight config (TOML/TS/YAML/HCL with
-// pipeline definitions) the paste view renders an interactive tile with
-// Run / Status / Logs / List buttons that invoke `pipelight` CLI commands.
-//
-// Environment:
-//   PIPELIGHT_CMD — path to the pipelight binary (default: pipelight)
+// Shell-out actions disabled per system requirements.
 
 use crate::plugin::{Plugin, PluginInput, PluginResult};
 use std::collections::HashMap;
-use std::process::Command;
 
 // ---------------------------------------------------------------------------
 // Detection
@@ -84,27 +77,6 @@ function runPipelight(id,action){{
 // Pipelight CLI wrapper
 // ---------------------------------------------------------------------------
 
-fn pipelight_bin() -> String {
-    std::env::var("PIPELIGHT_CMD").unwrap_or_else(|_| "pipelight".to_string())
-}
-
-fn run_pipelight(args: &[&str]) -> Result<String, String> {
-    let bin = pipelight_bin();
-    let output = Command::new(&bin)
-        .args(args)
-        .output()
-        .map_err(|e| format!("cannot execute `{}`: {}. Is pipelight installed?", bin, e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if output.status.success() {
-        Ok(stdout)
-    } else {
-        Err(format!("exit {}:\n{}", output.status, stderr))
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Plugin implementation
 // ---------------------------------------------------------------------------
@@ -150,58 +122,12 @@ impl Plugin for PipelightPlugin {
                     result.insert("tile_html".into(), render_tile_html(&input.id, bp));
                 }
             }
-            "list" => match run_pipelight(&["ls"]) {
-                Ok(output) => {
-                    result.insert("output".into(), output);
-                    result.insert("status".into(), "ok".into());
-                }
-                Err(e) => {
-                    result.insert("output".into(), e);
-                    result.insert("status".into(), "error".into());
-                }
-            },
-            "status" => match run_pipelight(&["status"]) {
-                Ok(output) => {
-                    result.insert("output".into(), output);
-                    result.insert("status".into(), "ok".into());
-                }
-                Err(e) => {
-                    result.insert("output".into(), e);
-                    result.insert("status".into(), "error".into());
-                }
-            },
-            "logs" => {
-                let mut args = vec!["logs"];
-                if let Some(pipe) = input.extra.get("pipe") {
-                    args.push(pipe);
-                }
-                match run_pipelight(&args) {
-                    Ok(output) => {
-                        result.insert("output".into(), output);
-                        result.insert("status".into(), "ok".into());
-                    }
-                    Err(e) => {
-                        result.insert("output".into(), e);
-                        result.insert("status".into(), "error".into());
-                    }
-                }
-            }
-            "run" => {
-                let pipe = input.extra.get("pipe").cloned().unwrap_or_default();
-                let mut args = vec!["run"];
-                if !pipe.is_empty() {
-                    args.push(&pipe);
-                }
-                match run_pipelight(&args) {
-                    Ok(output) => {
-                        result.insert("output".into(), output);
-                        result.insert("status".into(), "ok".into());
-                    }
-                    Err(e) => {
-                        result.insert("output".into(), e);
-                        result.insert("status".into(), "error".into());
-                    }
-                }
+            "list" | "status" | "logs" | "run" => {
+                result.insert("status".into(), "error".into());
+                result.insert(
+                    "output".into(),
+                    "pipelight CLI actions disabled: no shell-out allowed".to_string(),
+                );
             }
             other => {
                 result.insert("error".into(), format!("unknown action: {}", other));

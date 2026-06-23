@@ -254,13 +254,15 @@ async fn handle_mcp_search(args: HashMap<String, Value>) -> Result<Value, String
         limit
     );
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let resp = client
         .get(&url)
         .send()
+        .await
         .map_err(|e| format!("Search request failed: {}", e))?;
     let body: Value = resp
         .json()
+        .await
         .map_err(|e| format!("Search parse failed: {}", e))?;
 
     Ok(json!({
@@ -280,7 +282,7 @@ async fn handle_mcp_create_paste(args: HashMap<String, Value>) -> Result<Value, 
     let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
     let url = format!("{}/paste", base_url);
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let payload = json!({
         "title": title,
         "content": content,
@@ -290,9 +292,11 @@ async fn handle_mcp_create_paste(args: HashMap<String, Value>) -> Result<Value, 
         .post(&url)
         .json(&payload)
         .send()
+        .await
         .map_err(|e| format!("Create paste failed: {}", e))?;
     let body: Value = resp
         .json()
+        .await
         .map_err(|e| format!("Parse response failed: {}", e))?;
 
     Ok(json!({
@@ -310,15 +314,19 @@ async fn handle_mcp_get_paste(args: HashMap<String, Value>) -> Result<Value, Str
     let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
 
     // Try raw first (returns content with metadata)
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let raw_url = format!("{}/raw/{}", base_url, paste_id);
-    let raw_resp = client.get(&raw_url).send().ok();
-    let raw_content = raw_resp.and_then(|r| r.text().ok()).unwrap_or_default();
+    let raw_content = match client.get(&raw_url).send().await {
+        Ok(r) => r.text().await.unwrap_or_default(),
+        Err(_) => String::new(),
+    };
 
     // Also get metadata via paste endpoint
     let paste_url = format!("{}/paste/{}", base_url, paste_id);
-    let paste_resp = client.get(&paste_url).send().ok();
-    let paste_html = paste_resp.and_then(|r| r.text().ok()).unwrap_or_default();
+    let paste_html = match client.get(&paste_url).send().await {
+        Ok(r) => r.text().await.unwrap_or_default(),
+        Err(_) => String::new(),
+    };
 
     Ok(json!({
         "content": format!("=== Raw Content ===\n{}\n\n=== HTML View (first 500 chars) ===\n{}",
@@ -338,12 +346,13 @@ async fn handle_mcp_browse(args: HashMap<String, Value>) -> Result<Value, String
         url.push_str(&format!("&q={}", query));
     }
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let resp = client
         .get(&url)
         .send()
+        .await
         .map_err(|e| format!("Browse request failed: {}", e))?;
-    let body: Value = resp.json().map_err(|e| format!("Parse failed: {}", e))?;
+    let body: Value = resp.json().await.map_err(|e| format!("Parse failed: {}", e))?;
 
     Ok(json!({
         "content": serde_json::to_string_pretty(&body).unwrap_or_default(),
@@ -428,12 +437,13 @@ async fn handle_resources_read(params: &Option<Value>) -> Result<Value, String> 
                 env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8090".to_string());
             let url = format!("{}/api/search?limit=20&dirs=0&q=", base_url);
 
-            let client = reqwest::blocking::Client::new();
+            let client = reqwest::Client::new();
             let resp = client
                 .get(&url)
                 .send()
+                .await
                 .map_err(|e| format!("Request failed: {}", e))?;
-            let body: Value = resp.json().map_err(|e| format!("Parse failed: {}", e))?;
+            let body: Value = resp.json().await.map_err(|e| format!("Parse failed: {}", e))?;
 
             Ok(json!({
                 "contents": [{

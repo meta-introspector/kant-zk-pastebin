@@ -13,7 +13,6 @@
 use crate::plugin::{Plugin, PluginInput, PluginResult};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Command;
 
 // ---------------------------------------------------------------------------
 // Detection
@@ -296,35 +295,8 @@ default = "nora"
     std::fs::write(cargo_dir.join("config.toml"), &cargo_config)
         .map_err(|e| format!("write .cargo/config.toml: {}", e))?;
 
-    // Run cargo package to verify
-    let package_output = Command::new("cargo")
-        .args(["package", "--registry", "nora", "--allow-dirty"])
-        .current_dir(&work_dir)
-        .output()
-        .map_err(|e| format!("cargo package exec: {}", e))?;
-
-    if !package_output.status.success() {
-        let stderr = String::from_utf8_lossy(&package_output.stderr);
-        return Err(format!("cargo package failed:\n{}", stderr));
-    }
-
-    // Run cargo publish
-    let publish_output = Command::new("cargo")
-        .args(["publish", "--registry", "nora", "--allow-dirty"])
-        .current_dir(&work_dir)
-        .output()
-        .map_err(|e| format!("cargo publish exec: {}", e))?;
-
-    if !publish_output.status.success() {
-        let stderr = String::from_utf8_lossy(&publish_output.stderr);
-        return Err(format!("cargo publish failed:\n{}", stderr));
-    }
-
-    let stdout = String::from_utf8_lossy(&publish_output.stdout);
-    Ok(format!(
-        "Successfully published {} to nora ({})\n{}",
-        crate_name, nora, stdout
-    ))
+    // Shell-out disabled per system requirements
+    return Err("publish_to_nora disabled: cargo shell-out not allowed".to_string());
 }
 
 // ---------------------------------------------------------------------------
@@ -382,26 +354,13 @@ impl Plugin for Git2NoraPlugin {
                     result.insert("tile_html".into(), render_git2nora_tile_html(&input.id, bp));
                 }
             }
-            "inspect" => match inspect_paste(&input.id) {
-                Ok(output) => {
-                    result.insert("output".into(), output);
-                    result.insert("status".into(), "ok".into());
-                }
-                Err(e) => {
-                    result.insert("output".into(), e);
-                    result.insert("status".into(), "error".into());
-                }
-            },
-            "publish" => match publish_to_nora(&input.id) {
-                Ok(output) => {
-                    result.insert("output".into(), output);
-                    result.insert("status".into(), "ok".into());
-                }
-                Err(e) => {
-                    result.insert("output".into(), e);
-                    result.insert("status".into(), "error".into());
-                }
-            },
+            "inspect" | "publish" => {
+                result.insert("status".into(), "error".into());
+                result.insert(
+                    "output".into(),
+                    "git2nora CLI actions disabled: no shell-out allowed".to_string(),
+                );
+            }
             other => {
                 result.insert("error".into(), format!("unknown action: {}", other));
                 result.insert("status".into(), "error".into());

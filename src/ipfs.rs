@@ -46,12 +46,13 @@ pub trait ContentStore: Send + Sync {
 
 // === IPFS block storage (go-ipfs/kubo flatfs compatible) ===
 
-/// Resolve the IPFS repo path: `$IPFS_PATH` or `~/.ipfs`.
+/// Resolve the IPFS repo path: `$IPFS_PATH` or `/mnt/data1/ipfs`.
 /// Returns `None` if the directory doesn't exist.
+/// Never falls back to homedirs.
 fn ipfs_repo() -> Option<String> {
     std::env::var("IPFS_PATH")
         .ok()
-        .or_else(|| dirs_next::home_dir().map(|h| format!("{}/.ipfs", h.display())))
+        .or_else(|| Some("/mnt/data1/ipfs".to_string()))
         .filter(|p| std::path::Path::new(p).exists())
 }
 
@@ -224,34 +225,5 @@ impl ContentStore for DaslCborStore {
     fn add(&self, data: &[u8]) -> Option<String> {
         let (cbor, _) = wrap_dasl_cbor(data);
         ipfs_add_bytes(&cbor)
-    }
-}
-
-/// CLI fallback: shells out to `ipfs add`. Requires kubo/go-ipfs on PATH.
-pub struct IpfsCliStore;
-impl ContentStore for IpfsCliStore {
-    fn name(&self) -> &str {
-        "ipfs-cli"
-    }
-    fn add(&self, data: &[u8]) -> Option<String> {
-        use std::io::Write;
-        use std::process::Command;
-        let mut child = Command::new("ipfs")
-            .args(["add", "-Q", "--pin=false"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .ok()?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(data).ok()?;
-        }
-        let out = child.wait_with_output().ok()?;
-        let cid = String::from_utf8(out.stdout).ok()?.trim().to_string();
-        if cid.is_empty() {
-            None
-        } else {
-            Some(cid)
-        }
     }
 }
