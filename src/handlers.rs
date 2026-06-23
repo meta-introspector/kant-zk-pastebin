@@ -962,6 +962,76 @@ function bundleSelected() {{
     }
 }
 
+/// GET /health - Health check with version info
+pub async fn health_check() -> Result<HttpResponse> {
+    let version = option_env!("GIT_COMMIT").unwrap_or("unknown");
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "status": "ok",
+        "git_commit": version,
+        "binary": exe,
+        "service": "kant-pastebin",
+    })))
+}
+
+/// GET /api/version - Detailed version info
+pub async fn api_version() -> Result<HttpResponse> {
+    let version = option_env!("GIT_COMMIT").unwrap_or("unknown");
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "name": "kant-pastebin",
+        "git_commit": version,
+        "binary": exe,
+        "rustc": option_env!("CARGO_PKG_RUST_VERSION").unwrap_or("unknown"),
+        "nix_build": exe.contains("/nix/store/"),
+    })))
+}
+
+/// GET /api/diagnostics - Diagnostic info (open files, memory, etc.)
+pub async fn api_diagnostics() -> Result<HttpResponse> {
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    let mut open_fds = 0;
+    let mut open_files: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/proc/self/fd") {
+        for entry in entries.flatten() {
+            open_fds += 1;
+            if let Ok(target) = std::fs::read_link(entry.path()) {
+                if let Some(path) = target.to_str() {
+                    open_files.push(path.to_string());
+                }
+            }
+        }
+    }
+
+    let mut file_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for path in &open_files {
+        let ext = std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("(none)");
+        *file_counts.entry(ext.to_string()).or_default() += 1;
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "binary": exe,
+        "open_fds": open_fds,
+        "file_counts": file_counts,
+        "service": "kant-pastebin",
+    })))
+}
+
 /// GET /paste/{id}/split - Split paste content
 pub async fn get_paste_split(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();

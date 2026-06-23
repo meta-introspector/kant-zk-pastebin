@@ -595,6 +595,9 @@ async fn main() -> std::io::Result<()> {
                 web::post().to(handlers::nix_skill_find),
             )
             .route("/mcp", web::post().to(mcp_server::mcp_handler))
+            .route("/health", web::get().to(handlers::health_check))
+            .route("/api/version", web::get().to(handlers::api_version))
+            .route("/api/diagnostics", web::get().to(handlers::api_diagnostics))
             .route("/git-browse", web::get().to(handlers::git_browse))
             .route(
                 "/git-browse/{mount_id}",
