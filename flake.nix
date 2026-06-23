@@ -31,6 +31,9 @@
         craneLib = crane.mkLib pkgs;
         src = self;
 
+        # Git revision embedded into the binary at build time
+        gitRev = self.shortRev or "dirty";
+
         noraCargoPackage = p: pkgs.runCommand "cargo-package-${p.name}-${p.version}" {
           nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
           crate = nora-cargo + "/${p.name}/${p.version}/${p.name}-${p.version}.crate";
@@ -59,6 +62,9 @@
           buildInputs = with pkgs; [ openssl ];
 
           doInstallCargoArtifacts = false;
+
+          # Pass git revision into the build so build.rs can embed it
+          GIT_COMMIT = gitRev;
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;

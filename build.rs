@@ -18,9 +18,15 @@ fn read_git_commit(dir: &Path) -> Option<String> {
 }
 
 fn main() {
-    let git_commit = env::current_dir()
+    // Nix passes GIT_COMMIT via the flake (gitRev = self.shortRev or "dirty").
+    // Fall back to reading .git/HEAD for local cargo builds.
+    let git_commit = env::var("GIT_COMMIT")
         .ok()
-        .and_then(|cwd| read_git_commit(&cwd))
+        .or_else(|| {
+            env::current_dir()
+                .ok()
+                .and_then(|cwd| read_git_commit(&cwd))
+        })
         .or_else(|| {
             env::current_dir()
                 .ok()
