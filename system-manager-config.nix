@@ -93,8 +93,14 @@ locations."/nora/health" = {
       };
 
       # ─── NotebookLM exports  ────────────────────────────────────────
-      # NOTE: Served via /etc/nginx/locations.d/notebooklm.conf
-      # (Ubuntu-managed nginx, not system-manager)
+      locations."/notebooklm/" = {
+        alias = "/var/www/solana.solfunmeme.com/notebooklm/";
+        extraConfig = ''
+          autoindex on;
+          autoindex_exact_size off;
+          add_header Cache-Control "no-store";
+        '';
+      };
 
       locations."/nora/" = {
         proxyPass = "http://127.0.0.1:4000/";
