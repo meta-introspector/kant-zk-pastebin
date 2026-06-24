@@ -34,7 +34,27 @@ deploy() {
   cd "$PASTEBIN_DIR"
   mkdir -p "$LOG_DIR"
 
-  echo "Building system-manager configuration: $FLAKE"
+  echo "Step 1: Cargo clean (ensure fresh build, no stale store artifacts)"
+  nix develop -c cargo clean
+
+  echo "Step 2: Cargo build check"
+  nix develop -c cargo build --release
+
+  echo "Step 3: Git commit and push"
+  git add -A
+  git commit -m "deploy: auto-commit before nix build $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
+  git push origin "$PASTEBIN_BRANCH" || true
+
+  echo "Step 3b: Verify git push succeeded"
+  LOCAL_HEAD="$(git rev-parse HEAD)"
+  REMOTE_HEAD="$(git ls-remote origin "$PASTEBIN_BRANCH" | cut -f1)"
+  if [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ]; then
+    echo "ERROR: Local HEAD ($LOCAL_HEAD) does not match remote ($REMOTE_HEAD). Push may have failed." >&2
+    exit 1
+  fi
+  echo "Git push verified: $LOCAL_HEAD"
+
+  echo "Step 4: Nix build from git source: $FLAKE"
   STORE_PATH="$(nix build "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
   echo "Built: $STORE_PATH"
 

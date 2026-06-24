@@ -28,8 +28,8 @@
     },
     "crane": {
       "locked": {
-        "lastModified": 1779279542,
-        "narHash": "sha256-bLXpWUr2IoXY8BRN0dsi3DvIVahEj/gwLDBPx44WExo=",
+        "lastModified": 1781620627,
+        "narHash": "sha256-guZ6X/j12iA5+DecQZUfH1/IWsjam/b22tsVb5/biP0=",
         "path": "/mnt/data1/time-2026/05-may/19/crane",
         "type": "path"
       },

@@ -59,7 +59,7 @@
           doCheck = false;
 
           nativeBuildInputs = with pkgs; [ pkg-config ];
-          buildInputs = with pkgs; [ openssl ];
+          buildInputs = with pkgs; [ openssl.dev ];
 
           doInstallCargoArtifacts = false;
 
@@ -88,7 +88,88 @@
             platforms = platforms.linux;
           };
         });
+        devShells.default = pkgs.mkShell {
+          nativeBuildInputs = with pkgs; [
+            cargo rustc rustfmt clippy
+            pkg-config
+            stdenv.cc binutils coreutils
+          ];
+          buildInputs = with pkgs; [
+            openssl.dev
+            libgit2 curl libssh2 zlib nghttp2
+            glibc.dev libc
+            snappy lz4 zstd bzip2 liburing
+            protobuf protobufc automake autoconf libtool m4
+            systemd.dev libusb1 hidapi ncurses util-linux zsh
+          ];
+          shellHook = ''
+            export OPENSSL_DIR="${pkgs.openssl.dev}"
+            export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.systemd.dev}/lib/pkgconfig:${pkgs.libusb1.dev}/lib/pkgconfig''${PKG_CONFIG_PATH:+:}$$PKG_CONFIG_PATH"
+            export PATH="${pkgs.rustc}/bin:${pkgs.cargo}/bin''${PATH:+:}$$PATH"
+            export CC=cc
+            export CXX=c++
+            export PKG_CONFIG_ALLOW_CROSS=1
+            echo "Nix devShell ready: rust + openssl + all system deps"
+          '';
+        };
+
+        devShells.clang = pkgs.mkShell {
+          buildInputs = with pkgs; [ pkg-config openssl.dev clang mold ];
+          shellHook = ''
+            export OPENSSL_DIR="${pkgs.openssl.dev}"
+            export CC=clang CXX=clang++
+          '';
+        };
+
+        devShells.analysis = pkgs.mkShell {
+          buildInputs = with pkgs; [ pkg-config openssl.dev cargo rustc llvmPackages.clang llvmPackages.bintools ];
+          shellHook = ''
+            export OPENSSL_DIR="${pkgs.openssl.dev}"
+          '';
+        };
+
+        devShells.leak = pkgs.mkShell {
+          nativeBuildInputs = with pkgs; [ cargo rustc pkg-config openssl.dev ];
+          buildInputs = with pkgs; [ valgrind ];
+          shellHook = ''
+            export OPENSSL_DIR="${pkgs.openssl.dev}"
+          '';
+        };
+
+        devShells.thread = pkgs.mkShell {
+          nativeBuildInputs = with pkgs; [ cargo rustc pkg-config openssl.dev ];
+          buildInputs = with pkgs; [ heaptrack ];
+          shellHook = ''
+            export OPENSSL_DIR="${pkgs.openssl.dev}"
+          '';
+        };
+
+        devShells.sanitizer = pkgs.mkShell {
+          nativeBuildInputs = with pkgs; [ cargo rustc pkg-config openssl.dev ];
+          shellHook = ''
+            export OPENSSL_DIR="${pkgs.openssl.dev}"
+            export RUSTFLAGS="-Zsanitizer=address"
+          '';
+        };
+
+        devShells.tracing = pkgs.mkShell {
+          nativeBuildInputs = with pkgs; [ cargo rustc pkg-config openssl.dev ];
+          buildInputs = with pkgs; [ linuxPackages.perf ];
+          shellHook = ''
+            export OPENSSL_DIR="${pkgs.openssl.dev}"
+          '';
+        };
       in {
+        devShells = {
+          default = devShells.default;
+          clang = devShells.clang;
+          analysis = devShells.analysis;
+          leak = devShells.leak;
+          thread = devShells.thread;
+          sanitizer = devShells.sanitizer;
+          tracing = devShells.tracing;
+        };
+
         packages = {
           inherit kant-pastebin;
           default = kant-pastebin;

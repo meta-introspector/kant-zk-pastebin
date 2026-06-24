@@ -741,11 +741,47 @@ pub async fn get_paste(
                 String::new()
             };
 
+            struct Page {
+                bp: String,
+                id: String,
+                title: String,
+                prev_link: String,
+                next_link: String,
+                ipfs_cmd: String,
+                file_cmd: String,
+                curl_cmd: String,
+                body: String,
+                pipelight_tile: String,
+                git2nora_tile: String,
+                related_html: String,
+                ipfs_cid: String,
+                share_menu: String,
+                share_script: String,
+            }
+
+            let page = Page {
+                bp: base_path,
+                id: id.to_string(),
+                title: title.to_string(),
+                prev_link: prev_link.clone(),
+                next_link: next_link.clone(),
+                ipfs_cmd: ipfs_cmd.to_string(),
+                file_cmd: file_cmd.to_string(),
+                curl_cmd: curl_cmd.to_string(),
+                body: body.to_string(),
+                pipelight_tile: pipelight_tile.to_string(),
+                git2nora_tile: git2nora_tile.to_string(),
+                related_html: related_html.to_string(),
+                ipfs_cid: ipfs_cid.unwrap_or_default().to_string(),
+                share_menu: crate::share::render_share_menu(),
+                share_script: crate::share::render_share_script().to_string(),
+            };
+
             let html = format!(
                 r#"<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
-<title>{}</title>
+<title>{title}</title>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <style>
 body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
@@ -768,26 +804,26 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 .pipelight-btn{{padding:8px 16px;border-radius:4px;border:none;cursor:pointer;font-size:14px}}
 </style>
 </head><body>
-<div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/threads">🧵 Threads</a> <a href="{}/thread/{}">Thread</a> <a href="{}/raw/{}">📄 Raw</a> | {} {}</div>
-<h1>{}</h1>
-<a class="reply-btn" href="{}/?reply_to={}">Reply</a>
+<div class="nav"><a href="{bp}/">🏠 Home</a> <a href="{bp}/browse">📚 Browse</a> <a href="{bp}/threads">🧵 Threads</a> <a href="{bp}/thread/{id}">Thread</a> <a href="{bp}/raw/{id}">📄 Raw</a> | {prev_link} {next_link}</div>
+<h1>{title}</h1>
+<a class="reply-btn" href="{bp}/?reply_to={id}">Reply</a>
 <button class="reply-btn" onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent);this.textContent='Copied'">Copy</button>
 {share_menu}
 <button class="reply-btn" onclick="showQR()">QR Code</button>
 <button class="reply-btn" onclick="shareRDFa()">RDFa URL</button>
 <button class="reply-btn" onclick="showPreview()">Preview</button>
-<a class="reply-btn" href="{}/paste/{}/split">Split</a>
+<a class="reply-btn" href="{bp}/paste/{id}/split">Split</a>
 
 <h3>Access Commands:</h3>
-<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
-<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
-<div class="cmd" onclick="navigator.clipboard.writeText('{}');this.style.borderColor='#0f0'">$ {}</div>
+<div class="cmd" onclick="navigator.clipboard.writeText('{ipfs_cmd}');this.style.borderColor='#0f0'">$ {ipfs_cmd}</div>
+<div class="cmd" onclick="navigator.clipboard.writeText('{file_cmd}');this.style.borderColor='#0f0'">$ {file_cmd}</div>
+<div class="cmd" onclick="navigator.clipboard.writeText('{curl_cmd}');this.style.borderColor='#0f0'">$ {curl_cmd}</div>
 
 <h3>Content:</h3>
-<pre onclick="navigator.clipboard.writeText(this.textContent);this.style.borderColor='#0ff';setTimeout(()=>this.style.borderColor='#0f0',1500)" style="cursor:pointer">{}</pre>
-{}
-{}
-{}
+<pre onclick="navigator.clipboard.writeText(this.textContent);this.style.borderColor='#0ff';setTimeout(()=>this.style.borderColor='#0f0',1500)" style="cursor:pointer">{body}</pre>
+{pipelight_tile}
+{git2nora_tile}
+{related_html}
 <div id="sidebar" class="sidebar">
   <h3>🔍 Similar Posts</h3>
   <div id="similarResults" class="sidebar-results"></div>
@@ -797,16 +833,16 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
   </div>
 </div>
 <div id="qrModal" class="qr-modal">
-  <h3>{}</h3>
+  <h3>{title}</h3>
   <canvas id="qrcode"></canvas><br>
   <button onclick="document.getElementById('qrModal').style.display='none'">Close</button>
 </div>
 <script>
-const ipfsCid = '{}';
+const ipfsCid = '{ipfs_cid}';
 const pasteUrl = window.location.href;
-const currentPasteId = '{}';
-const title = '{}';
-console.log('[pastebin][debug] page id=' + currentPasteId + ' title=' + title + ' base_path={}');
+const currentPasteId = '{id}';
+const title = '{title}';
+console.log('[pastebin][debug] page id=' + currentPasteId + ' title=' + title + ' base_path={bp}');
 console.log('[pastebin][debug] pre present=', !!document.querySelector('pre'));
 console.log('[pastebin][debug] pre count=', document.querySelectorAll('pre').length);
 if (!document.querySelector('pre')) console.error('[pastebin][lint] missing <pre> content container');
@@ -871,7 +907,7 @@ function toggleSidebar() {{
     return;
   }}
   s.classList.add('open');
-  fetch('{}/api/similar/' + currentPasteId)
+  fetch('{bp}/api/similar/' + currentPasteId)
     .then(r => r.json())
     .then(d => {{
       const div = document.getElementById('similarResults');
@@ -899,7 +935,7 @@ function bundleSelected() {{
   if (checks.length === 0) {{ alert('Select at least one post.'); return; }}
   const pastes = [currentPasteId];
   checks.forEach(c => pastes.push(c.value));
-  fetch('{}/api/bundle', {{
+  fetch('{bp}/api/bundle', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{pastes: pastes}})
@@ -914,39 +950,21 @@ function bundleSelected() {{
 </script>
 <script src="{share_menu}/static/a11y.js"></script>
 </body></html>"#,
-                base_path,
-                base_path,
-                base_path,
-                base_path,
-                id,
-                base_path,
-                id,
-                prev_link,
-                next_link,
-                title,
-                base_path,
-                id,
-                base_path,
-                id,
-                ipfs_cmd,
-                ipfs_cmd,
-                file_cmd,
-                file_cmd,
-                curl_cmd,
-                curl_cmd,
-                body,
-                pipelight_tile,
-                git2nora_tile,
-                related_html,
-                title,
-                ipfs_cid.unwrap_or(""),
-                id,
-                title,
-                base_path,
-                base_path,
-                base_path,
-                share_menu = crate::share::render_share_menu(),
-                share_script = crate::share::render_share_script()
+                title = page.title,
+                bp = page.bp,
+                id = page.id,
+                prev_link = page.prev_link,
+                next_link = page.next_link,
+                ipfs_cmd = page.ipfs_cmd,
+                file_cmd = page.file_cmd,
+                curl_cmd = page.curl_cmd,
+                body = page.body,
+                pipelight_tile = page.pipelight_tile,
+                git2nora_tile = page.git2nora_tile,
+                related_html = page.related_html,
+                ipfs_cid = page.ipfs_cid,
+                share_menu = page.share_menu,
+                share_script = page.share_script
             );
 
             let lint_issues = lint_html(&html);
