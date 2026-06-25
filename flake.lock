@@ -1,107 +1,19 @@
 {
   "nodes": {
-    "common-inputs": {
-      "inputs": {
-        "crate2nix": "crate2nix",
-        "erdfa-canonical": "erdfa-canonical",
-        "erdfa-publish": "erdfa-publish",
-        "escaped-rdfa": "escaped-rdfa",
-        "linux-perf-data": "linux-perf-data",
-        "linux-perf-file-reader": "linux-perf-file-reader",
-        "rust-ipfs": "rust-ipfs",
-        "zkperf": "zkperf"
-      },
-      "locked": {
-        "lastModified": 1780225118,
-        "narHash": "sha256-kE3suAcz8bDFU8Y9/pvAqDsVKE3/DvVeYjf5RQXKnqs=",
-        "ref": "main",
-        "rev": "dde9411c571f320549dcf3d22d2e26394bb8185b",
-        "revCount": 4,
-        "type": "git",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/nix-common"
-      },
-      "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/nix-common"
-      }
-    },
     "crane": {
       "locked": {
-        "lastModified": 1781620627,
-        "narHash": "sha256-guZ6X/j12iA5+DecQZUfH1/IWsjam/b22tsVb5/biP0=",
-        "path": "/mnt/data1/time-2026/05-may/19/crane",
-        "type": "path"
+        "lastModified": 1780532242,
+        "narHash": "sha256-D+BsdpxmtUwtqGoY0IXPhHgTlmqgcZKCEo1oMyn7ep0=",
+        "ref": "omaster",
+        "rev": "59a82a1222dd3b2080b5cc52a1a2e8d5f1b77f37",
+        "revCount": 864,
+        "type": "git",
+        "url": "file:///mnt/data1/git/github.com/ipetkov/crane.git"
       },
       "original": {
-        "path": "/mnt/data1/time-2026/05-may/19/crane",
-        "type": "path"
-      }
-    },
-    "crate2nix": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1774369503,
-        "narHash": "sha256-YeCF4iBhlvTqkn4mihjZgixnDcEVgfyQlNeBsbLYUgQ=",
-        "rev": "b873ca53dd64e12340416f0fd5e3b33792b9c17b",
-        "revCount": 1452,
-        "submodules": true,
+        "ref": "omaster",
         "type": "git",
-        "url": "file:///mnt/data1/time-2026/04-april/26/crate2nix-zos/vendor/crate2nix"
-      },
-      "original": {
-        "submodules": true,
-        "type": "git",
-        "url": "file:///mnt/data1/time-2026/04-april/26/crate2nix-zos/vendor/crate2nix"
-      }
-    },
-    "erdfa-canonical": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1775581985,
-        "narHash": "sha256-8x9RzknzhIxm9UdWPy/6P8zDH+iGcr+KMAvyFyw0X0c=",
-        "ref": "refs/heads/main",
-        "rev": "6f8b33d527081a7d780b9a177cb49997a4e12bec",
-        "revCount": 9,
-        "submodules": true,
-        "type": "git",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git"
-      },
-      "original": {
-        "submodules": true,
-        "type": "git",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-canonical.git"
-      }
-    },
-    "erdfa-publish": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1778416230,
-        "narHash": "sha256-fT1QOa1WdcjPAKkX2WIG+YfuoNHPAG3BocL46rNGw4E=",
-        "ref": "refs/heads/main",
-        "rev": "856d3877095191b711579af6ed1700c7d1d0e23a",
-        "revCount": 67,
-        "type": "git",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-publish.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "file:///home/mdupont/git/solana.solfunmeme.com/erdfa-publish.git"
-      }
-    },
-    "escaped-rdfa": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1777283926,
-        "narHash": "sha256-DXUam+Q08p4ef0thQJ64l7OdwKBZTLN0jt6/1trgsHU=",
-        "rev": "9089ae077a0997d6a27247c4d7683c51929c6361",
-        "revCount": 33,
-        "type": "git",
-        "url": "file:///mnt/data1/time-2026/04-april/26/crate2nix-zos/vendor/escaped-rdfa"
-      },
-      "original": {
-        "type": "git",
-        "url": "file:///mnt/data1/time-2026/04-april/26/crate2nix-zos/vendor/escaped-rdfa"
+        "url": "file:///mnt/data1/git/github.com/ipetkov/crane.git"
       }
     },
     "flake-compat": {
@@ -149,14 +61,14 @@
       "locked": {
         "lastModified": 1731533236,
         "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
-        "ref": "main",
+        "ref": "omain",
         "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
         "revCount": 102,
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/numtide/flake-utils.git"
       },
       "original": {
-        "ref": "main",
+        "ref": "omain",
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/numtide/flake-utils.git"
       }
@@ -184,59 +96,59 @@
         "type": "github"
       }
     },
-    "linux-perf-data": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1770952228,
-        "narHash": "sha256-NxgFSkz8ZBZ9K0pmMTC2b9+m69fDtZTOKTQIswXF6Us=",
-        "owner": "meta-introspector",
-        "repo": "linux-perf-data",
-        "rev": "da5bce4b9fb724e84b1eea0cb6ab9c8a291bc676",
-        "type": "github"
-      },
-      "original": {
-        "owner": "meta-introspector",
-        "repo": "linux-perf-data",
-        "type": "github"
-      }
-    },
-    "linux-perf-file-reader": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1774522250,
-        "narHash": "sha256-PKuDHYxDO3SvqKLzZnvIpW7uN9ZkdPtzrXO/GMjajXc=",
-        "ref": "master",
-        "rev": "1687fddb11b5d262a609eb3528b3618f649fc0b0",
-        "revCount": 16,
-        "type": "git",
-        "url": "file:///home/mdupont/git/github.com/meta-introspector/linux-perf-file-reader.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "file:///home/mdupont/git/github.com/meta-introspector/linux-perf-file-reader.git"
-      }
-    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1772643971,
-        "narHash": "sha256-+bllfMsclzbAAPMZTm3K9G/a5lG+s6l18/AyyYLPSIE=",
-        "ref": "master",
-        "rev": "400de68cd101e8cfebffea121397683caf7f5a34",
-        "revCount": 958387,
+        "lastModified": 1781619580,
+        "narHash": "sha256-9yp5mGNoL3HARXeGKkRNHIqQhp3dKfeLipYvhw1cHY8=",
+        "ref": "omaster",
+        "rev": "14aceb09acd67cb3b017a08ada6b532981b31594",
+        "revCount": 1017633,
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
       },
       "original": {
-        "ref": "master",
+        "ref": "omaster",
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1744536153,
+        "narHash": "sha256-awS2zRgF4uTwrOKwwiJcByDzDOdo3Q1rPZbiHQg/N38=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "18dd725c29603f582cf1900e0d25f9f1063dbf11",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_3": {
+      "locked": {
+        "lastModified": 1777578337,
+        "narHash": "sha256-Ad49moKWeXtKBJNy2ebiTQUEgdLyvGmTeykAQ9xM+Z4=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "15f4ee454b1dce334612fa6843b3e05cf546efab",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
       }
     },
     "nora-cargo": {
       "flake": false,
       "locked": {
-        "lastModified": 1781551374,
-        "narHash": "sha256-3STGvz1MGo9Iv9D7KEYyMXzpyYFOAPPw5ckAA6KWmXk=",
+        "lastModified": 1782339840,
+        "narHash": "sha256-PmFIj/MHirNNyEXMZUxnXW91n7/H4PMAj2aABeXhem0=",
         "path": "/mnt/data1/nora/storage/cargo",
         "type": "path"
       },
@@ -275,49 +187,50 @@
     },
     "root": {
       "inputs": {
-        "common-inputs": "common-inputs",
         "crane": "crane",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "nora-cargo": "nora-cargo",
+        "rust-overlay": "rust-overlay",
         "system-manager": "system-manager"
       }
     },
-    "rust-ipfs": {
-      "flake": false,
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2"
+      },
       "locked": {
-        "lastModified": 1779933311,
-        "narHash": "sha256-d98BqMBDGSB1azmdqD6Q8n89kk9OZfq00M55sIGrsIo=",
-        "rev": "ceec05d12d71a450240a59168e96bd2d2edc0d2e",
-        "revCount": 2827,
-        "submodules": true,
+        "lastModified": 1781580018,
+        "narHash": "sha256-BlTedbM77FmesD2ZqR73vhFy+y77UrhefV7IYw1pDsk=",
+        "ref": "omaster",
+        "rev": "8bceba21a1ebea535c27c4dc723a0d5a4db9e386",
+        "revCount": 2207,
         "type": "git",
-        "url": "file:///mnt/data1/time-2026/04-april/26/crate2nix-zos/vendor/rust-ipfs"
+        "url": "file:///mnt/data1/git/github.com/oxalica/rust-overlay.git"
       },
       "original": {
-        "submodules": true,
+        "ref": "omaster",
         "type": "git",
-        "url": "file:///mnt/data1/time-2026/04-april/26/crate2nix-zos/vendor/rust-ipfs"
+        "url": "file:///mnt/data1/git/github.com/oxalica/rust-overlay.git"
       }
     },
     "system-manager": {
       "inputs": {
         "flake-compat": "flake-compat",
-        "nixpkgs": [
-          "nixpkgs"
-        ],
+        "nixpkgs": "nixpkgs_3",
         "userborn": "userborn"
       },
       "locked": {
         "lastModified": 1780022176,
         "narHash": "sha256-9CD/fxQUsiNbSw+tWHCG6hDn9DDsz5YfndP+TSmWO3o=",
-        "ref": "refs/heads/main",
+        "ref": "omain",
         "rev": "3dd7dbe51bb2232b7b51295a022c627c99fe14fc",
         "revCount": 1023,
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/numtide/system-manager.git"
       },
       "original": {
+        "ref": "omain",
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/numtide/system-manager.git"
       }
@@ -379,24 +292,6 @@
         "ref": "system-manager",
         "repo": "userborn",
         "type": "github"
-      }
-    },
-    "zkperf": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1774878182,
-        "narHash": "sha256-0lqV8z3L6mvN1FtaQxiJnP1iR2aLIdtMI0LXeIzy3aU=",
-        "ref": "refs/heads/main",
-        "rev": "3fd16a1e1e31665987171b871e4beeab0da7645a",
-        "revCount": 49,
-        "submodules": true,
-        "type": "git",
-        "url": "file:///home/mdupont/git/github.com/meta-introspector/zkperf.git"
-      },
-      "original": {
-        "submodules": true,
-        "type": "git",
-        "url": "file:///home/mdupont/git/github.com/meta-introspector/zkperf.git"
       }
     }
   },

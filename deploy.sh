@@ -25,7 +25,7 @@ usage() {
 Usage: $0 [deploy|restart]
 
 Commands:
-  deploy    Build system-manager config, activate it, restart pastebin, then diagnose
+  deploy    Nix build check, optional cargo build (if nora reachable), git commit+push, nix build, activate, restart, diagnose
   restart   Restart the installed pastebin service, then diagnose
 USAGE
 }
@@ -34,13 +34,24 @@ deploy() {
   cd "$PASTEBIN_DIR"
   mkdir -p "$LOG_DIR"
 
-  echo "Step 1: Cargo clean (ensure fresh build, no stale store artifacts)"
-  nix develop -c cargo clean
+  echo "Step 1: Nix build check (verifies Rust compilation with vendored deps)"
+  if ! nix build .#kant-pastebin --no-link; then
+    echo "ERROR: Nix build failed. Cannot proceed without compileable codebase." >&2
+    exit 1
+  fi
 
-  echo "Step 2: Cargo build check"
-  nix develop -c cargo build --release
+NORA_DEV_FLAKE="${PASTEBIN_DEV_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#devShells.default}"
 
-  echo "Step 3: Git commit and push"
+  echo "Step 1b: Optional nora registry check (for local cargo build)"
+  NORA_URL="$(grep -A1 '\[registries.nora\]' .cargo/config.toml 2>/dev/null | grep 'index' | cut -d'=' -f2 | tr -d ' \"' || true)"
+  if [ -n "$NORA_URL" ] && curl -sf --max-time 5 "$NORA_URL" > /dev/null 2>&1; then
+    echo "Nora registry reachable. Running cargo build check via git+file devShell."
+    nix develop "$NORA_DEV_FLAKE" -c cargo build --release || echo "WARNING: cargo build failed, but nix build succeeded — proceeding."
+  else
+    echo "Nora registry not reachable. Skipping cargo build check (nix build already verified compilation)."
+  fi
+
+  echo "Step 2: Git commit and push"
   git add -A
   git commit -m "deploy: auto-commit before nix build $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
   git push origin "$PASTEBIN_BRANCH" || true
@@ -54,7 +65,7 @@ deploy() {
   fi
   echo "Git push verified: $LOCAL_HEAD"
 
-  echo "Step 4: Nix build from git source: $FLAKE"
+  echo "Step 4: Nix build system-manager config from git source: $FLAKE"
   STORE_PATH="$(nix build "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
   echo "Built: $STORE_PATH"
 
