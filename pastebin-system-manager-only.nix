@@ -7,7 +7,7 @@ let
 in {
   config = {
     systemd.tmpfiles.rules = [
-      "d /mnt/data1/spool/uucp/pastebin 0755 kant kant -"
+      "d /var/spool/uucp/pastebin 0755 kant kant -"
     ];
 
     systemd.services.kant-pastebin = {
@@ -38,7 +38,7 @@ in {
       };
       environment = {
         BIND_ADDR = "127.0.0.1:8090";
-        UUCP_SPOOL = "/mnt/data1/spool/uucp/pastebin";
+        UUCP_SPOOL = "/var/spool/uucp/pastebin";
         BASE_PATH = "/pastebin";
         BASE_URL = "https://${domain}";
         NFT_DIR = "/mnt/data1/time-2026/03-march/13/nft_enriched";
