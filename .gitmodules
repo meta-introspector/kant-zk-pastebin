@@ -10,3 +10,12 @@
 [submodule "erdfa-publish-investigation"]
 	path = erdfa-publish-investigation
 	url = ./erdfa-publish-investigation/
+[submodule "dynalgo.github.io"]
+	path = dynalgo.github.io
+	url = /home/mdupont/git/github.com/dynalgo/dynalgo.github.io.git
+[submodule "cleanssl"]
+	path = cleanssl
+	url = ./cleanssl
+[submodule "ssl-test"]
+	path = ssl-test
+	url = ./ssl-test

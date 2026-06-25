@@ -462,6 +462,10 @@ proxy_set_header X-Real-IP $remote_addr;
         ExecStart = "${nora}/bin/nora serve";
         Restart = "on-failure";
         RestartSec = "5";
+        StartLimitIntervalSec = 60;
+        StartLimitBurst = 3;
+        TimeoutStopSec = 10;
+        KillMode = "process";
         WorkingDirectory = "/mnt/data1/nora";
 
         # Security hardening
