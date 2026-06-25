@@ -40,7 +40,7 @@ deploy() {
     exit 1
   fi
 
-NORA_DEV_FLAKE="${PASTEBIN_DEV_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#devShells.default}"
+  NORA_DEV_FLAKE="${PASTEBIN_DEV_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#devShells.default}"
 
   echo "Step 1b: Optional nora registry check (for local cargo build)"
   NORA_URL="$(grep -A1 '\[registries.nora\]' .cargo/config.toml 2>/dev/null | grep 'index' | cut -d'=' -f2 | tr -d ' \"' || true)"
@@ -66,20 +66,25 @@ NORA_DEV_FLAKE="${PASTEBIN_DEV_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN
   echo "Git push verified: $LOCAL_HEAD"
 
   echo "Step 4: Nix build system-manager config from git source: $FLAKE"
-  STORE_PATH="$(nix build "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
-  echo "Built: $STORE_PATH"
+  SM_STORE_PATH="$(nix build "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
+  echo "Built: $SM_STORE_PATH"
 
-  if [ ! -x "$STORE_PATH/bin/activate" ]; then
-    echo "ERROR: activation script not found at $STORE_PATH/bin/activate" >&2
+  if [ ! -x "$SM_STORE_PATH/bin/activate" ]; then
+    echo "ERROR: activation script not found at $SM_STORE_PATH/bin/activate" >&2
     exit 1
   fi
 
   echo "Activating system-manager configuration"
-  run_sudo "$STORE_PATH/bin/activate"
+  if ! run_sudo "$SM_STORE_PATH/bin/activate" 2>&1; then
+    echo "ERROR: system-manager activation failed — service restart skipped" >&2
+    exit 1
+  fi
   run_sudo systemctl daemon-reload
 
   echo "Restarting pastebin application service"
-  run_sudo systemctl restart kant-pastebin.service
+  if ! run_sudo systemctl restart kant-pastebin.service 2>&1; then
+    echo "WARNING: kant-pastebin.service restart failed — unit may not be loaded yet. Check: systemctl status kant-pastebin.service" >&2
+  fi
 
   "$PASTEBIN_DIR/diagnose.sh"
 }

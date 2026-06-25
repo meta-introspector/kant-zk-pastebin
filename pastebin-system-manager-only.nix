@@ -6,6 +6,10 @@ let
   domain = "solana.solfunmeme.com";
 in {
   config = {
+    systemd.tmpfiles.rules = [
+      "d /mnt/data1/spool/uucp/pastebin 0755 kant kantuucp -"
+    ];
+
     systemd.services.kant-pastebin = {
       enable = true;
       description = "Kant Pastebin - UUCP + zkTLS + IPFS";
