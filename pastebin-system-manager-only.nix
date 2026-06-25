@@ -7,7 +7,7 @@ let
 in {
   config = {
     systemd.tmpfiles.rules = [
-      "d /mnt/data1/spool/uucp/pastebin 0755 kant kantuucp -"
+      "d /mnt/data1/spool/uucp/pastebin 0755 kant kant -"
     ];
 
     systemd.services.kant-pastebin = {
@@ -19,7 +19,6 @@ in {
         Type = "simple";
         User = "kant";
         Group = "kant";
-        SupplementaryGroups = [ "mdupont" ];
         ExecStart = "${kant-pastebin}/bin/kant-pastebin";
         Restart = "always";
         RestartSec = "10";
