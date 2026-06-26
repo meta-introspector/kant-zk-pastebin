@@ -491,6 +491,7 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     let mut orig_name = String::new();
     let mut user_title = String::new();
     let mut user_description = String::new();
+    let mut content_text = String::new();
 
     while let Some(item) = payload.next().await {
         let mut field = item.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
@@ -508,6 +509,9 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
                     .unwrap_or_else(|| "upload".to_string());
                 file_data = buf;
             }
+            "content" => {
+                content_text = String::from_utf8_lossy(&buf).to_string();
+            }
             "title" => {
                 user_title = clean_field(&String::from_utf8_lossy(&buf));
             }
@@ -518,8 +522,15 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
         }
     }
 
-    if file_data.is_empty() {
+    // Accept either `file` field (binary upload) or `content` field (text paste)
+    if file_data.is_empty() && content_text.is_empty() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "no file"})));
+    }
+
+    if file_data.is_empty() && !content_text.is_empty() {
+        // Treat `content` field as a text file upload
+        file_data = content_text.clone().into_bytes();
+        orig_name = if user_title.is_empty() { "content.txt".to_string() } else { user_title.clone() };
     }
 
     let ext = orig_name.rsplit('.').next().unwrap_or("bin");
