@@ -26,7 +26,7 @@ in {
       recommendedProxySettings = true;
       commonHttpConfig = ''
         # Private server — no upload limits on any endpoint
-        client_max_body_size 0;
+        # (client_max_body_size is set per-location for /pastebin/)
 
         # Map non-2xx status codes to flag for error document logging
         map $status $is_error {
