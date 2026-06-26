@@ -157,6 +157,9 @@ pub async fn index(
 ) -> Result<HttpResponse> {
     let reply_to = query.get("reply_to").map(|s| s.as_str()).unwrap_or("");
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let version = option_env!("CARGO_PKG_VERSION").unwrap_or("0.1.0");
+    let git_commit = option_env!("GIT_COMMIT").unwrap_or("unknown");
+    let build_time = option_env!("BUILD_TIME").unwrap_or("unknown");
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -172,13 +175,13 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 </style>
 </head><body>
 <div class="nav">
-<a href="{}/">🏠 Home</a>
-<a href="{}/browse">📚 Browse</a>
-<a href="{}/threads">🧵 Threads</a>
-<a href="{}/gallery">🖼️ Gallery</a>
-<a href="{}/git-browse">📁 Git</a>
-<a href="{}/splitter/">✂️ Splitter</a>
-<a href="{}/openapi.json">📖 API</a>
+<a href="{base_path}/">🏠 Home</a>
+<a href="{base_path}/browse">📚 Browse</a>
+<a href="{base_path}/threads">🧵 Threads</a>
+<a href="{base_path}/gallery">🖼️ Gallery</a>
+<a href="{base_path}/git-browse">📁 Git</a>
+<a href="{base_path}/splitter/">✂️ Splitter</a>
+<a href="{base_path}/openapi.json">📖 API</a>
 </div>
 <h1>📋 Kant Pastebin</h1>
 <p>UUCP + zkTLS + IPFS</p>
@@ -188,15 +191,16 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <textarea id="content" placeholder="Paste content here..."></textarea><br><br>
 <input type="file" id="file" accept="image/*,.html,.json,.svg,.mth,.tar.gz,.tar.bz2,.tar.xz,.zip,.gz,.bz2,.xz"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
-<input type="hidden" id="reply_to" value="{}">
+<input type="hidden" id="reply_to" value="{reply_to}">
 <button type="submit">📤 Share</button>
 <button type="button" onclick="preview()">👁️ Preview</button>
 <button type="button" onclick="sendToSplitter()">✂️ Split</button>
 </form>
 <div id="result"></div>
-<br><a href="{}/browse">📚 Browse</a> | <a href="{}/openapi.json">📖 API</a> | <a href="{}/swagger-ui/">🔧 Swagger</a>
+<br><a href="{base_path}/browse">📚 Browse</a> | <a href="{base_path}/openapi.json">📖 API</a> | <a href="{base_path}/swagger-ui/">🔧 Swagger</a>
+<div style="margin-top:20px;padding-top:10px;border-top:1px solid #0f0;font-size:0.8em;color:#080">kant-pastebin v{version} git:{git_commit} built:{build_time}</div>
 <script>
-const basePath = '{}';
+const basePath = '{base_path}';
 const form = document.getElementById('form');
 const content = document.getElementById('content');
 
@@ -215,7 +219,7 @@ function preview() {{
 
 function sendToSplitter() {{
   localStorage.setItem('splitter-text', content.value);
-  window.open('{}/splitter/', '_blank');
+  window.open('{base_path}/splitter/', '_blank');
 }}
 
 form.onsubmit = async (e) => {{
@@ -261,20 +265,7 @@ form.onsubmit = async (e) => {{
   }}
 }};
 </script>
-</body></html>"#,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        reply_to,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path
+</body></html>"#
     );
 
     Ok(HttpResponse::Ok()
