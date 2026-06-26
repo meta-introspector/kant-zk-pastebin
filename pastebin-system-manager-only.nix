@@ -15,10 +15,6 @@ in {
   config = {
     systemd.tmpfiles.rules = [
       "d /var/spool/uucp/pastebin 0755 kant kant -"
-      "d /var/log/nginx 0755 nginx nginx -"
-      "d /var/log/nginx/error-docs 0755 nginx nginx -"
-      "f /var/log/nginx/research.access.log 0644 nginx nginx -"
-      "f /var/log/nginx/research.error.log 0644 nginx nginx -"
     ];
 
     services.nginx = {
@@ -132,6 +128,39 @@ Server-Name: $server_name
         ENRICH_PIPELINE = "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh";
         RUST_LOG = "info";
         TILES_DIR = "";
+      };
+    };
+
+    systemd.services.nginx-log-setup = {
+      enable = true;
+      description = "Create nginx research log files and error-docs directory";
+      before = [ "nginx.service" ];
+      wantedBy = [ "system-manager.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = let
+          script = pkgs.writeShellScript "nginx-log-setup" ''
+            set -eu
+            # Use the private log path that matches systemd's resolved view
+            log_base="/var/log/nginx"
+            # Resolve through private symlink
+            if [ -L /var/log ]; then
+              real_log="$(readlink -f /var/log)"
+              if [ -n "$real_log" ] && [ "$real_log" != /var/log ]; then
+                log_base="$real_log/nginx"
+              fi
+            fi
+            ${pkgs.coreutils}/bin/mkdir -p "$log_base/error-docs"
+            touch "$log_base/research.access.log" "$log_base/research.error.log"
+            chmod 755 "$log_base" "$log_base/error-docs"
+            chmod 644 "$log_base/research.access.log" "$log_base/research.error.log"
+            # Symlink from /var/log/nginx if it doesn't exist
+            if [ ! -d /var/log/nginx ]; then
+              ln -sf "$log_base" /var/log/nginx 2>/dev/null || true
+            fi
+          '';
+        in "${script}";
       };
     };
 
