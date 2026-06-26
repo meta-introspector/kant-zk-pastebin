@@ -23,6 +23,8 @@ in {
       commonHttpConfig = ''
         # Private server — no upload limits on any endpoint
         # (client_max_body_size is set per-location for /pastebin/)
+        # Larger buffer so $request_body captures body content in error logs
+        client_body_buffer_size 1024k;
 
         # Map non-2xx status codes to flag for error document logging
         map $status $is_error {
@@ -45,6 +47,7 @@ Method: $request_method
 URI: $request_uri
 Status: $status
 Bytes: $body_bytes_sent
+Content-Type: $sent_http_content_type
 Referer: $http_referer
 User-Agent: $http_user_agent
 Request-Time: $request_time
@@ -53,6 +56,7 @@ Upstream-Status: $upstream_status
 Host: $host
 X-Forwarded-For: $http_x_forwarded_for
 Server-Name: $server_name
+Request-Body: $request_body
 -------------------
 ';
         access_log /var/log/nginx/error-docs/error.log error_doc if=$is_error;
