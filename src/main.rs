@@ -500,6 +500,7 @@ async fn main() -> std::io::Result<()> {
             .route("/browse", web::get().to(handlers::browse))
             .route("/threads", web::get().to(handlers::threads))
             .route("/paste", web::post().to(handlers::create_paste))
+            .route("/paste-form", web::post().to(handlers::create_paste_form))
             .route("/paste/{id}", web::get().to(handlers::get_paste))
             .route(
                 "/paste/{id}/split",

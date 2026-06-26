@@ -282,7 +282,7 @@ form.onsubmit = async (e) => {{
         .body(html))
 }
 
-/// POST /paste - Create paste
+/// POST /paste - Create paste (JSON body)
 #[utoipa::path(
     post,
     path = concat!(env!("BASE_PATH"), "/paste"),
@@ -292,7 +292,15 @@ form.onsubmit = async (e) => {{
     )
 )]
 pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
-    let paste = data.into_inner();
+    create_paste_inner(data.into_inner()).await
+}
+
+/// POST /paste - Create paste (form body)
+pub async fn create_paste_form(form: web::Form<Paste>) -> Result<HttpResponse> {
+    create_paste_inner(form.into_inner()).await
+}
+
+async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
     let content = paste.content.as_deref().unwrap_or("");
 
     // Detect Wikidata QID — trigger enrichment pipeline
