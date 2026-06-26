@@ -1093,6 +1093,7 @@ function bundleSelected() {{
 /// GET /health - Health check with version info
 pub async fn health_check() -> Result<HttpResponse> {
     let version = option_env!("GIT_COMMIT").unwrap_or("unknown");
+    let build_time = option_env!("BUILD_TIME").unwrap_or("unknown");
     let exe = std::env::current_exe()
         .ok()
         .and_then(|p| p.to_str().map(|s| s.to_string()))
@@ -1100,15 +1101,17 @@ pub async fn health_check() -> Result<HttpResponse> {
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "status": "ok",
-        "git_commit": version,
-        "binary": exe,
         "service": "kant-pastebin",
+        "git_commit": version,
+        "build_time": build_time,
+        "binary": exe,
     })))
 }
 
 /// GET /api/version - Detailed version info
 pub async fn api_version() -> Result<HttpResponse> {
     let version = option_env!("GIT_COMMIT").unwrap_or("unknown");
+    let build_time = option_env!("BUILD_TIME").unwrap_or("unknown");
     let exe = std::env::current_exe()
         .ok()
         .and_then(|p| p.to_str().map(|s| s.to_string()))
@@ -1116,7 +1119,9 @@ pub async fn api_version() -> Result<HttpResponse> {
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "name": "kant-pastebin",
+        "version": "0.1.0",
         "git_commit": version,
+        "build_time": build_time,
         "binary": exe,
         "rustc": option_env!("CARGO_PKG_RUST_VERSION").unwrap_or("unknown"),
         "nix_build": exe.contains("/nix/store/"),

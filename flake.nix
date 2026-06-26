@@ -72,6 +72,7 @@
           nativeBuildInputs = commonNativeBuildInputs;
           doInstallCargoArtifacts = false;
           GIT_COMMIT = gitRev;
+          BUILD_TIME = builtins.substring 0 19 (builtins.toString self.lastModifiedDate or "unknown");
           BASE_PATH = "/pastebin";
 
           installPhase = ''

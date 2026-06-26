@@ -458,8 +458,11 @@ async fn main() -> std::io::Result<()> {
     let uucp_dir =
         env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
 
+    let git_commit = option_env!("GIT_COMMIT").unwrap_or("unknown");
+    let build_time = option_env!("BUILD_TIME").unwrap_or("unknown");
     log::info!("🚀 Starting kant-pastebin microservice on {}", bind);
     log::info!("📁 UUCP spool: {}", uucp_dir);
+    log::info!("📦 Version: git={} built={}", git_commit, build_time);
 
     // Initialize plugin registry
     let mut registry = plugin::PluginRegistry::new();
