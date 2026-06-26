@@ -534,7 +534,7 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
     }
 
     let ext = orig_name.rsplit('.').next().unwrap_or("bin");
-    let mime = if orig_name.to_lowercase().ends_with(".mth") || orig_name.to_lowercase().ends_with(".html") {
+    let mime = if orig_name.to_lowercase().ends_with(".mth") || orig_name.to_lowercase().ends_with(".mht") || orig_name.to_lowercase().ends_with(".html") {
         "text/html".parse::<mime_guess::Mime>().unwrap_or_else(|_| mime_guess::from_ext(ext).first_or_octet_stream())
     } else {
         mime_guess::from_ext(ext).first_or_octet_stream()
@@ -632,7 +632,12 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
                 .and_then(|e| e.to_str())
                 .unwrap_or("bin")
                 .to_string();
-            let mime = mime_guess::from_ext(&ext).first_or_octet_stream();
+            let mime = if ext == "mht" || ext == "mhtml" {
+                // MHT is message/rfc822 but browsers render it better as text/html
+                mime_guess::mime::TEXT_HTML
+            } else {
+                mime_guess::from_ext(&ext).first_or_octet_stream()
+            };
             Ok(HttpResponse::Ok().content_type(mime.to_string()).body(data))
         }
         None => Ok(HttpResponse::NotFound().body("File not found")),
@@ -1110,14 +1115,18 @@ function bundleSelected() {{
                         .map(|e| &e.title)
                         .cloned()
                         .unwrap_or_else(|| id.clone());
-                    let display_mime = mime.to_string();
+                    let display_mime = if ext == "mht" || ext == "mhtml" {
+                        "text/html".to_string()
+                    } else {
+                        mime.to_string()
+                    };
 
                     let content_html = if display_mime.starts_with("image/") {
                         format!(
                             r##"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"##,
                             base_path, id, title
                         )
-                    } else if display_mime == "message/rfc822" || ext == "mht" || ext == "mhtml" {
+                    } else if ext == "mht" || ext == "mhtml" {
                         // Render MHT as inline HTML with download link
                         format!(
                             r##"<p>📎 <a href="{}/file/{}">{}</a> (MHT web archive, {} bytes)</p>
