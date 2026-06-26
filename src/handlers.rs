@@ -295,9 +295,52 @@ pub async fn create_paste(data: web::Json<Paste>) -> Result<HttpResponse> {
     create_paste_inner(data.into_inner()).await
 }
 
-/// POST /paste - Create paste (form body)
+/// POST /paste - Create paste (URL-encoded form body)
 pub async fn create_paste_form(form: web::Form<Paste>) -> Result<HttpResponse> {
     create_paste_inner(form.into_inner()).await
+}
+
+/// POST /paste - Create paste (multipart form body — e.g. curl -F)
+pub async fn create_paste_multipart(mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
+    use actix_web::web::BytesMut;
+    use futures_util::StreamExt as _;
+
+    let mut content = String::new();
+    let mut title = None;
+    let mut description = None;
+    let mut reply_to = None;
+
+    while let Some(item) = payload.next().await {
+        let mut field = item.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+        let field_name = field.name().unwrap_or("").to_string();
+        let mut buf: Vec<u8> = Vec::new();
+        while let Some(chunk) = field.next().await {
+            let data = chunk.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+            buf.extend_from_slice(&data);
+        }
+        let val = String::from_utf8_lossy(&buf).to_string();
+        match field_name.as_str() {
+            "content" => content = val,
+            "title" => title = Some(val),
+            "description" => description = Some(val),
+            "reply_to" => reply_to = Some(val),
+            _ => {}
+        }
+    }
+
+    if content.is_empty() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "no content"})));
+    }
+
+    let paste = Paste {
+        content: Some(content),
+        cid: None,
+        title,
+        description,
+        keywords: None,
+        reply_to,
+    };
+    create_paste_inner(paste).await
 }
 
 async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
