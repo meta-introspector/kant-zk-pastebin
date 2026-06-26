@@ -728,8 +728,8 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
                 .and_then(|e| e.to_str())
                 .unwrap_or("bin")
                 .to_string();
-            let mime = if ext == "mht" || ext == "mhtml" {
-                // MHT is message/rfc822 but browsers render it better as text/html
+            let mime = if ext == "mht" || ext == "mhtml" || ext == "mth" {
+                // MHT/MTH is message/rfc822 but browsers render it better as text/html
                 mime_guess::mime::TEXT_HTML
             } else {
                 mime_guess::from_ext(&ext).first_or_octet_stream()
@@ -1211,7 +1211,7 @@ function bundleSelected() {{
                         .map(|e| &e.title)
                         .cloned()
                         .unwrap_or_else(|| id.clone());
-                    let display_mime = if ext == "mht" || ext == "mhtml" {
+                    let display_mime = if ext == "mht" || ext == "mhtml" || ext == "mth" {
                         "text/html".to_string()
                     } else {
                         mime.to_string()
@@ -1222,8 +1222,8 @@ function bundleSelected() {{
                             r##"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"##,
                             base_path, id, title
                         )
-                    } else if ext == "mht" || ext == "mhtml" {
-                        // Render MHT as inline HTML with download link
+                    } else if ext == "mht" || ext == "mhtml" || ext == "mth" {
+                        // Render MHT/MTH as inline HTML with download link
                         format!(
                             r##"<p>📎 <a href="{}/file/{}">{}</a> (MHT web archive, {} bytes)</p>
 <iframe src="{}/file/{}" style="width:100%;height:600px;border:1px solid #0f0;background:#fff"></iframe>"##,
