@@ -19,7 +19,7 @@ use std::{collections::HashMap, env, fs};
 // ─── Full error capture — saves replayable test case ───────────────
 /// Captures the full request details on failure and writes a replayable
 /// test case document to /var/log/nginx/error-docs/cases/.
-fn capture_error_case(
+pub fn capture_error_case(
     handler: &str,
     req: &HttpRequest,
     body_preview: &str,
@@ -155,7 +155,7 @@ fn log_error_case(handler: &str, req: &Option<HttpRequest>, field_names: &[&str]
     }
 }
 
-fn write_index_entry(
+pub fn write_index_entry(
     uucp_dir: &str,
     id: &str,
     title: &str,
@@ -196,11 +196,11 @@ fn write_index_entry(
         .ok();
 }
 
-fn clean_field(value: &str) -> String {
+pub fn clean_field(value: &str) -> String {
     value.trim().to_string()
 }
 
-fn archive_name_title(name: &str) -> String {
+pub fn archive_name_title(name: &str) -> String {
     Path::new(name)
         .file_name()
         .and_then(|s| s.to_str())
@@ -221,7 +221,7 @@ fn archive_name_title(name: &str) -> String {
         .to_string()
 }
 
-fn archive_name_description(title: &str, name: &str, entries: usize, bytes: usize) -> String {
+pub fn archive_name_description(title: &str, name: &str, entries: usize, bytes: usize) -> String {
     if title.is_empty() {
         format!(
             "Uploaded archive {} with {} entries and {} bytes",
@@ -232,7 +232,7 @@ fn archive_name_description(title: &str, name: &str, entries: usize, bytes: usiz
     }
 }
 
-fn file_description(name: &str, mime: &str, size: usize, data: &[u8]) -> String {
+pub fn file_description(name: &str, mime: &str, size: usize, data: &[u8]) -> String {
     if mime.starts_with("text/")
         || name.to_lowercase().ends_with(".html")
         || name.to_lowercase().ends_with(".json")
@@ -574,142 +574,6 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
 /// POST /upload - Upload file (multipart)
 /// Save-first: write file to disk immediately, then return.
 /// No NLP, no HTML extraction, no blocking calls in this handler.
-pub async fn upload_file(req: HttpRequest, mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
-    use actix_web::web::BytesMut;
-    use futures_util::StreamExt as _;
-
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
-    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let mut file_data: Vec<u8> = Vec::new();
-    let mut orig_name = String::new();
-    let mut user_title = String::new();
-    let mut user_description = String::new();
-    let mut content_text = String::new();
-
-    while let Some(item) = payload.next().await {
-        let mut field = item.map_err(|e| {
-            let err_detail = format!("multipart parse: {}", e);
-            log::error!("[upload] {}: {}", req.uri(), err_detail);
-            capture_error_case("upload_file", &req, &format!("<multipart error>"), 400, &e.to_string(), &err_detail);
-            actix_web::error::ErrorBadRequest(e)
-        })?;
-        let field_name = field.name().unwrap_or("").to_string();
-        let mut buf: Vec<u8> = Vec::new();
-        while let Some(chunk) = field.next().await {
-            let data = chunk.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
-            buf.extend_from_slice(&data);
-        }
-        match field_name.as_str() {
-            "file" => {
-                orig_name = field
-                    .content_disposition()
-                    .and_then(|cd| cd.get_filename().map(|s| s.to_string()))
-                    .unwrap_or_else(|| "upload".to_string());
-                file_data = buf;
-            }
-            "content" => {
-                content_text = String::from_utf8_lossy(&buf).to_string();
-            }
-            "title" => {
-                user_title = clean_field(&String::from_utf8_lossy(&buf));
-            }
-            "description" => {
-                user_description = clean_field(&String::from_utf8_lossy(&buf));
-            }
-            _ => {}
-        }
-    }
-
-    // Accept either `file` field (binary upload) or `content` field (text paste)
-    if file_data.is_empty() && content_text.is_empty() {
-        let resp = serde_json::json!({"error": "no file"});
-        let resp_body = serde_json::to_string(&resp).unwrap_or_default();
-        capture_error_case("upload_file", &req, &format!("title={}", user_title), 400, &resp_body, "no file or content field in multipart upload");
-        return Ok(HttpResponse::BadRequest().json(resp));
-    }
-
-    if file_data.is_empty() && !content_text.is_empty() {
-        // Treat `content` field as a text file upload
-        file_data = content_text.clone().into_bytes();
-        orig_name = if user_title.is_empty() { "content.txt".to_string() } else { user_title.clone() };
-    }
-
-    let ext = orig_name.rsplit('.').next().unwrap_or("bin");
-    let mime = if orig_name.to_lowercase().ends_with(".mth") || orig_name.to_lowercase().ends_with(".mht") || orig_name.to_lowercase().ends_with(".html") {
-        "text/html".parse::<mime_guess::Mime>().unwrap_or_else(|_| mime_guess::from_ext(ext).first_or_octet_stream())
-    } else {
-        mime_guess::from_ext(ext).first_or_octet_stream()
-    };
-    let mime_str = mime.to_string();
-
-    let save_title = if user_title.is_empty() {
-        archive_name_title(&orig_name)
-    } else {
-        user_title.clone()
-    };
-
-    let save_slug = tagging::slugify(&save_title);
-    let filename = format!("{}_{}.{}", ts, save_slug, ext);
-    let id = filename
-        .rsplit_once('.')
-        .map(|(s, _)| s)
-        .unwrap_or(&filename)
-        .to_string();
-    let uucp = format!("{}/{}", uucp_dir, filename);
-
-    fs::write(&uucp, &file_data).ok();
-    log::info!("[upload] saved file: {} ({} bytes)", uucp, file_data.len());
-
-    let mut hasher = Sha256::new();
-    hasher.update(&file_data);
-    let hash = hasher.finalize();
-    let local_cid = format!("bafk{}", hex::encode(&hash[..16]));
-    let witness = hex::encode(&hash);
-    let ipfs_cid = ipfs::ipfs_add_bytes(&file_data);
-
-    let final_title = save_title.clone();
-    let final_description = if user_description.is_empty() {
-        file_description(&orig_name, &mime_str, file_data.len(), &file_data)
-    } else {
-        user_description.clone()
-    };
-
-    // CID dedup file
-    let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
-    fs::write(&cid_file, &id).ok();
-
-    write_index_entry(
-        &uucp_dir,
-        &id,
-        &final_title,
-        Some(&final_description),
-        vec!["upload".to_string(), ext.to_string()],
-        &local_cid,
-        &witness,
-        &filename,
-        file_data.len(),
-        ipfs_cid.clone(),
-        None,
-        None,
-    );
-
-    log::info!("[upload] completed: id={} title='{}'", id, final_title);
-
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "id": id,
-        "filename": filename,
-        "title": final_title,
-        "description": final_description,
-        "cid": local_cid,
-        "ipfs_cid": ipfs_cid,
-        "witness": witness,
-        "mime": mime.to_string(),
-        "size": file_data.len(),
-        "url": format!("/paste/{}", id),
-    })))
-}
-
-/// GET /file/{id} - Serve raw file
 pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
