@@ -28,8 +28,9 @@ fn capture_error_case(
     err_detail: &str,
 ) {
     let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let cases_dir = "/var/log/nginx/error-docs/cases";
-    let _ = fs::create_dir_all(cases_dir);
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp/pastebin".to_string());
+    let cases_dir = format!("{}/../error-cases", uucp_dir);
+    let _ = fs::create_dir_all(&cases_dir);
 
     let client = req.peer_addr().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string());
     let method = req.method().to_string();
