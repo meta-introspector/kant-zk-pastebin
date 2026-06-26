@@ -9,12 +9,74 @@ use crate::{ipfs, plugin, storage, tagging, view};
 use actix_web::{web, HttpRequest, HttpResponse, Result};
 use chrono::Utc;
 use ciborium;
-use log::debug;
+use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Path;
 use std::{collections::HashMap, env, fs};
+
+// ─── Full error capture — saves replayable test case ───────────────
+/// Captures the full request details on failure and writes a replayable
+/// test case document to /var/log/nginx/error-docs/cases/.
+fn capture_error_case(
+    handler: &str,
+    req: &HttpRequest,
+    body_preview: &str,
+    status: u16,
+    resp_body: &str,
+    err_detail: &str,
+) {
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let cases_dir = "/var/log/nginx/error-docs/cases";
+    let _ = fs::create_dir_all(cases_dir);
+
+    let client = req.peer_addr().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string());
+    let method = req.method().to_string();
+    let uri = req.uri().to_string();
+
+    // Build replayable curl command
+    let mut curl = format!("curl -sk -X {method}\
+", method = method);
+    for (k, v) in req.headers().iter() {
+        if k.as_str().to_lowercase() == "host" { continue; }
+        if k.as_str().to_lowercase() == "content-length" { continue; }
+        let val = v.to_str().unwrap_or("<binary>");
+        curl.push_str(&format!("  -H '{k}: {val}'\
+", k = k, val = val));
+    }
+    if status >= 400 && !body_preview.is_empty() {
+        // Include body as --data-binary for replay
+        curl.push_str(&format!("  --data-binary '{}'", body_preview.chars().take(200).collect::<String>()));
+    }
+    curl.push_str(&format!(" https://solana.solfunmeme.com{uri}", uri = uri));
+
+    let headers_dump = req.headers().iter()
+        .map(|(k, v)| format!("  {}: {}", k, v.to_str().unwrap_or("<binary>")))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let doc = format!(
+        "---\ncase_id: case_{ts}_{handler}\ntimestamp: {ts}\nhandler: {handler}\nstatus: {status}\n---\n\n# Error Case: {handler}\n\n**Timestamp**: {ts}\n**Client**: {client}\n**Method**: {method}\n**URI**: {uri}\n**Status**: {status}\n**Detail**: {err_detail}\n\n## Replay Command\n\n```bash\n{curl}\n```\n\n## Request Headers\n\n```\n{headers_dump}\n```\n\n## Request Body Preview\n\n```\n{body_preview}\n```\n\n## Response Body\n\n```\n{resp_body}\n```\n\n---\n*Auto-captured by kant-pastebin error case logger*\n",
+        ts = ts,
+        handler = handler,
+        status = status,
+        client = client,
+        method = method,
+        uri = uri,
+        err_detail = err_detail,
+        curl = curl,
+        headers_dump = headers_dump,
+        body_preview = if body_preview.is_empty() { "(empty)".to_string() } else { body_preview.chars().take(500).collect() },
+        resp_body = if resp_body.is_empty() { "(empty)".to_string() } else { resp_body.chars().take(1000).collect() },
+    );
+
+    let filename = format!("{}/case_{}_{}.md", cases_dir, ts, handler.replace(" ", "_").to_lowercase());
+    match fs::write(&filename, &doc) {
+        Ok(_) => warn!("[error-case] Saved replayable case: {}", filename),
+        Err(e) => error!("[error-case] Failed to write {}: {}", filename, e),
+    }
+}
 
 // ─── Helper: basic HTML lint ──────────────────────────────────────────
 fn lint_html(html: &str) -> Vec<String> {
@@ -53,6 +115,45 @@ fn lint_html(html: &str) -> Vec<String> {
 }
 
 // ─── Helper: append an entry to index.jsonl ──────────────────────────
+/// Log an error case as an individual research document in /var/log/nginx/error-docs/
+fn log_error_case(handler: &str, req: &Option<HttpRequest>, field_names: &[&str], err_msg: &str) {
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let slug = handler.replace(" ", "_").to_lowercase();
+    let case_file = format!("/var/log/nginx/error-docs/case_{}_{}.md", ts, slug);
+
+    let client = req.as_ref().map(|r| {
+        r.peer_addr().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string())
+    }).unwrap_or_else(|| "unknown".to_string());
+
+    let method = req.as_ref().map(|r| r.method().to_string()).unwrap_or_else(|| "?".to_string());
+    let uri = req.as_ref().map(|r| r.uri().to_string()).unwrap_or_else(|| "?".to_string());
+    let headers = req.as_ref().map(|r| {
+        r.headers().iter()
+            .map(|(k, v)| format!("  {}: {}", k, v.to_str().unwrap_or("<binary>")))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }).unwrap_or_else(|| "  (none)".to_string());
+
+    let fields = field_names.iter().map(|f| format!("  - {}", f)).collect::<Vec<_>>().join("\n");
+
+    let doc = format!(
+        "---\ncase_id: {ts}\nhandler: {handler}\nseverity: error\n---\n\n# Error Case: {handler}\n\n**Timestamp**: {ts}\n**Client**: {client}\n**Method**: {method}\n**URI**: {uri}\n**Error**: {err_msg}\n\n## Request Headers\n\n```\n{headers}\n```\n\n## Fields Received\n\n{fields}\n\n## Resolution\n\n- [ ] Investigate root cause\n- [ ] Apply fix\n- [ ] Verify\n",
+        ts = ts,
+        handler = handler,
+        client = client,
+        method = method,
+        uri = uri,
+        err_msg = err_msg,
+        headers = headers,
+        fields = fields,
+    );
+
+    match std::fs::write(&case_file, &doc) {
+        Ok(_) => warn!("[error-case] Created: {}", case_file),
+        Err(e) => error!("[error-case] Failed to write {}: {}", case_file, e),
+    }
+}
+
 fn write_index_entry(
     uucp_dir: &str,
     id: &str,
@@ -472,7 +573,7 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
 /// POST /upload - Upload file (multipart)
 /// Save-first: write file to disk immediately, then return.
 /// No NLP, no HTML extraction, no blocking calls in this handler.
-pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
+pub async fn upload_file(req: HttpRequest, mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
     use actix_web::web::BytesMut;
     use futures_util::StreamExt as _;
 
@@ -515,7 +616,10 @@ pub async fn upload_file(mut payload: actix_multipart::Multipart) -> Result<Http
 
     // Accept either `file` field (binary upload) or `content` field (text paste)
     if file_data.is_empty() && content_text.is_empty() {
-        return Ok(HttpResponse::BadRequest().json(serde_json::json!({"error": "no file"})));
+        let resp = serde_json::json!({"error": "no file"});
+        let resp_body = serde_json::to_string(&resp).unwrap_or_default();
+        capture_error_case("upload_file", &req, &format!("title={}", user_title), 400, &resp_body, "no file or content field in multipart upload");
+        return Ok(HttpResponse::BadRequest().json(resp));
     }
 
     if file_data.is_empty() && !content_text.is_empty() {
