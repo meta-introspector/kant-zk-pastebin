@@ -5,31 +5,67 @@ let
   kant-pastebin = self.packages.${system}.kant-pastebin;
   domain = "solana.solfunmeme.com";
 
-  leDir = "/etc/letsencrypt/live/${domain}";
-  leCert = "${leDir}/fullchain.pem";
-  leKey  = "${leDir}/privkey.pem";
-  selfSignedDir = "/mnt/data1/kant/pastebin/ssl";
-  selfSignedCert = "${selfSignedDir}/${domain}.crt";
-  selfSignedKey  = "${selfSignedDir}/${domain}.key";
-  activeCert = if builtins.pathExists leCert then leCert else selfSignedCert;
-  activeKey  = if builtins.pathExists leKey  then leKey  else selfSignedKey;
+  # SSL certs — always use the live directory. The ssl-selfsigned service
+  # ensures symlinks exist there (pointing to LE certs or self-signed fallback).
+  # Do NOT use builtins.pathExists here — that bakes a build-time check into
+  # an immutable store path. The runtime ssl-selfsigned service handles fallback.
+  sslCert = "/etc/letsencrypt/live/${domain}/fullchain.pem";
+  sslKey  = "/etc/letsencrypt/live/${domain}/privkey.pem";
 in {
   config = {
     systemd.tmpfiles.rules = [
       "d /var/spool/uucp/pastebin 0755 kant kant -"
+      "d /var/log/nginx 0755 nginx nginx -"
+      "d /var/log/nginx/error-docs 0755 nginx nginx -"
+      "f /var/log/nginx/research.access.log 0644 nginx nginx -"
+      "f /var/log/nginx/research.error.log 0644 nginx nginx -"
     ];
 
     services.nginx = {
       enable = true;
       recommendedProxySettings = true;
       commonHttpConfig = ''
-        access_log off;
+        # Private server — no upload limits on any endpoint
+        client_max_body_size 0;
+
+        # Map non-2xx status codes to flag for error document logging
+        map $status $is_error {
+          ~^[23]  0;
+          default 1;
+        }
+
+        # Research-grade access logging (all requests)
+        log_format research '"$time_iso8601" client=$remote_addr method=$request_method uri=$request_uri status=$status body_bytes=$body_bytes_sent referer=$http_referer user_agent=$http_user_agent request_time=''${request_time}s upstream_addr=$upstream_addr upstream_status=$upstream_status scheme=$scheme host=$host';
+
+        access_log /var/log/nginx/research.access.log research;
+        error_log /var/log/nginx/research.error.log warn;
+
+        # Structured error document archive (all 4xx/5xx responses)
+        log_format error_doc '
+=== Error Document ===
+Date: $time_iso8601
+Client: $remote_addr
+Method: $request_method
+URI: $request_uri
+Status: $status
+Bytes: $body_bytes_sent
+Referer: $http_referer
+User-Agent: $http_user_agent
+Request-Time: $request_time
+Upstream-Addr: $upstream_addr
+Upstream-Status: $upstream_status
+Host: $host
+X-Forwarded-For: $http_x_forwarded_for
+Server-Name: $server_name
+-------------------
+';
+        access_log /var/log/nginx/error-docs/error.log error_doc if=$is_error;
       '';
 
       virtualHosts."${domain}" = {
         forceSSL = true;
-        sslCertificate = activeCert;
-        sslCertificateKey = activeKey;
+        sslCertificate = sslCert;
+        sslCertificateKey = sslKey;
 
         locations."/pastebin/" = {
           proxyPass = "http://127.0.0.1:8090/";
@@ -45,6 +81,17 @@ in {
             proxy_connect_timeout 3600s;
             proxy_buffering off;
             proxy_request_buffering off;
+          '';
+        };
+
+        # Serve error documents for research
+        locations."/nginx-docs/errors/" = {
+          alias = "/var/log/nginx/error-docs/";
+          extraConfig = ''
+            autoindex on;
+            autoindex_exact_size off;
+            autoindex_localtime on;
+            default_type text/markdown;
           '';
         };
       };
@@ -99,35 +146,55 @@ in {
         ExecStart = let
           script = pkgs.writeShellScript "ssl-selfsigned" ''
             set -eu
-            if [ -f "${leCert}" ] && [ -f "${leKey}" ]; then
-              echo "LE certs present at ${leDir} — skipping self-signed"
-              exit 0
-            fi
+            domain="${domain}"
+            leArchive="/etc/letsencrypt/archive/$domain"
+            leDir="/etc/letsencrypt/live/$domain"
+            selfSignedDir="/mnt/data1/kant/pastebin/ssl"
+            selfSignedCert="$selfSignedDir/$domain.crt"
+            selfSignedKey="$selfSignedDir/$domain.key"
 
-            leArchive="/etc/letsencrypt/archive/${domain}"
-            ${pkgs.coreutils}/bin/mkdir -p "''${leArchive}" "${selfSignedDir}" "${leDir}"
-            ${pkgs.coreutils}/bin/chmod 755 "${selfSignedDir}" "''${leArchive}" "${leDir}" 2>/dev/null || true
+            # Create all needed directories
+            ${pkgs.coreutils}/bin/mkdir -p "$leArchive" "$selfSignedDir" "$leDir"
+            ${pkgs.coreutils}/bin/chmod 755 "$selfSignedDir" "$leArchive" "$leDir" 2>/dev/null || true
 
-            if [ ! -f "${selfSignedCert}" ] || [ ! -f "${selfSignedKey}" ]; then
-              echo "Generating self-signed cert for ${domain}"
+            # Generate self-signed cert once
+            if [ ! -f "$selfSignedCert" ] || [ ! -f "$selfSignedKey" ]; then
+              echo "[ssl-selfsigned] Generating self-signed cert for $domain"
               ${pkgs.openssl}/bin/openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                -keyout "${selfSignedKey}.tmp" -out "${selfSignedCert}.tmp" \
-                -subj /CN=${domain} 2>/dev/null
-              ${pkgs.coreutils}/bin/mv "${selfSignedKey}.tmp" "${selfSignedKey}"
-              ${pkgs.coreutils}/bin/mv "${selfSignedCert}.tmp" "${selfSignedCert}"
-              ${pkgs.coreutils}/bin/chmod 644 "${selfSignedCert}"
-              ${pkgs.coreutils}/bin/chmod 644 "${selfSignedKey}"
+                -keyout "$selfSignedKey.tmp" -out "$selfSignedCert.tmp" \
+                -subj /CN=$domain 2>/dev/null
+              ${pkgs.coreutils}/bin/mv "$selfSignedKey.tmp" "$selfSignedKey"
+              ${pkgs.coreutils}/bin/mv "$selfSignedCert.tmp" "$selfSignedCert"
+              ${pkgs.coreutils}/bin/chmod 644 "$selfSignedCert"
+              ${pkgs.coreutils}/bin/chmod 644 "$selfSignedKey"
             fi
 
-            for f in cert.pem chain.pem fullchain.pem; do
-              [ -L "${leDir}/$f" ] && continue
-              ${pkgs.coreutils}/bin/ln -s "${selfSignedCert}" "${leDir}/$f" 2>/dev/null || true
-            done
-            [ -L "${leDir}/privkey.pem" ] || \
-              ${pkgs.coreutils}/bin/ln -s "${selfSignedKey}" "${leDir}/privkey.pem" 2>/dev/null || true
+            # Check for LE certs — use the latest in the archive
+            latest_fullchain="$(ls "$leArchive"/fullchain*.pem 2>/dev/null | sort | tail -1)"
+            latest_privkey="$(ls "$leArchive"/privkey*.pem 2>/dev/null | sort | tail -1)"
 
-            ${pkgs.coreutils}/bin/chmod 755 /etc/letsencrypt/archive /etc/letsencrypt/archive/${domain} 2>/dev/null || true
-            ${pkgs.coreutils}/bin/chmod 644 /etc/letsencrypt/archive/${domain}/*.pem 2>/dev/null || true
+            if [ -n "$latest_fullchain" ] && [ -n "$latest_privkey" ]; then
+              echo "[ssl-selfsigned] LE certs found — symlinking latest into live dir"
+              # Find the corresponding cert and chain
+              latest_cert="$(ls "$leArchive"/cert*.pem 2>/dev/null | sort | tail -1)"
+              latest_chain="$(ls "$leArchive"/chain*.pem 2>/dev/null | sort | tail -1)"
+              ln -sf "$latest_cert"      "$leDir/cert.pem"
+              ln -sf "$latest_chain"     "$leDir/chain.pem"
+              ln -sf "$latest_fullchain" "$leDir/fullchain.pem"
+              ln -sf "$latest_privkey"   "$leDir/privkey.pem"
+            else
+              echo "[ssl-selfsigned] No LE certs — using self-signed fallback"
+              ln -sf "$selfSignedCert" "$leDir/fullchain.pem"
+              ln -sf "$selfSignedCert" "$leDir/cert.pem"
+              ln -sf "$selfSignedCert" "$leDir/chain.pem"
+              ln -sf "$selfSignedKey"  "$leDir/privkey.pem"
+            fi
+
+            # Permissions for LE archive
+            ${pkgs.coreutils}/bin/chmod 755 /etc/letsencrypt/archive /etc/letsencrypt/archive/$domain 2>/dev/null || true
+            ${pkgs.coreutils}/bin/chmod 644 /etc/letsencrypt/archive/$domain/*.pem 2>/dev/null || true
+
+            echo "[ssl-selfsigned] Active SSL cert: $(readlink -f "$leDir/fullchain.pem")"
           '';
         in "${script}";
       };
@@ -145,10 +212,33 @@ in {
         ExecStartPost = let
           fixPerms = pkgs.writeShellScript "certbot-fix-perms" ''
             set -eu
-            chmod 755 /etc/letsencrypt/archive /etc/letsencrypt/archive/${domain} 2>/dev/null || true
-            chmod 644 /etc/letsencrypt/archive/${domain}/*.pem 2>/dev/null || true
-            touch /var/log/nginx/access.log /var/log/nginx/error.log 2>/dev/null || true
-            chown nginx:nginx /var/log/nginx/access.log /var/log/nginx/error.log 2>/dev/null || true
+            domain="${domain}"
+            leArchive="/etc/letsencrypt/archive/$domain"
+            leDir="/etc/letsencrypt/live/$domain"
+
+            # Fix LE archive permissions
+            chmod 755 /etc/letsencrypt/archive /etc/letsencrypt/archive/$domain 2>/dev/null || true
+            chmod 644 "$leArchive"/*.pem 2>/dev/null || true
+
+            # Re-symlink the latest LE certs (certbot increments the number)
+            latest_cert="$(ls "$leArchive"/cert*.pem 2>/dev/null | sort | tail -1)"
+            latest_chain="$(ls "$leArchive"/chain*.pem 2>/dev/null | sort | tail -1)"
+            latest_fullchain="$(ls "$leArchive"/fullchain*.pem 2>/dev/null | sort | tail -1)"
+            latest_privkey="$(ls "$leArchive"/privkey*.pem 2>/dev/null | sort | tail -1)"
+            if [ -n "$latest_fullchain" ] && [ -n "$latest_privkey" ]; then
+              echo "[certbot-renew] Updating LE symlinks"
+              ln -sf "$latest_cert"      "$leDir/cert.pem"
+              ln -sf "$latest_chain"     "$leDir/chain.pem"
+              ln -sf "$latest_fullchain" "$leDir/fullchain.pem"
+              ln -sf "$latest_privkey"   "$leDir/privkey.pem"
+            fi
+
+            # Ensure nginx log files exist and are writable
+            touch /var/log/nginx/research.access.log /var/log/nginx/research.error.log 2>/dev/null || true
+            chown :nginx /var/log/nginx/research.access.log /var/log/nginx/research.error.log 2>/dev/null || true
+            chmod 664 /var/log/nginx/research.access.log /var/log/nginx/research.error.log 2>/dev/null || true
+
+            echo "[certbot-renew] Active SSL cert: $(readlink -f "$leDir/fullchain.pem")"
             systemctl reload-or-restart nginx.service 2>/dev/null || true
           '';
         in "${fixPerms}";
