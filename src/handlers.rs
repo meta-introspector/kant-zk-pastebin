@@ -587,7 +587,12 @@ pub async fn upload_file(req: HttpRequest, mut payload: actix_multipart::Multipa
     let mut content_text = String::new();
 
     while let Some(item) = payload.next().await {
-        let mut field = item.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+        let mut field = item.map_err(|e| {
+            let err_detail = format!("multipart parse: {}", e);
+            log::error!("[upload] {}: {}", req.uri(), err_detail);
+            capture_error_case("upload_file", &req, &format!("<multipart error>"), 400, &e.to_string(), &err_detail);
+            actix_web::error::ErrorBadRequest(e)
+        })?;
         let field_name = field.name().unwrap_or("").to_string();
         let mut buf: Vec<u8> = Vec::new();
         while let Some(chunk) = field.next().await {
