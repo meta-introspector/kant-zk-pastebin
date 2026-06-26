@@ -291,7 +291,7 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <input type="text" id="title" placeholder="Title" value=""><br><br>
 <input type="text" id="description" placeholder="Description" value=""><br><br>
 <textarea id="content" placeholder="Paste content here..."></textarea><br><br>
-<input type="file" id="file" accept="image/*,.html,.json,.svg,.mth,.tar.gz,.tar.bz2,.tar.xz,.zip,.gz,.bz2,.xz"><br><br>
+<input type="file" id="file" accept="image/*,.html,.json,.svg,.mth,.mht,.tar.gz,.tar.bz2,.tar.xz,.zip,.gz,.bz2,.xz"><br><br>
 <input type="text" id="keywords" placeholder="Keywords (comma separated)"><br><br>
 <input type="hidden" id="reply_to" value="{reply_to}">
 <button type="submit">📤 Share</button>
