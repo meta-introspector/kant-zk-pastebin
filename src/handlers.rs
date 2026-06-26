@@ -1086,7 +1086,83 @@ function bundleSelected() {{
                 .content_type("text/html; charset=utf-8")
                 .body(html))
         }
-        None => Ok(HttpResponse::NotFound().body("Paste not found")),
+        None => {
+            // Last resort: find any file in spool matching this id
+            let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
+                entries.filter_map(|e| e.ok()).find(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+                    stem == id && !name.ends_with(".cid") && !name.ends_with(".meta") && !name.ends_with(".jsonl") && !name.ends_with(".txt")
+                })
+            });
+
+            match file {
+                Some(entry) => {
+                    let data = fs::read(entry.path())
+                        .map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
+                    let ext = entry.path().extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("bin")
+                        .to_string();
+                    let mime = mime_guess::from_ext(&ext).first_or_octet_stream();
+                    let title = entries.iter()
+                        .find(|e| e.id == id)
+                        .map(|e| &e.title)
+                        .cloned()
+                        .unwrap_or_else(|| id.clone());
+                    let display_mime = mime.to_string();
+
+                    let content_html = if display_mime.starts_with("image/") {
+                        format!(
+                            r##"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"##,
+                            base_path, id, title
+                        )
+                    } else if display_mime == "message/rfc822" || ext == "mht" || ext == "mhtml" {
+                        // Render MHT as inline HTML with download link
+                        format!(
+                            r##"<p>📎 <a href="{}/file/{}">{}</a> (MHT web archive, {} bytes)</p>
+<iframe src="{}/file/{}" style="width:100%;height:600px;border:1px solid #0f0;background:#fff"></iframe>"##,
+                            base_path, id, title, data.len(), base_path, id
+                        )
+                    } else if display_mime.starts_with("text/") {
+                        // Escape for safe display
+                        let escaped = data.iter().map(|&b| match b {
+                            b'&' => "&amp;".to_string(),
+                            b'<' => "&lt;".to_string(),
+                            b'>' => "&gt;".to_string(),
+                            _ => (b as char).to_string(),
+                        }).collect::<String>();
+                        format!(
+                            r##"<pre style="white-space:pre-wrap;word-wrap:break-word">{}</pre>"##,
+                            escaped
+                        )
+                    } else {
+                        format!(
+                            r##"<p>📎 <a href="{}/file/{}">{}</a> ({}, {} bytes)</p>"##,
+                            base_path, id, title, display_mime, data.len()
+                        )
+                    };
+
+                    let html = format!(
+                        r##"<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>{}</title>
+<style>body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}a{{color:#0ff}}</style>
+</head><body>
+<div><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/file/{}">📄 Raw</a></div>
+<h1>{}</h1>
+<p>MIME: {} | {} bytes</p>
+{}
+</body></html>"##,
+                        title, base_path, base_path, base_path, id, title, display_mime, data.len(), content_html
+                    );
+
+                    Ok(HttpResponse::Ok()
+                        .content_type("text/html; charset=utf-8")
+                        .body(html))
+                }
+                None => Ok(HttpResponse::NotFound().body("Paste not found")),
+            }
+        }
     }
 }
 
