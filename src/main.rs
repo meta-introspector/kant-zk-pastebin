@@ -499,6 +499,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors)
             .app_data(registry.clone())
+            .app_data(web::PayloadConfig::new(256 * 1024 * 1024)) // 256MB max upload
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url("/openapi.json", openapi.clone()))
             .route("/", web::get().to(handlers::index))
             .route("/browse", web::get().to(handlers::browse))
