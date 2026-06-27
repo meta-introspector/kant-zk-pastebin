@@ -131,17 +131,39 @@ switch_system_manager() {
   fi
 
   echo "Activating (requires sudo)..."
+  # Remove stale static unit files so system-manager can create proper symlinks
+  run_sudo rm -f /etc/systemd/system/kant-pastebin.service \
+                    /etc/systemd/system/nginx.service \
+                    /etc/systemd/system/nginx-log-setup.service \
+                    /etc/systemd/system/ssl-selfsigned.service \
+                    /etc/systemd/system/certbot-renew.service \
+                    /etc/systemd/system/certbot-renew.timer
+
   run_sudo "$STORE_PATH/bin/activate"
 
   echo "Reloading systemd..."
   run_sudo systemctl daemon-reload
 
-  echo "Restarting kant-pastebin.service..."
-  run_sudo systemctl restart kant-pastebin.service || true
+  echo "Restarting all managed services..."
+  run_sudo systemctl restart nginx-log-setup.service 2>/dev/null || true
+  run_sudo systemctl restart ssl-selfsigned.service 2>/dev/null || true
+  run_sudo systemctl restart nginx.service 2>/dev/null || true
+  run_sudo systemctl restart kant-pastebin.service 2>/dev/null || true
 
   echo ""
-  echo "Switch complete."
-  run_sudo systemctl status kant-pastebin.service --no-pager -l
+  echo "=== Verifying services ==="
+  for svc in nginx-log-setup ssl-selfsigned nginx kant-pastebin; do
+    if systemctl is-active --quiet "$svc.service" 2>/dev/null; then
+      echo "  ✅ $svc.service"
+    else
+      echo "  ⚠️  $svc.service not active"
+    fi
+  done
+
+  echo ""
+  echo "=== Version ==="
+  curl -sk "https://solana.solfunmeme.com/pastebin/api/version" 2>/dev/null | \
+    python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  git={d[\"git_commit\"]} built={d[\"build_time\"]}') " 2>/dev/null || echo "  (pastebin not responding yet)"
 }
 
 case "${1:-deploy}" in
