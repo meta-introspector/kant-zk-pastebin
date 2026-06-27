@@ -278,6 +278,26 @@ Request-Body: $request_body
       };
     };
 
+    systemd.services.svg2anim-worker = {
+      enable = true;
+      description = "SVG to animated GIF conversion worker";
+      after = [ "network.target" ];
+      wantedBy = [ "system-manager.target" ];
+      serviceConfig = {
+        Type = "simple";
+        User = "kant";
+        Group = "kant";
+        ExecStart = "${pkgs.bash}/bin/bash ${./scripts/svg2anim-worker.sh}";
+        Restart = "always";
+        RestartSec = "10";
+        Environment = [
+          "RESVG_BIN=/usr/local/bin/resvg"
+          "UUCP_SPOOL=/var/spool/uucp/pastebin"
+          "PATH=/usr/local/bin:/usr/bin:/bin"
+        ];
+      };
+    };
+
     systemd.timers.certbot-renew = {
       enable = true;
       description = "Daily certbot renewal check for ${domain}";
