@@ -580,11 +580,23 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
 
     // Find file with any extension matching the id
     let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
-        entries.filter_map(|e| e.ok()).find(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
-            stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
-        })
+        let mut matches: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+                stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
+            })
+            .collect();
+        if matches.is_empty() {
+            entries.filter_map(|e| e.ok()).find(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+                stem.ends_with(&format!("_{}", id)) && !name.ends_with(".cid") && !name.ends_with(".meta")
+            })
+        } else {
+            matches.into_iter().next()
+        }
     });
 
     match file {

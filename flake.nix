@@ -35,6 +35,7 @@
             || lib.strings.hasSuffix ".md" path
             || lib.strings.hasSuffix ".sh" path
             || lib.strings.hasSuffix ".nix" path
+            || (type == "symlink" && (baseNameOf path == "erdfa-publish" || baseNameOf path == "rust-unixfs"))
           ;
         };
 
@@ -109,10 +110,10 @@
     )) // {
       systemConfigs.kant-pastebin-only = system-manager.lib.makeSystemConfig {
         modules = [
-          ./pastebin-system-manager-only.nix
+          /home/mdupont/projects/system-manager/all-services.nix
           { nixpkgs.hostPlatform = "x86_64-linux"; }
         ];
-        specialArgs = { inherit self; };
+        specialArgs = { pastebin-src = self; };
       };
     };
 }
