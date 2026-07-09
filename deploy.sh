@@ -112,6 +112,11 @@ deploy() {
     log "WARNING: kant-pastebin.service restart failed — unit may not be loaded yet. Check: systemctl status kant-pastebin.service"
   fi
 
+  log "Restarting svg2anim-worker service"
+  if ! run_sudo systemctl restart svg2anim-worker.service >> "$LOG_FILE" 2>&1; then
+    log "WARNING: svg2anim-worker.service restart failed — unit may not be loaded yet. Check: systemctl status svg2anim-worker.service"
+  fi
+
   log "=== Deploy complete ==="
   "$PASTEBIN_DIR/diagnose.sh" | tee -a "$LOG_FILE"
 }
