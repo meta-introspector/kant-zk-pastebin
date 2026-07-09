@@ -9,7 +9,7 @@ PASTEBIN_UPSTREAM="$(git -C "$PASTEBIN_REPO" rev-parse --abbrev-ref --symbolic-f
 if [ -n "$PASTEBIN_UPSTREAM" ]; then
   PASTEBIN_BRANCH="${PASTEBIN_UPSTREAM#*/}"
 fi
-FLAKE="${PASTEBIN_FLAKE:-/home/mdupont/projects/system-manager#all-services}"
+FLAKE="${PASTEBIN_FLAKE:-/home/mdupont/projects/system-manager#systemConfigs.all-services}"
 LOG_DIR="${PASTEBIN_DIR}/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LOG_FILE="${LOG_DIR}/deploy-${TIMESTAMP}.log"
