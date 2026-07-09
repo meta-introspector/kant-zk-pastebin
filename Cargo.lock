@@ -1597,7 +1597,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 [[package]]
 name = "erdfa-publish"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "a3537ebb306c2ad3521e206a938415e42bea47df8fcb56a8862a9a751fa8d44e"
 dependencies = [
  "anyhow",
@@ -3625,7 +3625,7 @@ dependencies = [
 [[package]]
 name = "rust-unixfs"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "c6d3eadb39df5a598445aca058dd00217c96f7e2311c45c53388164fc42d11fb"
 dependencies = [
  "either",

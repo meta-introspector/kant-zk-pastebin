@@ -580,18 +580,20 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
 
     // Find file with any extension matching the id
     let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
+        let entries: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
         let mut matches: Vec<_> = entries
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+            .iter()
+            .filter(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
                 stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
             })
+            .cloned()
             .collect();
         if matches.is_empty() {
-            entries.filter_map(|e| e.ok()).find(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+            entries.into_iter().find(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
                 stem.ends_with(&format!("_{}", id)) && !name.ends_with(".cid") && !name.ends_with(".meta")
             })
         } else {
@@ -601,10 +603,9 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
 
     match file {
         Some(entry) => {
-            let data = fs::read(entry.path())
+            let data = fs::read(&entry)
                 .map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
             let ext = entry
-                .path()
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("bin")
@@ -712,7 +713,7 @@ pub async fn get_paste(
             }
 
             let title = headers.get("Title").map(|s| *s).unwrap_or(&id);
-            let cid = headers.get("CID").map(|s| *s).unwrap_or("");
+            let _cid = headers.get("CID").map(|s| *s).unwrap_or("");
             let ipfs_cid = headers
                 .get("IPFS")
                 .or(headers.get("ipfs_cid"))
@@ -734,7 +735,6 @@ pub async fn get_paste(
 
             let file_cmd = format!("cat {}/{}.txt", uucp_dir, id);
             let curl_cmd = format!("curl {}/raw/{}", base_url, id);
-            let reply_cmd = format!("curl -X POST {}/paste -H 'Content-Type: application/json' -d '{{\"content\":\"...\",\"reply_to\":\"{}\"}}'", base_url, id);
 
             // Find related posts by keywords
             let current_entry = entries.iter().find(|e| e.id == id);

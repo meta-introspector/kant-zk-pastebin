@@ -25,19 +25,7 @@
         rust = pkgs.rust-bin.stable.latest.default;
         craneLib = (crane.mkLib pkgs).overrideToolchain rust;
 
-        src = lib.cleanSourceWith {
-          src = self;
-          filter = path: type:
-            craneLib.filterCargoSources path type
-            || lib.strings.hasSuffix ".rs" path
-            || lib.strings.hasSuffix ".toml" path
-            || lib.strings.hasSuffix ".lock" path
-            || lib.strings.hasSuffix ".md" path
-            || lib.strings.hasSuffix ".sh" path
-            || lib.strings.hasSuffix ".nix" path
-            || (type == "symlink" && (baseNameOf path == "erdfa-publish" || baseNameOf path == "rust-unixfs"))
-          ;
-        };
+        src = self;
 
         gitRev = self.shortRev or "dirty";
 
@@ -51,7 +39,7 @@
         '';
 
         cargoVendorDir = craneLib.vendorCargoDeps {
-          src = self;
+          src = src;
           overrideVendorCargoPackage = p: drv:
             if p.name == "erdfa-publish" || p.name == "rust-unixfs" then
               noraCargoPackage p
@@ -65,7 +53,7 @@
         kant-pastebin = craneLib.buildPackage {
           pname = "kant-pastebin";
           version = "0.1.0";
-          src = self;
+          src = src;
           cargoVendorDir = cargoVendorDir;
           strictDeps = true;
           doCheck = false;

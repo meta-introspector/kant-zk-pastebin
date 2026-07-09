@@ -9,7 +9,7 @@ PASTEBIN_UPSTREAM="$(git -C "$PASTEBIN_REPO" rev-parse --abbrev-ref --symbolic-f
 if [ -n "$PASTEBIN_UPSTREAM" ]; then
   PASTEBIN_BRANCH="${PASTEBIN_UPSTREAM#*/}"
 fi
-FLAKE="${PASTEBIN_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only}"
+FLAKE="${PASTEBIN_FLAKE:-/home/mdupont/projects/system-manager#all-services}"
 LOG_DIR="${PASTEBIN_DIR}/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LOG_FILE="${LOG_DIR}/deploy-${TIMESTAMP}.log"
@@ -85,7 +85,7 @@ deploy() {
   log "Git push verified: $LOCAL_HEAD"
 
   log "Step 4: Nix build system-manager config from git source: $FLAKE"
-  SM_STORE_PATH="$(nix build "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
+  SM_STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
   log "Built: $SM_STORE_PATH"
 
   if [ ! -x "$SM_STORE_PATH/bin/activate" ]; then
@@ -94,6 +94,12 @@ deploy() {
   fi
 
   log "Activating system-manager configuration"
+  run_sudo rm -f /etc/systemd/system/kant-pastebin.service \
+                    /etc/systemd/system/nginx.service \
+                    /etc/systemd/system/nginx-log-setup.service \
+                    /etc/systemd/system/ssl-selfsigned.service \
+                    /etc/systemd/system/certbot-renew.service \
+                    /etc/systemd/system/certbot-renew.timer
   if ! run_sudo "$SM_STORE_PATH/bin/activate" >> "$LOG_FILE" 2>&1; then
     log "ERROR: system-manager activation failed — service restart skipped"
     exit 1
@@ -122,7 +128,7 @@ switch_system_manager() {
   echo "Flake: $FLAKE"
 
   echo "Building system-manager config..."
-  STORE_PATH="$(nix build "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
+  STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
   echo "Built: $STORE_PATH"
 
   if [ ! -x "$STORE_PATH/bin/activate" ]; then
