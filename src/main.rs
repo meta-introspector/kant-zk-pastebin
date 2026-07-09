@@ -526,7 +526,7 @@ async fn main() -> std::io::Result<()> {
             .route("/upload", web::post().to(upload_handler::upload_file))
             .route("/file/{id}", web::get().to(handlers::get_file))
             .route("/ipfs/{cid}", web::get().to(handlers::ipfs_proxy))
-            .route("/svg2anim/{id}", web::post().to(svg_anim::svg2anim))
+            .route("/svg2anim/{id}", web::get().to(svg_anim::svg2anim))
             .route("/gallery", web::get().to(gallery::gallery))
             .route("/gallery/img/{qid}", web::get().to(handlers::gallery_image))
             .route("/upload-archive", web::post().to(handlers::upload_archive))
