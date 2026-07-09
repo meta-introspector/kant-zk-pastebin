@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SVG→animated GIF worker — standalone systemd service.
+# SVG→GIF worker — renders SVG as-is (like a browser), no animation by default.
 # Watches for job files in /var/spool/uucp/pastebin/svg2anim-jobs/
 # Each job file contains the SVG paste ID.
 # Output is saved back to the pastebin spool and indexed.
@@ -8,9 +8,10 @@ set -euo pipefail
 RESVG="${RESVG_BIN:-/home/mdupont/2026/06/26/resvg/target/debug/resvg}"
 SPOOL="${UUCP_SPOOL:-/var/spool/uucp/pastebin}"
 JOBS_DIR="${SPOOL}/svg2anim-jobs"
-NUM_FRAMES=24
-MAX_DIM=800
-DELAY_CS=4
+NUM_FRAMES="${SVG2ANIM_NUM_FRAMES:-1}"
+MAX_DIM="${SVG2ANIM_MAX_DIM:-800}"
+DELAY_CS="${SVG2ANIM_DELAY_CS:-0}"
+ROTATE="${SVG2ANIM_ROTATE:-0}"
 
 mkdir -p "$JOBS_DIR"
 
@@ -33,7 +34,7 @@ process_svg() {
 
     log "Processing: $svg_file"
 
-    # 1. Render base PNG via resvg
+    # 1. Render base PNG via resvg (like a browser)
     if ! "$RESVG" "$svg_file" "$tmp/base.png" 2>/dev/null; then
         log "resvg failed for $id"
         rm -rf "$tmp"
@@ -60,21 +61,27 @@ process_svg() {
     # 3. Resize
     convert "$tmp/base.png" -resize "${w}x${h}!" "$tmp/src.png"
 
-    # 4. Generate rotated frames
+    # 4. Generate frames (static render by default, optional rotation)
     for i in $(seq 0 $((NUM_FRAMES - 1))); do
-        local angle
-        angle=$(awk "BEGIN { printf \"%.2f\", $i * 360 / $NUM_FRAMES }")
         local fp
         fp=$(printf "$tmp/frame_%02d.png" "$i")
-        if ! convert "$tmp/src.png" -background none -virtual-pixel transparent \
-            -distort SRT "$angle" -gravity center -extent "${w}x${h}" "$fp" 2>/dev/null; then
+        if [ "$ROTATE" -gt 0 ] 2>/dev/null; then
+            local angle
+            angle=$(awk "BEGIN { printf \"%.2f\", $i * $ROTATE }")
+            convert "$tmp/src.png" -background none -virtual-pixel transparent \
+                -distort SRT "$angle" -gravity center -extent "${w}x${h}" "$fp" 2>/dev/null || cp "$tmp/src.png" "$fp"
+        else
             cp "$tmp/src.png" "$fp"
         fi
     done
 
     # 5. Combine into animated GIF
     local gif_out="${tmp}/out.gif"
-    convert -delay "$DELAY_CS" -loop 0 "$tmp"/frame_*.png "$gif_out"
+    if [ "$NUM_FRAMES" -le 1 ] 2>/dev/null; then
+        cp "$tmp/frame_00.png" "$gif_out"
+    else
+        convert -delay "$DELAY_CS" -loop 0 "$tmp"/frame_*.png "$gif_out"
+    fi
 
     # 6. Copy to spool
     local safe_id
@@ -93,7 +100,7 @@ process_svg() {
     local gif_id="${ts}_${safe_id}"
     local entry
     entry=$(cat <<ENDJSON
-{"id":"$gif_id","title":"$id (animated)","description":"Animated GIF from SVG ($NUM_FRAMES frames ${w}x${h})","keywords":["svg","animation","gif"],"cid":"bafk$cid","witness":"$wit","timestamp":"$ts","filename":"$gif_fn","size":$gif_size,"mime":"image/gif","ipfs_cid":null,"reply_to":null,"root":null,"uucp_path":"${SPOOL}/${gif_fn}"}
+{"id":"$gif_id","title":"$id (rendered)","description":"Rendered SVG ($NUM_FRAMES frames ${w}x${h})","keywords":["svg","render","gif"],"cid":"bafk$cid","witness":"$wit","timestamp":"$ts","filename":"$gif_fn","size":$gif_size,"mime":"image/gif","ipfs_cid":null,"reply_to":null,"root":null,"uucp_path":"${SPOOL}/${gif_fn}"}
 ENDJSON
 )
     echo "$entry" >> "${SPOOL}/index.jsonl"
