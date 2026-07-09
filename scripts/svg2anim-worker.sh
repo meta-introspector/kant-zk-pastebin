@@ -50,9 +50,9 @@ process_svg() {
     # Cap at MAX_DIM
     if [ "$w" -gt "$MAX_DIM" ] || [ "$h" -gt "$MAX_DIM" ]; then
         local s
-        s=$(echo "scale=4; $MAX_DIM / ($w > $h ? $w : $h)" | bc)
-        w=$(echo "scale=0; ($w * $s) / 1" | bc)
-        h=$(echo "scale=0; ($h * $s) / 1" | bc)
+        s=$(awk "BEGIN { printf \"%.4f\", $MAX_DIM / (($w > $h) ? $w : $h) }")
+        w=$(awk "BEGIN { printf \"%.0f\", $w * $s }")
+        h=$(awk "BEGIN { printf \"%.0f\", $h * $s }")
     fi
     [ "$w" -lt 100 ] && w=100
     [ "$h" -lt 100 ] && h=100
@@ -63,7 +63,7 @@ process_svg() {
     # 4. Generate rotated frames
     for i in $(seq 0 $((NUM_FRAMES - 1))); do
         local angle
-        angle=$(echo "scale=2; $i * 360 / $NUM_FRAMES" | bc)
+        angle=$(awk "BEGIN { printf \"%.2f\", $i * 360 / $NUM_FRAMES }")
         local fp
         fp=$(printf "$tmp/frame_%02d.png" "$i")
         if ! convert "$tmp/src.png" -background none -virtual-pixel transparent \
