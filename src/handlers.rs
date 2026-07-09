@@ -575,7 +575,8 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
 /// Save-first: write file to disk immediately, then return.
 /// No NLP, no HTML extraction, no blocking calls in this handler.
 pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
-    let id = path.into_inner();
+    let id_with_ext = path.into_inner();
+    let (id, requested_ext) = id_with_ext.rsplit_once('.').map(|(s, e)| (s, e)).unwrap_or((&id_with_ext, ""));
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
 
     // Find file with any extension matching the id
@@ -587,6 +588,7 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
                 stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
+                    && name.ends_with(requested_ext)
             })
             .cloned()
             .collect();
@@ -595,6 +597,7 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
                 stem.ends_with(&format!("_{}", id)) && !name.ends_with(".cid") && !name.ends_with(".meta")
+                    && name.ends_with(requested_ext)
             })
         } else {
             matches.into_iter().next()
