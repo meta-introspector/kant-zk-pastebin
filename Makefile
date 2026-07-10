@@ -1,14 +1,14 @@
-.PHONY: build deploy run test-share-menu rename-allm-pastes rename-allm-pastes-apply clean help tiles
+.PHONY: build deploy restart switch logs diagnose clean help tiles
 
 help:
 	@echo "Kant Pastebin"
 	@echo ""
-	@echo "  make build       — Build (nix build)"
-	@echo "  make run         — Run with cargo"
-	@echo "  make test-share-menu — Run offline share menu test"
-	@echo "  make rename-allm-pastes — Preview allm.txt metadata renames"
-	@echo "  make rename-allm-pastes-apply — Apply allm.txt metadata renames"
-	@echo "  make deploy      — Deploy with systemd"
+	@echo "  make build       — Nix build check"
+	@echo "  make deploy      — Full deployment (nix build, commit, push, activate, restart)"
+	@echo "  make restart     — Restart pastebin + svg2anim-worker services"
+	@echo "  make switch      — Build + activate system-manager config"
+	@echo "  make logs        — Show error logs"
+	@echo "  make diagnose    — Run diagnose script"
 	@echo "  make tiles       — Copy DAG-CBOR tiles from dasl-testing"
 	@echo "  make clean       — Clean build artifacts"
 
@@ -16,22 +16,26 @@ DASL_TESTING := /mnt/data1/time-2026/02-february/22/dasl/dasl-testing
 export DAGCBOR_TILES_PATH := $(DASL_TESTING)/sheaf/tiles/dagcbor_tiles.html
 
 build:
-	nix develop -c cargo build
+	nix build .#kant-pastebin --no-link
 
-run:
-	nix develop -c cargo run
+deploy:
+	bash deploy.sh deploy
 
-test-share-menu:
-	nix develop -c cargo run --bin kant-pastebin -- test-share-menu
+restart:
+	systemctl restart kant-pastebin.service || true
+	systemctl restart svg2anim-worker.service || true
+	systemctl status kant-pastebin.service --no-pager || true
+	systemctl status svg2anim-worker.service --no-pager || true
 
-rename-allm-pastes:
-	nix develop -c cargo run --bin kant-pastebin -- rename-allm-pastes
+switch:
+	bash deploy.sh switch
 
-rename-allm-pastes-apply:
-	nix develop -c cargo run --bin kant-pastebin -- rename-allm-pastes --apply
+logs:
+	tail -30 logs/kant-pastebin-errors.log 2>/dev/null || echo "  (no error log found)"
+	tail -30 logs/nginx-errors.log 2>/dev/null || echo "  (no nginx error log found)"
 
-deploy: build
-	bash deploy.sh
+diagnose:
+	bash diagnose.sh
 
 tiles:
 	cd $(DASL_TESTING) && python3 sheaf/tiles/build_tiles.py

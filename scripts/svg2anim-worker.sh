@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
-# SVG→GIF worker — renders SVG as-is (like a browser), no animation by default.
+# SVG→GIF worker — renders SVG SMIL animations faithfully using svg2anim-frames.
 # Watches for job files in /var/spool/uucp/pastebin/svg2anim-jobs/
 # Each job file contains the SVG paste ID.
 # Output is saved back to the pastebin spool and indexed.
 set -euo pipefail
 
-RESVG="${RESVG_BIN:-/home/mdupont/2026/06/26/resvg/target/debug/resvg}"
 SPOOL="${UUCP_SPOOL:-/var/spool/uucp/pastebin}"
 JOBS_DIR="${SPOOL}/svg2anim-jobs"
-NUM_FRAMES="${SVG2ANIM_NUM_FRAMES:-1}"
-MAX_DIM="${SVG2ANIM_MAX_DIM:-800}"
-DELAY_CS="${SVG2ANIM_DELAY_CS:-0}"
-ROTATE="${SVG2ANIM_ROTATE:-0}"
+SVG2ANIM_FRAMES="${SVG2ANIM_FRAMES_BIN:-/mnt/data1/time-2026/06-june/26/svg2anim-frames/target/debug/svg2anim-frames}"
+FPS="${SVG2ANIM_FPS:-5}"
 
 mkdir -p "$JOBS_DIR"
 
@@ -29,84 +26,34 @@ process_svg() {
 
     local ts
     ts=$(date -u +%Y%m%d_%H%M%S)
-    local tmp="/tmp/svg2anim_${ts}_${id}"
-    mkdir -p "$tmp"
+    local gif_fn="${ts}_${id}.gif"
+    local gif_path="${SPOOL}/${gif_fn}"
 
-    log "Processing: $svg_file"
+    log "Processing: $svg_file -> $gif_fn"
 
-    # 1. Render base PNG via resvg (like a browser)
-    if ! "$RESVG" "$svg_file" "$tmp/base.png" 2>/dev/null; then
-        log "resvg failed for $id"
-        rm -rf "$tmp"
+    if ! "$SVG2ANIM_FRAMES" "$svg_file" --output "$gif_path" --fps "$FPS" 2>&1; then
+        log "svg2anim-frames failed for $id"
         return 1
     fi
 
-    # 2. Get dimensions
-    local dims
-    dims=$(identify -format "%w %h" "$tmp/base.png" 2>/dev/null || echo "400 400")
-    local w h
-    w=$(echo "$dims" | cut -d' ' -f1)
-    h=$(echo "$dims" | cut -d' ' -f2)
-
-    # Cap at MAX_DIM
-    if [ "$w" -gt "$MAX_DIM" ] || [ "$h" -gt "$MAX_DIM" ]; then
-        local s
-        s=$(awk "BEGIN { printf \"%.4f\", $MAX_DIM / (($w > $h) ? $w : $h) }")
-        w=$(awk "BEGIN { printf \"%.0f\", $w * $s }")
-        h=$(awk "BEGIN { printf \"%.0f\", $h * $s }")
-    fi
-    [ "$w" -lt 100 ] && w=100
-    [ "$h" -lt 100 ] && h=100
-
-    # 3. Resize
-    convert "$tmp/base.png" -resize "${w}x${h}!" "$tmp/src.png"
-
-    # 4. Generate frames (static render by default, optional rotation)
-    for i in $(seq 0 $((NUM_FRAMES - 1))); do
-        local fp
-        fp=$(printf "$tmp/frame_%02d.png" "$i")
-        if [ "$ROTATE" -gt 0 ] 2>/dev/null; then
-            local angle
-            angle=$(awk "BEGIN { printf \"%.2f\", $i * $ROTATE }")
-            convert "$tmp/src.png" -background none -virtual-pixel transparent \
-                -distort SRT "$angle" -gravity center -extent "${w}x${h}" "$fp" 2>/dev/null || cp "$tmp/src.png" "$fp"
-        else
-            cp "$tmp/src.png" "$fp"
-        fi
-    done
-
-    # 5. Combine into animated GIF
-    local gif_out="${tmp}/out.gif"
-    if [ "$NUM_FRAMES" -le 1 ] 2>/dev/null; then
-        cp "$tmp/frame_00.png" "$gif_out"
-    else
-        convert -delay "$DELAY_CS" -loop 0 "$tmp"/frame_*.png "$gif_out"
-    fi
-
-    # 6. Copy to spool
-    local safe_id
-    safe_id=$(echo "$id" | tr '.' '_')
-    local gif_fn="${ts}_${safe_id}.gif"
-    cp "$gif_out" "${SPOOL}/${gif_fn}"
     local gif_size
-    gif_size=$(stat -c%s "$gif_out" 2>/dev/null || stat -f%z "$gif_out" 2>/dev/null)
+    gif_size=$(stat -c%s "$gif_path" 2>/dev/null || stat -f%z "$gif_path" 2>/dev/null)
 
-    # 7. Compute SHA256 for CID
+    # Compute SHA256 for CID
     local cid wit
-    cid=$(sha256sum "$gif_out" | cut -c1-32)
-    wit=$(sha256sum "$gif_out" | cut -c1-64)
+    cid=$(sha256sum "$gif_path" | cut -c1-32)
+    wit=$(sha256sum "$gif_path" | cut -c1-64)
 
-    # 8. Write index entry
-    local gif_id="${ts}_${safe_id}"
+    # Write index entry
+    local gif_id="${ts}_${id}"
     local entry
     entry=$(cat <<ENDJSON
-{"id":"$gif_id","title":"$id (rendered)","description":"Rendered SVG ($NUM_FRAMES frames ${w}x${h})","keywords":["svg","render","gif"],"cid":"bafk$cid","witness":"$wit","timestamp":"$ts","filename":"$gif_fn","size":$gif_size,"mime":"image/gif","ipfs_cid":null,"reply_to":null,"root":null,"uucp_path":"${SPOOL}/${gif_fn}"}
+{"id":"$gif_id","title":"$id (animated)","description":"Animated GIF from SVG SMIL animations","keywords":["svg","animation","gif"],"cid":"bafk$cid","witness":"$wit","timestamp":"$ts","filename":"$gif_fn","size":$gif_size,"mime":"image/gif","ipfs_cid":null,"reply_to":null,"root":null,"uucp_path":"${gif_path}"}
 ENDJSON
 )
     echo "$entry" >> "${SPOOL}/index.jsonl"
 
-    log "Created: $gif_id (${w}x${h}, ${gif_size}B, ${NUM_FRAMES}frames)"
-    rm -rf "$tmp"
+    log "Created: $gif_id (${gif_size}B)"
 }
 
 # Main loop — process job files
