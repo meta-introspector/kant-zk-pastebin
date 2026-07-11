@@ -7,7 +7,7 @@ set -euo pipefail
 
 SPOOL="${UUCP_SPOOL:-/var/spool/uucp/pastebin}"
 JOBS_DIR="${SPOOL}/svg2anim-jobs"
-SVG2ANIM_FRAMES="${SVG2ANIM_FRAMES_BIN:-/mnt/data1/time-2026/06-june/26/svg2anim-frames/target/debug/svg2anim-frames}"
+SVG2ANIM_FRAMES="${SVG2ANIM_FRAMES_BIN:-/mnt/data1/time-2026/06-june/26/svg2anim-frames/target/release/svg2anim-frames}"
 FPS="${SVG2ANIM_FPS:-5}"
 
 mkdir -p "$JOBS_DIR"
@@ -61,13 +61,16 @@ log "Worker started, watching $JOBS_DIR"
 while true; do
     for job in "$JOBS_DIR"/*; do
         [ -f "$job" ] || continue
+        case "$job" in
+            *.failed|*.dead) continue ;;
+        esac
         id=$(basename "$job")
         log "Job: $id"
         if process_svg "$id"; then
             rm -f "$job"
             log "Completed: $id"
         else
-            mv "$job" "${job}.failed"
+            mv "$job" "${job%.*}.failed"
             log "Failed: $id"
         fi
     done
