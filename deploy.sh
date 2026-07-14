@@ -9,7 +9,7 @@ PASTEBIN_UPSTREAM="$(git -C "$PASTEBIN_REPO" rev-parse --abbrev-ref --symbolic-f
 if [ -n "$PASTEBIN_UPSTREAM" ]; then
   PASTEBIN_BRANCH="${PASTEBIN_UPSTREAM#*/}"
 fi
-FLAKE="${PASTEBIN_FLAKE:-/home/mdupont/projects/system-manager#systemConfigs.all-services}"
+FLAKE="${PASTEBIN_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only}"
 LOG_DIR="${PASTEBIN_DIR}/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LOG_FILE="${LOG_DIR}/deploy-${TIMESTAMP}.log"
@@ -62,27 +62,17 @@ deploy() {
   NORA_DEV_FLAKE="${PASTEBIN_DEV_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#devShells.default}"
 
   log "Step 1b: Optional nora registry check (for local cargo build)"
-  NORA_URL="$(grep -A1 '\[registries.nora\]' .cargo/config.toml 2>/dev/null | grep 'index' | cut -d'=' -f2 | tr -d ' \"' || true)"
-  if [ -n "$NORA_URL" ] && curl -sf --max-time 5 "$NORA_URL" > /dev/null 2>&1; then
-    log "Nora registry reachable. Running cargo build check via git+file devShell."
+  if curl -sf --max-time 5 http://127.0.0.1:4000/health > /dev/null 2>&1; then
+    log "Nora registry reachable at localhost:4000. Running cargo build check via git+file devShell."
     nix develop "$NORA_DEV_FLAKE" -c cargo build --release >> "$LOG_FILE" 2>&1 || log "WARNING: cargo build failed, but nix build succeeded — proceeding."
   else
-    log "Nora registry not reachable. Skipping cargo build check (nix build already verified compilation)."
+    log "Nora registry not reachable at localhost:4000. Skipping cargo build check (nix build already verified compilation)."
   fi
 
-  log "Step 2: Git commit and push"
+  log "Step 2: Git commit (local only, no remote push)"
   git add -A
   git commit -m "deploy: auto-commit before nix build $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
-  git push origin "$PASTEBIN_BRANCH" || true
-
-  log "Step 3b: Verify git push succeeded"
-  LOCAL_HEAD="$(git rev-parse HEAD)"
-  REMOTE_HEAD="$(git ls-remote origin "$PASTEBIN_BRANCH" | cut -f1)"
-  if [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ]; then
-    log "ERROR: Local HEAD ($LOCAL_HEAD) does not match remote ($REMOTE_HEAD). Push may have failed."
-    exit 1
-  fi
-  log "Git push verified: $LOCAL_HEAD"
+  log "Local commit verified: $(git rev-parse HEAD)"
 
   log "Step 4: Nix build system-manager config from git source: $FLAKE"
   SM_STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
@@ -129,9 +119,11 @@ restart_pastebin() {
 switch_system_manager() {
   cd "$PASTEBIN_DIR"
 
-  echo "=== Switch: build + activate system-manager config ==="
+  echo "=== Switch: build + activate pastebin system-manager config ==="
   echo "Flake: $FLAKE"
 
+  echo "Building pastebin package..."
+  nix build .#kant-pastebin --no-link >> "$LOG_FILE" 2>&1 || true
   echo "Building system-manager config..."
   STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
   echo "Built: $STORE_PATH"
@@ -142,39 +134,21 @@ switch_system_manager() {
   fi
 
   echo "Activating (requires sudo)..."
-  # Remove stale static unit files so system-manager can create proper symlinks
-  run_sudo rm -f /etc/systemd/system/kant-pastebin.service \
-                    /etc/systemd/system/nginx.service \
-                    /etc/systemd/system/nginx-log-setup.service \
-                    /etc/systemd/system/ssl-selfsigned.service \
-                    /etc/systemd/system/certbot-renew.service \
-                    /etc/systemd/system/certbot-renew.timer
-
   run_sudo "$STORE_PATH/bin/activate"
 
   echo "Reloading systemd..."
   run_sudo systemctl daemon-reload
 
-  echo "Restarting all managed services..."
-  run_sudo systemctl restart nginx-log-setup.service 2>/dev/null || true
-  run_sudo systemctl restart ssl-selfsigned.service 2>/dev/null || true
-  run_sudo systemctl restart nginx.service 2>/dev/null || true
+  echo "Restarting pastebin..."
   run_sudo systemctl restart kant-pastebin.service 2>/dev/null || true
 
   echo ""
-  echo "=== Verifying services ==="
-  for svc in nginx-log-setup ssl-selfsigned nginx kant-pastebin; do
-    if systemctl is-active --quiet "$svc.service" 2>/dev/null; then
-      echo "  ✅ $svc.service"
-    else
-      echo "  ⚠️  $svc.service not active"
-    fi
-  done
-
-  echo ""
-  echo "=== Version ==="
-  curl -sk "https://solana.solfunmeme.com/pastebin/api/version" 2>/dev/null | \
-    python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  git={d[\"git_commit\"]} built={d[\"build_time\"]}') " 2>/dev/null || echo "  (pastebin not responding yet)"
+  echo "=== Verifying ==="
+  if systemctl is-active --quiet kant-pastebin.service 2>/dev/null; then
+    echo "  ✅ kant-pastebin.service"
+  else
+    echo "  ⚠️  kant-pastebin.service not active"
+  fi
 }
 
 case "${1:-deploy}" in
