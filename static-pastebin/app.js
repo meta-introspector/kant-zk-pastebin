@@ -39,6 +39,11 @@ document.getElementById('pasteForm').onsubmit = async (e) => {
   const content = document.getElementById('content').value;
   const keywords = document.getElementById('keywords').value.split(',').map(s => s.trim()).filter(s => s);
   
+  if (!content.trim()) {
+    document.getElementById('result').innerHTML = '⚠️ Please enter some content';
+    return;
+  }
+  
   const paste = {
     id: Date.now().toString(),
     title,
@@ -47,6 +52,12 @@ document.getElementById('pasteForm').onsubmit = async (e) => {
     timestamp: new Date().toISOString(),
     synced: false
   };
+  
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Saving...';
+  }
   
   // Save locally
   const tx = db.transaction([STORE_NAME], 'readwrite');
@@ -59,6 +70,19 @@ document.getElementById('pasteForm').onsubmit = async (e) => {
     // Try to sync to server
     if (serverUrl) {
       syncToServer(paste);
+    }
+    
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '📤 Share';
+    }
+  };
+  
+  tx.onerror = () => {
+    document.getElementById('result').innerHTML = '❌ Failed to save locally';
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '📤 Share';
     }
   };
   
@@ -333,9 +357,17 @@ function copyChunk(i) {
 }
 
 function copyAllChunks() {
-  if (window.__chunks) {
-    navigator.clipboard.writeText(window.__chunks.join('\n\n---\n\n'));
+  if (!window.__chunks || !window.__chunks.length) {
+    document.getElementById('result').innerHTML = '⚠️ No chunks to copy. Split some text first.';
+    return;
   }
+  navigator.clipboard.writeText(window.__chunks.join('\n\n---\n\n'))
+    .then(() => {
+      document.getElementById('result').innerHTML = '✅ All chunks copied to clipboard';
+    })
+    .catch(() => {
+      document.getElementById('result').innerHTML = '❌ Failed to copy';
+    });
 }
 
 // Accept text from other apps via localStorage

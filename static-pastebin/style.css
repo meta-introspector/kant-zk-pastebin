@@ -46,6 +46,12 @@ button:hover {
   background: #0ff;
 }
 
+button:disabled {
+  background: #333;
+  color: #666;
+  cursor: not-allowed;
+}
+
 .config {
   background: #222;
   padding: 10px;

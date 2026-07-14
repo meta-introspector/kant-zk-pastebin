@@ -580,8 +580,28 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
 
     // Find file with any extension matching the id
+    // Pass order when no extension is given:
+    //   1. Prefer .gif files matching by suffix (rendered animation)
+    //   2. Exact stem match (original file)
+    //   3. Suffix match fallback (timestamp-prefixed outputs)
     let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
         let entries: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+
+        // Pass 1: When no extension requested, prefer GIF files matching by suffix
+        // (e.g. "20260711_135358_20260710_191143_download_svg.gif" for id
+        //  "20260710_191143_download_svg" -- rendered animation)
+        if requested_ext.is_empty() {
+            if let Some(gif) = entries.iter().find(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+                name.ends_with(".gif") && stem.ends_with(&format!("_{}", id))
+                    && !name.ends_with(".cid") && !name.ends_with(".meta")
+            }).cloned() {
+                return Some(gif);
+            }
+        }
+
+        // Pass 2: Exact stem match (original file like SVG)
         let mut matches: Vec<_> = entries
             .iter()
             .filter(|p| {
@@ -592,18 +612,18 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
             })
             .cloned()
             .collect();
-        if matches.is_empty() {
-            entries.into_iter().find(|p| {
+        if !matches.is_empty() {
+            return matches.into_iter().next();
+        }
+
+        // Pass 3: Suffix match fallback (timestamp-prefixed outputs)
+        entries.into_iter().find(|p| {
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
                 stem.ends_with(&format!("_{}", id)) && !name.ends_with(".cid") && !name.ends_with(".meta")
                     && name.ends_with(requested_ext)
-            })
-        } else {
-            matches.into_iter().next()
-        }
+        })
     });
-
     match file {
         Some(entry) => {
             let data = fs::read(&entry)
@@ -1074,18 +1094,39 @@ function bundleSelected() {{
         None => {
             // Last resort: find any file in spool matching this id
             let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
-                entries.filter_map(|e| e.ok()).find(|e| {
+                let entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+                let matches: Vec<_> = entries.iter().filter(|e| {
                     let name = e.file_name().to_string_lossy().to_string();
                     let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
-                    stem == id && !name.ends_with(".cid") && !name.ends_with(".meta") && !name.ends_with(".jsonl") && !name.ends_with(".txt")
-                })
+                    !name.ends_with(".cid") && !name.ends_with(".meta") && !name.ends_with(".jsonl") && !name.ends_with(".txt")
+                }).collect();
+                // Pass 1: Prefer .gif files matching by suffix (rendered animation)
+                let gif = matches.iter().find(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+                    name.ends_with(".gif") && stem.ends_with(&format!("_{}", id))
+                });
+                gif.or_else(|| {
+                    // Pass 2: Exact stem match (original file like SVG)
+                    matches.iter().find(|e| {
+                        let name = e.file_name().to_string_lossy().to_string();
+                        let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+                        stem == id
+                    })
+                }).or_else(|| {
+                    // Pass 3: Suffix match fallback (timestamp-prefixed outputs)
+                    matches.iter().find(|e| {
+                        let name = e.file_name().to_string_lossy().to_string();
+                        let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+                        stem.ends_with(&format!("_{}", id))
+                    })
+                }).map(|e| e.path())
             });
-
             match file {
                 Some(entry) => {
-                    let data = fs::read(entry.path())
+                    let data = fs::read(&entry)
                         .map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
-                    let ext = entry.path().extension()
+                    let ext = entry.extension()
                         .and_then(|e| e.to_str())
                         .unwrap_or("bin")
                         .to_string();
@@ -1104,9 +1145,11 @@ function bundleSelected() {{
                     let is_svg = ext == "svg" || display_mime == "image/svg+xml";
                     let content_html = if is_svg {
                         format!(
-                            r##"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0;background:#fff" alt="{}">
+                            r##"<object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff">
+  <a href="{}/file/{}">{}</a>
+</object>
 <p style="margin-top:10px"><button onclick="fetch('{}/svg2anim/{}',{{method:'GET'}}).then(r=>r.json()).then(d=>{{window.location='{}/paste/'+d.id}})" style="background:#0f0;color:#000;border:none;padding:8px 16px;cursor:pointer;font-weight:bold">🎬 Render Animated GIF</button></p>"##,
-                            base_path, id, title, base_path, id, base_path
+                             base_path, id, base_path, id, html_escape(&title), base_path, id, base_path
                         )
                     } else if display_mime.starts_with("image/") {
                         format!(

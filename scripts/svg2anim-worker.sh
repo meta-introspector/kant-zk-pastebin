@@ -17,7 +17,7 @@ log() { echo "[svg2anim-worker] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
 process_svg() {
     local id="$1"
     local svg_file
-    svg_file=$(find "$SPOOL" -maxdepth 1 -name "${id}.svg" -o -name "${id}.*.svg" 2>/dev/null | head -1)
+    svg_file=$(find "$SPOOL" -maxdepth 1 \( -name "${id}.svg" -o -name "*_${id}.svg" \) 2>/dev/null | head -1)
 
     if [ -z "$svg_file" ]; then
         log "SVG not found for id=$id"

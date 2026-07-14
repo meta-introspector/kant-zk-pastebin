@@ -1,7 +1,16 @@
 // Gallery — shows NFT enrichments + all uploaded media (images, SVG, GIF, video)
 use actix_web::{HttpResponse, Result};
+use chrono::DateTime;
 use log::warn;
-use std::{collections::HashMap, env, fs};
+use std::{collections::HashMap, env, fs, path::PathBuf, time::SystemTime};
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
 
 /// GET /gallery - Gallery of NFT enrichments + uploaded media
 pub async fn gallery() -> Result<HttpResponse> {
@@ -76,7 +85,8 @@ pub async fn gallery() -> Result<HttpResponse> {
 
     // ── Media uploads from spool ──
     let media_exts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "mp4", "webm"];
-    let mut media = Vec::new();
+    let mut media_tuples: Vec<(String, String, String, String, usize, String, SystemTime, PathBuf)> = Vec::new();
+    let mut media_items_html = Vec::new();
     if let Ok(entries) = fs::read_dir(&uucp_dir) {
         let index_file = format!("{}/index.jsonl", uucp_dir);
         let index: Vec<crate::model::PasteIndex> = fs::read_to_string(&index_file)
@@ -85,7 +95,9 @@ pub async fn gallery() -> Result<HttpResponse> {
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect();
 
-        for entry in entries.flatten() {
+        let mut media_entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+
+        for entry in media_entries {
             let name = entry.file_name().to_string_lossy().to_string();
             let ext = name.rsplit_once('.').map(|(_, e)| e.to_lowercase()).unwrap_or_default();
             if !media_exts.contains(&ext.as_str()) { continue; }
@@ -99,40 +111,72 @@ pub async fn gallery() -> Result<HttpResponse> {
                 _ => "file",
             };
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let mtime = entry.metadata().and_then(|m| m.modified()).ok().unwrap_or(std::time::UNIX_EPOCH);
             let pretty_size = if size > 1_000_000 { format!("{:.1}MB", size as f64 / 1_000_000.0) } else { format!("{:.1}KB", size as f64 / 1_000.0) };
 
-            let preview = if mime == "video" {
-                format!(r#"<video src="{bp}/file/{stem}" style="max-width:200px;max-height:150px;border-radius:4px" controls></video>"#, bp = base_path, stem = stem)
-            } else if ext == "svg" {
-                format!(r#"<a href="{bp}/paste/{stem}"><img src="{bp}/file/{stem}" style="max-width:200px;max-height:150px;border-radius:4px;background:#fff" alt="{title}"></a><br><a href="{bp}/svg2anim/{stem}" style="font-size:11px;color:#0f0" onclick="return confirm('Generate animation from this SVG?')">🎬 Render Animation</a>"#, bp = base_path, stem = stem, title = title)
-            } else {
-                format!(r#"<a href="{bp}/paste/{stem}"><img src="{bp}/file/{stem}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{title}"></a>"#, bp = base_path, stem = stem, title = title)
-            };
-
-            media.push(format!(
-                r#"<div style="background:#1a1a1a;padding:10px;border-radius:8px;text-align:center">
-{preview}
-<div style="font-size:12px;color:#0ff;margin-top:5px">{title}</div>
-<div style="font-size:10px;color:#666">{pretty_size} · {ext}</div>
-</div>"#,
-                preview = preview,
-                title = title,
-                pretty_size = pretty_size,
-                ext = ext,
-            ));
+            media_tuples.push((stem, ext.to_string(), title, mime.to_string(), size as usize, pretty_size, mtime, entry.path()));
         }
+
+        media_tuples.sort_by(|(_, _, _, _, _, _, a_mtime, _), (_, _, _, _, _, _, b_mtime, _)| b_mtime.cmp(a_mtime));
     }
 
     let nft_count = items.len();
-    let media_count = media.len();
-    let media_html = if media.is_empty() {
+    let media_count = media_tuples.len();
+
+    for (stem, ext, title, mime, size, pretty_size, mtime, entry_path) in media_tuples {
+        let ts = chrono::DateTime::<chrono::Utc>::from(mtime).format("%Y-%m-%d %H:%M").to_string();
+
+        let mut has_gif = false;
+        let mut gif_path = None;
+        if ext == "svg" {
+            let gif_candidate = entry_path.with_extension("gif");
+            if gif_candidate.exists() {
+                has_gif = true;
+                gif_path = Some(gif_candidate);
+            }
+        }
+
+        let preview = if mime == "video" {
+            format!(r#"<video src="{bp}/file/{stem}" style="max-width:200px;max-height:150px;border-radius:4px" controls></video>"#, bp = base_path, stem = stem)
+        } else if ext == "svg" {
+            let svg_obj = format!(r#"<object data="{bp}/file/{stem}" type="image/svg+xml" style="max-width:200px;max-height:150px;border-radius:4px;background:#fff"><a href="{bp}/file/{stem}">{title}</a></object>"#, bp = base_path, stem = stem, title = html_escape(&title));
+            if has_gif {
+                let gif_path_buf = gif_path.unwrap();
+                let gif_name = gif_path_buf.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let gif_stem = gif_name.rsplit_once('.').map(|(s, _)| s).unwrap_or(gif_name);
+                format!(r#"<div style="display:flex;gap:5px;align-items:start">
+<div style="flex:1;text-align:center"><div style="font-size:10px;color:#0ff;margin-bottom:2px">SVG</div>{svg_obj}</div>
+<div style="flex:1;text-align:center"><div style="font-size:10px;color:#0ff;margin-bottom:2px">GIF</div><a href="{bp}/file/{gif_stem}"><img src="{bp}/file/{gif_stem}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{title}"></a></div>
+</div><a href="{bp}/svg2anim/{stem}" style="font-size:11px;color:#0f0" onclick="return confirm('Regenerate animation?')">🔄 Re-render GIF</a>"#, bp = base_path, stem = stem, gif_stem = gif_stem, title = html_escape(&title), svg_obj = svg_obj)
+            } else {
+                format!(r#"<a href="{bp}/paste/{stem}">{svg_obj}</a><br><a href="{bp}/svg2anim/{stem}" style="font-size:11px;color:#0f0" onclick="return confirm('Generate animation from this SVG?')">🎬 Render Animation</a>"#, bp = base_path, stem = stem, svg_obj = svg_obj)
+            }
+        } else {
+            format!(r#"<a href="{bp}/paste/{stem}"><img src="{bp}/file/{stem}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{title}"></a>"#, bp = base_path, stem = stem, title = html_escape(&title))
+        };
+
+        media_items_html.push(format!(
+            r#"<div style="background:#1a1a1a;padding:10px;border-radius:8px;text-align:center">
+{preview}
+<div style="font-size:12px;color:#0ff;margin-top:5px">{title}</div>
+<div style="font-size:10px;color:#666">{ts} · {pretty_size} · {ext}</div>
+</div>"#,
+            preview = preview,
+            title = html_escape(&title),
+            ts = ts,
+            pretty_size = pretty_size,
+            ext = ext,
+        ));
+    }
+
+    let media_html = if media_items_html.is_empty() {
         String::new()
     } else {
         format!(r#"<h2>📁 Media Uploads</h2>
 <p style="color:#999">{media_count} files</p>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">{items}</div>"#,
             media_count = media_count,
-            items = media.join("\n"),
+            items = media_items_html.join("\n"),
         )
     };
 
