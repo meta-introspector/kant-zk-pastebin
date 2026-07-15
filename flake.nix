@@ -10,7 +10,7 @@
       url = "path:/mnt/data1/nora/storage/cargo";
       flake = false;
     };
-    system-manager.url = "git+file:///mnt/data1/git/github.com/numtide/system-manager.git?ref=omain";
+    system-manager.url = "git+file:///home/mdupont/projects/system-manager/.git?ref=omain";
   };
 
   outputs = { self, nixpkgs, flake-utils, system-manager, rust-overlay, crane, nora-cargo }:
@@ -98,7 +98,7 @@
     )) // {
       systemConfigs.kant-pastebin-only = system-manager.lib.makeSystemConfig {
         modules = [
-          /home/mdupont/projects/system-manager/all-services.nix
+          ./pastebin-system.nix
           { nixpkgs.hostPlatform = "x86_64-linux"; }
         ];
         specialArgs = { pastebin-src = self; };
