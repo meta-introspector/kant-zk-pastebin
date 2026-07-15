@@ -133,6 +133,16 @@ pub async fn gallery() -> Result<HttpResponse> {
             if gif_candidate.exists() {
                 has_gif = true;
                 gif_path = Some(gif_candidate);
+            } else if let Ok(entries) = fs::read_dir(&uucp_dir) {
+                let gif_suffix = format!("_{}.gif", stem);
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name.ends_with(".gif") && !name.ends_with(".cid") && !name.ends_with(".meta") && name.ends_with(&gif_suffix) {
+                        has_gif = true;
+                        gif_path = Some(e.path());
+                        break;
+                    }
+                }
             }
         }
 

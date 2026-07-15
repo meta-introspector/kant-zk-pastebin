@@ -62,17 +62,17 @@ while true; do
     for job in "$JOBS_DIR"/*; do
         [ -f "$job" ] || continue
         case "$job" in
-            *.failed|*.dead) continue ;;
+            *.dead) continue ;;
         esac
-        id=$(basename "$job")
-        log "Job: $id"
-        if process_svg "$id"; then
-            rm -f "$job"
-            log "Completed: $id"
-        else
-            mv "$job" "${job%.*}.failed"
-            log "Failed: $id"
-        fi
+         id=$(basename "$job")
+         log "Job: $id"
+         if process_svg "$id"; then
+             rm -f "$job"
+             log "Completed: $id"
+         else
+             mv "$job" "${job}.dead"
+             log "Failed: $id"
+         fi
     done
     sleep 5
 done
