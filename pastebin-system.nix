@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, pastebin-src, ... }:
 
 let
   system = pkgs.stdenv.hostPlatform.system;
