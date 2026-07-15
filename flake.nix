@@ -38,9 +38,10 @@
           echo "{\"files\":{},\"package\":\"${p.checksum}\"}" > "$out/.cargo-checksum.json"
         '';
 
-        cargoVendorDir = craneLib.vendorCargoDeps {
+        cargoArtifacts = craneLib.buildDepsOnly {
+          name = "kant-pastebin-deps";
           src = src;
-          overrideVendorCargoPackage = p: drv:
+          overrideCargoVendorCrate = p: drv:
             if p.name == "erdfa-publish" || p.name == "rust-unixfs" then
               noraCargoPackage p
             else
@@ -54,14 +55,14 @@
           pname = "kant-pastebin";
           version = "0.1.0";
           src = src;
-          cargoVendorDir = cargoVendorDir;
+          cargoArtifacts = cargoArtifacts;
           strictDeps = true;
           doCheck = false;
           buildInputs = commonBuildInputs;
           nativeBuildInputs = commonNativeBuildInputs;
           doInstallCargoArtifacts = false;
           GIT_COMMIT = gitRev;
-          BUILD_TIME = builtins.substring 0 19 (builtins.toString self.lastModifiedDate or "unknown");
+          BUILD_TIME = builtins.substring 0 19 (builtins.toString self.lastModifiedDate or "unknown"));
           BASE_PATH = "/pastebin";
 
           installPhase = ''
@@ -69,13 +70,14 @@
             mkdir -p "$out/bin"
             cp target/release/kant-pastebin "$out/bin/kant-pastebin"
             runHook postInstall
-          '';
+          ';
 
           meta = with pkgs.lib; {
             description = "Kant Pastebin — UUCP + zkTLS with IPFS";
             license = licenses.mit;
             platforms = platforms.linux;
           };
+        };
         };
       in {
         packages = {
