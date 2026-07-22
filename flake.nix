@@ -4,8 +4,7 @@
   inputs = {
     nixpkgs.url = "git+file:///mnt/data1/git/github.com/NixOS/nixpkgs.git?ref=omaster";
     flake-utils.url = "git+file:///mnt/data1/git/github.com/numtide/flake-utils.git?ref=omain";
-    rust-overlay.url = "git+file:///mnt/data1/git/github.com/oxalica/rust-overlay.git?ref=omaster";
-    crane.url = "git+file:///mnt/data1/git/github.com/ipetkov/crane.git?ref=omaster";
+    crane.url = "path:/mnt/data1/time-2026/05-may/19/crane";
     nora-cargo = {
       url = "path:/mnt/data1/nora/storage/cargo";
       flake = false;
@@ -13,18 +12,14 @@
     system-manager.url = "git+file:///mnt/data1/git/github.com/numtide/system-manager.git?ref=omain";
   };
 
-  outputs = { self, nixpkgs, flake-utils, system-manager, rust-overlay, crane, nora-cargo }:
+  outputs = { self, nixpkgs, flake-utils, system-manager, crane, nora-cargo }:
     (flake-utils.lib.eachDefaultSystem (system:
       let
-        lib = nixpkgs.lib;
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [ rust-overlay.overlays.default ];
         };
 
-        rust = pkgs.rust-bin.stable.latest.default;
-        craneLib = (crane.mkLib pkgs).overrideToolchain rust;
-
+        craneLib = crane.mkLib pkgs;
         src = self;
 
         gitRev = self.shortRev or "dirty";
@@ -38,63 +33,69 @@
           echo "{\"files\":{},\"package\":\"${p.checksum}\"}" > "$out/.cargo-checksum.json"
         '';
 
-        cargoArtifacts = craneLib.buildDepsOnly {
-          name = "kant-pastebin-deps";
+        cargoVendorDir = craneLib.vendorCargoDeps {
           src = src;
-          overrideCargoVendorCrate = p: drv:
+          overrideVendorCargoPackage = p: drv:
             if p.name == "erdfa-publish" || p.name == "rust-unixfs" then
               noraCargoPackage p
             else
               drv;
         };
 
-        commonBuildInputs = with pkgs; [ openssl ];
-        commonNativeBuildInputs = with pkgs; [ pkg-config ];
-
-        kant-pastebin = craneLib.buildPackage {
-          pname = "kant-pastebin";
-          version = "0.1.0";
-          src = src;
-          cargoArtifacts = cargoArtifacts;
+        commonArgs = {
+          inherit src;
+          inherit cargoVendorDir;
           strictDeps = true;
           doCheck = false;
-          buildInputs = commonBuildInputs;
-          nativeBuildInputs = commonNativeBuildInputs;
-          doInstallCargoArtifacts = false;
-          GIT_COMMIT = gitRev;
-          BUILD_TIME = builtins.substring 0 19 (builtins.toString self.lastModifiedDate or "unknown");
-          BASE_PATH = "/pastebin";
 
+          nativeBuildInputs = with pkgs; [ pkg-config ];
+          buildInputs = with pkgs; [ openssl ];
+
+          doInstallCargoArtifacts = false;
           installPhase = ''
             runHook preInstall
             mkdir -p "$out/bin"
-            cp target/release/kant-pastebin "$out/bin/kant-pastebin"
+            BIN=$(find target -name "kant-pastebin" -type f -executable | head -1)
+            if [ -z "$BIN" ]; then
+              BIN=$(find target -name "kant-pastebin*" -type f -executable | head -1)
+            fi
+            cp "$BIN" "$out/bin/kant-pastebin"
+            CLI=$(find target -name "svg2tile-cli" -type f -executable | head -1)
+            if [ -n "$CLI" ]; then
+              cp "$CLI" "$out/bin/svg2tile-cli"
+            fi
             runHook postInstall
-          ';
+          '';
+        };
+
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+        kant-pastebin = craneLib.cargoBuild (commonArgs // {
+          inherit cargoArtifacts;
+          pnameSuffix = "";
 
           meta = with pkgs.lib; {
             description = "Kant Pastebin — UUCP + zkTLS with IPFS";
             license = licenses.mit;
             platforms = platforms.linux;
           };
-        };
-        };
+        });
       in {
         packages = {
           inherit kant-pastebin;
           default = kant-pastebin;
         };
 
+        apps.default = {
+          type = "app";
+          program = "${kant-pastebin}/bin/kant-pastebin";
+        };
+
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            rust rust-analyzer
-            cargo pkg-config
-            openssl.dev
+            rustc cargo rustfmt clippy
+            openssl.dev pkg-config
           ];
-          shellHook = ''
-            export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
-            echo "kant-pastebin dev shell — cargo, rustc, openssl ready"
-          '';
         };
       }
     )) // {

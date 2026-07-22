@@ -1062,7 +1062,16 @@ function bundleSelected() {{
             let cid = headers.get("CID").cloned().unwrap_or_default();
             let size = headers.get("Size").cloned().unwrap_or_default();
 
-            let content_html = if mime.starts_with("image/") {
+            let is_svg = mime == "image/svg+xml" || id.ends_with(".svg");
+            let content_html = if is_svg {
+                format!(
+                    r##"<object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff">
+  <a href="{}/file/{}">{}</a>
+</object>
+<p style="margin-top:10px"><button onclick="fetch('{}/svg2anim/{}',{{method:'GET'}}).then(r=>r.json()).then(d=>{{window.location='{}/paste/'+d.id}})" style="background:#0f0;color:#000;border:none;padding:8px 16px;cursor:pointer;font-weight:bold">🎬 Render Animated GIF</button></p>"##,
+                    base_path, id, base_path, id, html_escape(&title), base_path, id, base_path
+                )
+            } else if mime.starts_with("image/") {
                 format!(
                     r#"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#,
                     base_path, id, title

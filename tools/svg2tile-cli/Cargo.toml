@@ -1,0 +1,19 @@
+[package]
+name = "svg2tile-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+resvg = "0.43"
+usvg = "0.43"
+tiny-skia = "0.11"
+fontdb = "0.16"
+gif = "0.13"
+image = "0.25"
+base64 = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+xmltree = "0.10"
+log = "0.4"
+env_logger = "0.10"

@@ -1,5 +1,6 @@
 .PHONY: build deploy restart switch logs diagnose clean help tiles \
-	task-gif-lookup task-deploy-verify task-worker-fix task-perm-fix
+	task-gif-lookup task-deploy-verify task-worker-fix task-perm-fix \
+	svg-queue svg-worker-start svg-worker-status svg-cli-build
 
 help:
 	@echo "Kant Pastebin"
@@ -12,6 +13,10 @@ help:
 	@echo "  make diagnose    — Run diagnose script"
 	@echo "  make tiles       — Copy DAG-CBOR tiles from dasl-testing"
 	@echo "  make clean       — Clean build artifacts"
+	@echo "  make svg-queue        — Queue animated SVGs from ~/aristotle-results/all_svg.txt"
+	@echo "  make svg-worker-start — Start svg2anim-worker via systemd"
+	@echo "  make svg-worker-status — Check svg2anim-worker status"
+	@echo "  make svg-cli-build    — Build svg2tile-cli binary via cargo"
 	@echo "  make task-gif-lookup   — Run GIF lookup fix task via task-runner"
 	@echo "  make task-deploy-verify — Run deploy+verify task via task-runner"
 	@echo "  make task-worker-fix   — Run worker .failed suffix fix task via task-runner"
@@ -71,6 +76,20 @@ diagnose:
 
 tiles:
 	cd $(DASL_TESTING) && python3 sheaf/tiles/build_tiles.py
+
+svg-queue:
+	bash ./scripts/svg2anim-queue.sh
+
+svg-worker-start:
+	sudo systemctl daemon-reload || true
+	sudo systemctl enable svg2anim-worker.service || true
+	sudo systemctl start svg2anim-worker.service || true
+
+svg-worker-status:
+	systemctl status svg2anim-worker.service --no-pager || true
+
+svg-cli-build:
+	cargo build --bin svg2tile-cli --release
 
 clean:
 	cargo clean
