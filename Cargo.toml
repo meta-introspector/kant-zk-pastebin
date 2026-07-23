@@ -58,7 +58,3 @@ path = "src/bin/freeze_chats.rs"
 [[bin]]
 name = "multi-reindex"
 path = "src/bin/multi_reindex.rs"
-
-[[bin]]
-name = "svg2tile-cli"
-path = "tools/svg2tile-cli/src/main.rs"

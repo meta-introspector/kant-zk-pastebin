@@ -4,8 +4,7 @@ set -euo pipefail
 SPOOL="${UUCP_SPOOL:-/srv/kant/svg-spool}"
 JOBS_DIR="${SPOOL}/svg2anim-jobs"
 RESULTS_DIR="${SPOOL}/svg2anim-results"
-SVG2TILE_CLI="${SVG2TILE_CLI:-/mnt/data1/kant/pastebin/target/release/svg2tile-cli}"
-TILE_SO="${SVG2TILE_SO:-/mnt/data1/kant/pastebin/tiles/resvg-render/target/release/libresvg_render.so}"
+SVG2TILE_CLI="${SVG2TILE_CLI:-/mnt/data1/kant/pastebin/tools/svg2tile-cli/target/release/svg2tile-cli}"
 FPS="${SVG2ANIM_FPS:-5}"
 MAX_WIDTH="${SVG2ANIM_MAX_WIDTH:-1920}"
 MAX_HEIGHT="${SVG2ANIM_MAX_HEIGHT:-1200}"
@@ -49,7 +48,7 @@ process_svg() {
         local png_fn="${ts}_${stem}.png"
         local png_path="${RESULTS_DIR}/${png_fn}"
         log "Static SVG: $src -> $png_fn"
-        if ! "$SVG2TILE_CLI" --tile "$TILE_SO" --input "$src" --output "$png_path" --width "$MAX_WIDTH" --height "$MAX_HEIGHT" 2>&1; then
+        if ! "$SVG2TILE_CLI" --input "$src" --output "$png_path" --width "$MAX_WIDTH" --height "$MAX_HEIGHT" 2>&1; then
             log "svg2tile-cli failed for $src"
             return 1
         fi

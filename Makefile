@@ -89,7 +89,7 @@ svg-worker-status:
 	systemctl status svg2anim-worker.service --no-pager || true
 
 svg-cli-build:
-	cargo build --bin svg2tile-cli --release
+	cargo build --manifest-path tools/svg2tile-cli/Cargo.toml --release
 
 clean:
 	cargo clean

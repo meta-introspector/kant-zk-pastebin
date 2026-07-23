@@ -1,6 +1,5 @@
 use resvg::tiny_skia::Pixmap;
 use resvg::usvg::{Options, Transform, Tree};
-use std::path::PathBuf;
 
 pub fn render_svg_to_pixmap(
     svg_data: &[u8],
