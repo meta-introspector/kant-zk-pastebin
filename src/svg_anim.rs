@@ -47,8 +47,10 @@ pub async fn svg2anim(path: web::Path<String>) -> Result<HttpResponse> {
         actix_web::error::ErrorInternalServerError(e)
     })?;
 
+    let svg_path_str = svg_entry.path().to_string_lossy().to_string();
+
     let job_path = format!("{}/{}", jobs_dir, resolved_id);
-    if let Err(e) = fs::write(&job_path, "") {
+    if let Err(e) = fs::write(&job_path, &svg_path_str) {
         error!("[svg2anim] write job: {}", e);
         return Ok(HttpResponse::InternalServerError()
             .json(serde_json::json!({"error": "failed to submit job"})));

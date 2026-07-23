@@ -529,6 +529,7 @@ async fn main() -> std::io::Result<()> {
             .route("/svg2anim/{id}", web::get().to(svg_anim::svg2anim))
             .route("/gallery", web::get().to(gallery::gallery))
             .route("/gallery/img/{qid}", web::get().to(handlers::gallery_image))
+            .route("/render/{filename}", web::get().to(gallery::render_file))
             .route("/upload-archive", web::post().to(handlers::upload_archive))
             .route(
                 "/browse-archive/{session_id}",

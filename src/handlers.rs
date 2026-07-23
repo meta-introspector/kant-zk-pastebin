@@ -574,56 +574,73 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
 /// POST /upload - Upload file (multipart)
 /// Save-first: write file to disk immediately, then return.
 /// No NLP, no HTML extraction, no blocking calls in this handler.
+fn find_file_in_dir(dir: &str, id: &str, requested_ext: &str) -> Option<std::path::PathBuf> {
+    let entries: Vec<std::path::PathBuf> = fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .collect();
+
+    if requested_ext.is_empty() {
+        if let Some(gif) = entries.iter().find(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+            name.ends_with(".gif") && stem.ends_with(&format!("_{}", id))
+                && !name.ends_with(".cid") && !name.ends_with(".meta")
+        }).cloned() {
+            return Some(gif);
+        }
+    }
+
+    let mut matches: Vec<_> = entries
+        .iter()
+        .filter(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+            stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
+                && name.ends_with(requested_ext)
+        })
+        .cloned()
+        .collect();
+    if !matches.is_empty() {
+        return matches.into_iter().next();
+    }
+
+    entries.into_iter().find(|p| {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+        stem.ends_with(&format!("_{}", id)) && !name.ends_with(".cid") && !name.ends_with(".meta")
+            && name.ends_with(requested_ext)
+    })
+}
+
+fn find_render_info(uucp_dir: &str, id: &str) -> Option<(String, String)> {
+    let results_dir = format!("{}/svg2anim-results", uucp_dir);
+    let entries = fs::read_dir(&results_dir).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let ext = name.rsplit_once('.').map(|(_, e)| e.to_lowercase()).unwrap_or_default();
+        if ext != "png" && ext != "gif" { continue; }
+        let stem_with_ext = name.split_once('_').map(|(_, rest)| rest).unwrap_or(&name);
+        let stem = stem_with_ext.rsplit_once('.').map(|(s, _)| s).unwrap_or(stem_with_ext);
+        if stem == id {
+            return Some((ext, name));
+        }
+    }
+    None
+}
+
 pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
     let id_with_ext = path.into_inner();
     let (id, requested_ext) = id_with_ext.rsplit_once('.').map(|(s, e)| (s, e)).unwrap_or((&id_with_ext, ""));
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
 
-    // Find file with any extension matching the id
-    // Pass order when no extension is given:
-    //   1. Prefer .gif files matching by suffix (rendered animation)
-    //   2. Exact stem match (original file)
-    //   3. Suffix match fallback (timestamp-prefixed outputs)
-    let file = fs::read_dir(&uucp_dir).ok().and_then(|entries| {
-        let entries: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+    let file = find_file_in_dir(&uucp_dir, &id, &requested_ext)
+        .or_else(|| {
+            let results_dir = format!("{}/svg2anim-results", uucp_dir);
+            find_file_in_dir(&results_dir, &id, &requested_ext)
+        });
 
-        // Pass 1: When no extension requested, prefer GIF files matching by suffix
-        // (e.g. "20260711_135358_20260710_191143_download_svg.gif" for id
-        //  "20260710_191143_download_svg" -- rendered animation)
-        if requested_ext.is_empty() {
-            if let Some(gif) = entries.iter().find(|p| {
-                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
-                name.ends_with(".gif") && stem.ends_with(&format!("_{}", id))
-                    && !name.ends_with(".cid") && !name.ends_with(".meta")
-            }).cloned() {
-                return Some(gif);
-            }
-        }
-
-        // Pass 2: Exact stem match (original file like SVG)
-        let mut matches: Vec<_> = entries
-            .iter()
-            .filter(|p| {
-                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
-                stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
-                    && name.ends_with(requested_ext)
-            })
-            .cloned()
-            .collect();
-        if !matches.is_empty() {
-            return matches.into_iter().next();
-        }
-
-        // Pass 3: Suffix match fallback (timestamp-prefixed outputs)
-        entries.into_iter().find(|p| {
-                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
-                stem.ends_with(&format!("_{}", id)) && !name.ends_with(".cid") && !name.ends_with(".meta")
-                    && name.ends_with(requested_ext)
-        })
-    });
     match file {
         Some(entry) => {
             let data = fs::read(&entry)
@@ -634,7 +651,6 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
                 .unwrap_or("bin")
                 .to_string();
             let mime = if ext == "mht" || ext == "mhtml" || ext == "mth" {
-                // MHT/MTH is message/rfc822 but browsers render it better as text/html
                 mime_guess::mime::TEXT_HTML
             } else {
                 mime_guess::from_ext(&ext).first_or_octet_stream()
@@ -1064,13 +1080,30 @@ function bundleSelected() {{
 
             let is_svg = mime == "image/svg+xml" || id.ends_with(".svg");
             let content_html = if is_svg {
-                format!(
-                    r##"<object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff">
+                let render_info = find_render_info(&uucp_dir, &id);
+                match render_info {
+                    Some((ref render_ext, ref render_name)) => {
+                        let render_url = format!("{}/render/{}", base_path, html_escape(render_name));
+                        let render_label = match render_ext.as_str() {
+                            "png" => "PNG",
+                            "gif" => "GIF",
+                            _ => "Render",
+                        };
+                        format!(r##"<div style="display:flex;gap:10px;align-items:start">
+<div style="flex:1;text-align:center"><div style="font-size:12px;color:#0ff;margin-bottom:5px">SVG Source</div><object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff"><a href="{}/file/{}">{}</a></object></div>
+<div style="flex:1;text-align:center"><div style="font-size:12px;color:#0ff;margin-bottom:5px">{}</div><a href="{}"><img src="{}" style="max-width:100%;border:1px solid #0f0" alt=""></a></div>
+</div><p style="margin-top:10px"><a href="{}/svg2anim/{}" style="color:#0f0" onclick="return confirm('Regenerate render?')">🔄 Re-render</a></p>"##,
+                            base_path, id, base_path, id, html_escape(&title),
+                            render_label, render_url, render_url, base_path, id)
+                    }
+                    None => {
+                        format!(r##"<object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff">
   <a href="{}/file/{}">{}</a>
 </object>
 <p style="margin-top:10px"><button onclick="fetch('{}/svg2anim/{}',{{method:'GET'}}).then(r=>r.json()).then(d=>{{window.location='{}/paste/'+d.id}})" style="background:#0f0;color:#000;border:none;padding:8px 16px;cursor:pointer;font-weight:bold">🎬 Render Animated GIF</button></p>"##,
-                    base_path, id, base_path, id, html_escape(&title), base_path, id, base_path
-                )
+                            base_path, id, base_path, id, html_escape(&title), base_path, id, base_path)
+                    }
+                }
             } else if mime.starts_with("image/") {
                 format!(
                     r#"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#,
@@ -1153,13 +1186,30 @@ function bundleSelected() {{
 
                     let is_svg = ext == "svg" || display_mime == "image/svg+xml";
                     let content_html = if is_svg {
-                        format!(
-                            r##"<object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff">
+                        let render_info = find_render_info(&uucp_dir, &id);
+                        match render_info {
+                            Some((ref render_ext, ref render_name)) => {
+                                let render_url = format!("{}/render/{}", base_path, html_escape(render_name));
+                                let render_label = match render_ext.as_str() {
+                                    "png" => "PNG",
+                                    "gif" => "GIF",
+                                    _ => "Render",
+                                };
+                                format!(r##"<div style="display:flex;gap:10px;align-items:start">
+<div style="flex:1;text-align:center"><div style="font-size:12px;color:#0ff;margin-bottom:5px">SVG Source</div><object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff"><a href="{}/file/{}">{}</a></object></div>
+<div style="flex:1;text-align:center"><div style="font-size:12px;color:#0ff;margin-bottom:5px">{}</div><a href="{}"><img src="{}" style="max-width:100%;border:1px solid #0f0" alt=""></a></div>
+</div><p style="margin-top:10px"><a href="{}/svg2anim/{}" style="color:#0f0" onclick="return confirm('Regenerate render?')">🔄 Re-render</a></p>"##,
+                                base_path, id, base_path, id, html_escape(&title),
+                                render_label, render_url, render_url, base_path, id)
+                            }
+                            None => {
+                                format!(r##"<object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff">
   <a href="{}/file/{}">{}</a>
 </object>
 <p style="margin-top:10px"><button onclick="fetch('{}/svg2anim/{}',{{method:'GET'}}).then(r=>r.json()).then(d=>{{window.location='{}/paste/'+d.id}})" style="background:#0f0;color:#000;border:none;padding:8px 16px;cursor:pointer;font-weight:bold">🎬 Render Animated GIF</button></p>"##,
-                             base_path, id, base_path, id, html_escape(&title), base_path, id, base_path
-                        )
+                                base_path, id, base_path, id, html_escape(&title), base_path, id, base_path)
+                            }
+                        }
                     } else if display_mime.starts_with("image/") {
                         format!(
                             r##"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"##,

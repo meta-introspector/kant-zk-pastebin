@@ -1,6 +1,5 @@
-// Gallery — shows NFT enrichments + all uploaded media (images, SVG, GIF, video)
-use actix_web::{HttpResponse, Result};
-use chrono::DateTime;
+use actix_web::{web, HttpResponse, Result};
+use chrono::{DateTime, Datelike, Utc};
 use log::warn;
 use std::{collections::HashMap, env, fs, path::PathBuf, time::SystemTime};
 
@@ -12,13 +11,89 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+fn find_in_dir(dir: &str, id: &str, requested_ext: &str) -> Option<PathBuf> {
+    let entries: Vec<PathBuf> = fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .collect();
+
+    if requested_ext.is_empty() {
+        if let Some(gif) = entries.iter().find(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+            name.ends_with(".gif") && stem.ends_with(&format!("_{}", id))
+                && !name.ends_with(".cid") && !name.ends_with(".meta")
+        }).cloned() {
+            return Some(gif);
+        }
+    }
+
+    let mut matches: Vec<_> = entries
+        .iter()
+        .filter(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+            stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
+                && name.ends_with(requested_ext)
+        })
+        .cloned()
+        .collect();
+    if !matches.is_empty() {
+        return matches.into_iter().next();
+    }
+
+    entries.into_iter().find(|p| {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+        stem.ends_with(&format!("_{}", id)) && !name.ends_with(".cid") && !name.ends_with(".meta")
+            && name.ends_with(requested_ext)
+    })
+}
+
+/// GET /render/{filename} - Serve a render file from svg2anim-results
+pub async fn render_file(path: web::Path<String>) -> Result<HttpResponse> {
+    let filename = path.into_inner();
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let results_dir = format!("{}/svg2anim-results", uucp_dir);
+    let file_path = format!("{}/{}", results_dir, filename);
+
+    let data = fs::read(&file_path)
+        .map_err(|_| actix_web::error::ErrorNotFound("render not found"))?;
+
+    let ext = std::path::Path::new(&filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin");
+
+    let mime = match ext {
+        "png" => "image/png",
+        "gif" => "image/gif",
+        _ => mime_guess::from_ext(ext).first_or_octet_stream(),
+    };
+
+    Ok(HttpResponse::Ok().content_type(mime.to_string()).body(data))
+}
+
 /// GET /gallery - Gallery of NFT enrichments + uploaded media
-pub async fn gallery() -> Result<HttpResponse> {
+pub async fn gallery(query: web::Query<std::collections::HashMap<String, String>>) -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_default();
     let nft_dir = env::var("NFT_DIR")
         .unwrap_or_else(|_| "/mnt/data1/time-2026/03-march/13/nft_enriched".to_string());
     let uucp_dir = env::var("UUCP_SPOOL")
         .unwrap_or_else(|_| "/var/spool/uucp/pastebin".to_string());
+
+    let time_filter = query.get("time").map(|s| s.as_str()).unwrap_or("all");
+    let cat_filter = query.get("cat").map(|s| s.as_str()).unwrap_or("all");
+
+    let now = Utc::now();
+    let time_cutoff = match time_filter {
+        "today" => now - chrono::Duration::days(1),
+        "week" => now - chrono::Duration::weeks(1),
+        "month" => now - chrono::Duration::months(1),
+        _ => DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
+    };
+    let time_cutoff_ts: SystemTime = time_cutoff.into();
 
     // ── NFT items ──
     let mut items = Vec::new();
@@ -83,9 +158,21 @@ pub async fn gallery() -> Result<HttpResponse> {
         }
     }
 
-    // ── Media uploads from spool ──
+    let results_dir = format!("{}/svg2anim-results", uucp_dir);
+    let mut render_map: HashMap<String, (String, String)> = HashMap::new();
+    if let Ok(entries) = fs::read_dir(&results_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let ext = name.rsplit_once('.').map(|(_, e)| e.to_lowercase()).unwrap_or_default();
+            if ext != "png" && ext != "gif" { continue; }
+            let stem_with_ext = name.split_once('_').map(|(_, rest)| rest).unwrap_or(&name);
+            let stem = stem_with_ext.rsplit_once('.').map(|(s, _)| s).unwrap_or(stem_with_ext);
+            render_map.insert(stem.to_string(), (ext, name));
+        }
+    }
+
     let media_exts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "mp4", "webm"];
-    let mut media_tuples: Vec<(String, String, String, String, usize, String, SystemTime, PathBuf)> = Vec::new();
+    let mut media_tuples: Vec<(String, String, String, String, usize, String, SystemTime, PathBuf, Option<(String, String)>)> = Vec::new();
     let mut media_items_html = Vec::new();
     if let Ok(entries) = fs::read_dir(&uucp_dir) {
         let index_file = format!("{}/index.jsonl", uucp_dir);
@@ -101,6 +188,16 @@ pub async fn gallery() -> Result<HttpResponse> {
             let name = entry.file_name().to_string_lossy().to_string();
             let ext = name.rsplit_once('.').map(|(_, e)| e.to_lowercase()).unwrap_or_default();
             if !media_exts.contains(&ext.as_str()) { continue; }
+            if cat_filter != "all" {
+                let cat = match ext.as_str() {
+                    "svg" => "svg",
+                    "png" | "jpg" | "jpeg" | "webp" => "image",
+                    "gif" => "gif",
+                    "mp4" | "webm" => "video",
+                    _ => continue,
+                };
+                if cat_filter != cat { continue; }
+            }
             let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name).to_string();
             let title = index.iter().find(|e| e.id == stem).map(|e| &e.title).cloned().unwrap_or_else(|| stem.clone());
             let mime = match ext.as_str() {
@@ -112,54 +209,47 @@ pub async fn gallery() -> Result<HttpResponse> {
             };
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
             let mtime = entry.metadata().and_then(|m| m.modified()).ok().unwrap_or(std::time::UNIX_EPOCH);
+
+            if mtime < time_cutoff_ts { continue; }
+
             let pretty_size = if size > 1_000_000 { format!("{:.1}MB", size as f64 / 1_000_000.0) } else { format!("{:.1}KB", size as f64 / 1_000.0) };
 
-            media_tuples.push((stem, ext.to_string(), title, mime.to_string(), size as usize, pretty_size, mtime, entry.path()));
+            let render_info = render_map.get(&stem).cloned();
+            media_tuples.push((stem, ext.to_string(), title, mime.to_string(), size as usize, pretty_size, mtime, entry.path(), render_info));
         }
 
-        media_tuples.sort_by(|(_, _, _, _, _, _, a_mtime, _), (_, _, _, _, _, _, b_mtime, _)| b_mtime.cmp(a_mtime));
+        media_tuples.sort_by(|(_, _, _, _, _, _, a_mtime, _, _), (_, _, _, _, _, _, b_mtime, _, _)| b_mtime.cmp(a_mtime));
     }
 
     let nft_count = items.len();
     let media_count = media_tuples.len();
 
-    for (stem, ext, title, mime, size, pretty_size, mtime, entry_path) in media_tuples {
+    for (stem, ext, title, mime, size, pretty_size, mtime, entry_path, render_info) in media_tuples {
         let ts = chrono::DateTime::<chrono::Utc>::from(mtime).format("%Y-%m-%d %H:%M").to_string();
-
-        let mut has_gif = false;
-        let mut gif_path = None;
-        if ext == "svg" {
-            let gif_candidate = entry_path.with_extension("gif");
-            if gif_candidate.exists() {
-                has_gif = true;
-                gif_path = Some(gif_candidate);
-            } else if let Ok(entries) = fs::read_dir(&uucp_dir) {
-                let gif_suffix = format!("_{}.gif", stem);
-                for e in entries.flatten() {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    if name.ends_with(".gif") && !name.ends_with(".cid") && !name.ends_with(".meta") && name.ends_with(&gif_suffix) {
-                        has_gif = true;
-                        gif_path = Some(e.path());
-                        break;
-                    }
-                }
-            }
-        }
 
         let preview = if mime == "video" {
             format!(r#"<video src="{bp}/file/{stem}" style="max-width:200px;max-height:150px;border-radius:4px" controls></video>"#, bp = base_path, stem = stem)
         } else if ext == "svg" {
             let svg_obj = format!(r#"<object data="{bp}/file/{stem}" type="image/svg+xml" style="max-width:200px;max-height:150px;border-radius:4px;background:#fff"><a href="{bp}/file/{stem}">{title}</a></object>"#, bp = base_path, stem = stem, title = html_escape(&title));
-            if has_gif {
-                let gif_path_buf = gif_path.unwrap();
-                let gif_name = gif_path_buf.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let gif_stem = gif_name.rsplit_once('.').map(|(s, _)| s).unwrap_or(gif_name);
-                format!(r#"<div style="display:flex;gap:5px;align-items:start">
+            match render_info {
+                Some((ref render_ext, ref render_name)) => {
+                    let render_url = format!("{bp}/render/{render_name}", bp = base_path, render_name = html_escape(render_name));
+                    let render_label = match render_ext.as_str() {
+                        "png" => "PNG",
+                        "gif" => "GIF",
+                        _ => "Render",
+                    };
+                    format!(r#"<div style="display:flex;gap:5px;align-items:start">
 <div style="flex:1;text-align:center"><div style="font-size:10px;color:#0ff;margin-bottom:2px">SVG</div>{svg_obj}</div>
-<div style="flex:1;text-align:center"><div style="font-size:10px;color:#0ff;margin-bottom:2px">GIF</div><a href="{bp}/file/{gif_stem}"><img src="{bp}/file/{gif_stem}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{title}"></a></div>
-</div><a href="{bp}/svg2anim/{stem}" style="font-size:11px;color:#0f0" onclick="return confirm('Regenerate animation?')">🔄 Re-render GIF</a>"#, bp = base_path, stem = stem, gif_stem = gif_stem, title = html_escape(&title), svg_obj = svg_obj)
-            } else {
-                format!(r#"<a href="{bp}/paste/{stem}">{svg_obj}</a><br><a href="{bp}/svg2anim/{stem}" style="font-size:11px;color:#0f0" onclick="return confirm('Generate animation from this SVG?')">🎬 Render Animation</a>"#, bp = base_path, stem = stem, svg_obj = svg_obj)
+<div style="flex:1;text-align:center"><div style="font-size:10px;color:#0ff;margin-bottom:2px">{render_label}</div><a href="{render_url}"><img src="{render_url}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{title}"></a></div>
+</div><a href="{bp}/svg2anim/{stem}" style="font-size:11px;color:#0f0" onclick="return confirm('Regenerate animation?')">🔄 Re-render</a>"#,
+                        render_label = render_label,
+                        render_url = render_url,
+                        title = html_escape(&title))
+                }
+                None => {
+                    format!(r#"<a href="{bp}/paste/{stem}">{svg_obj}</a><br><a href="{bp}/svg2anim/{stem}" style="font-size:11px;color:#0f0" onclick="return confirm('Generate animation from this SVG?')">🎬 Render Animation</a>"#, bp = base_path, stem = stem, svg_obj = svg_obj)
+                }
             }
         } else {
             format!(r#"<a href="{bp}/paste/{stem}"><img src="{bp}/file/{stem}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{title}"></a>"#, bp = base_path, stem = stem, title = html_escape(&title))
@@ -179,13 +269,34 @@ pub async fn gallery() -> Result<HttpResponse> {
         ));
     }
 
+    let filters = format!(
+        r#"<div style="margin:10px 0">
+<strong>Time:</strong>
+<a href="{bp}/gallery?time=all&cat={cat}" style="color:#0ff">All</a> |
+<a href="{bp}/gallery?time=today&cat={cat}" style="color:#0ff">Today</a> |
+<a href="{bp}/gallery?time=week&cat={cat}" style="color:#0ff">This Week</a> |
+<a href="{bp}/gallery?time=month&cat={cat}" style="color:#0ff">This Month</a>
+&nbsp;&nbsp;
+<strong>Type:</strong>
+<a href="{bp}/gallery?time={time}&cat=all" style="color:#0ff">All</a> |
+<a href="{bp}/gallery?time={time}&cat=svg" style="color:#0ff">SVG</a> |
+<a href="{bp}/gallery?time={time}&cat=image" style="color:#0ff">Image</a> |
+<a href="{bp}/gallery?time={time}&cat=video" style="color:#0ff">Video</a>
+</div>"#,
+        bp = base_path,
+        cat = cat_filter,
+        time = time_filter,
+    );
+
     let media_html = if media_items_html.is_empty() {
         String::new()
     } else {
         format!(r#"<h2>📁 Media Uploads</h2>
 <p style="color:#999">{media_count} files</p>
+{filters}
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">{items}</div>"#,
             media_count = media_count,
+            filters = filters,
             items = media_items_html.join("\n"),
         )
     };
