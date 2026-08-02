@@ -128,7 +128,7 @@
       "flake": false,
       "locked": {
         "lastModified": 1784149569,
-        "narHash": "sha256-5eRLx1dJ3vYvbxXwUVAuSRXhNA5XcIVBo7f1KNhSRZI=",
+        "narHash": "sha256-2oEViu1Jgxoic97UhNa35B1bMk+33Pah/jOoMUpHCF8=",
         "path": "/mnt/data1/nora/storage/cargo",
         "type": "path"
       },

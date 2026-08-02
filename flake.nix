@@ -19,7 +19,14 @@
           inherit system;
         };
 
-        craneLib = crane.mkLib pkgs;
+        craneLibOrig = crane.mkLib pkgs;
+        craneLib = craneLibOrig.appendCrateRegistries [
+          (craneLibOrig.registryFromDownloadUrl {
+            indexUrl = "https://solana.solfunmeme.com/nora/cargo/index/";
+            registryPrefix = "sparse+";
+            dl = "file://${nora-cargo}/{crate}/{version}/{crate}-{version}.crate";
+          })
+        ];
         src = self;
 
         gitRev = self.shortRev or "dirty";
@@ -36,7 +43,7 @@
         cargoVendorDir = craneLib.vendorCargoDeps {
           src = src;
           overrideVendorCargoPackage = p: drv:
-            if p.name == "erdfa-publish" || p.name == "rust-unixfs" then
+            if builtins.hasPrefix "sparse+https://solana.solfunmeme.com/nora/cargo/index/" (p.source or "") then
               noraCargoPackage p
             else
               drv;
