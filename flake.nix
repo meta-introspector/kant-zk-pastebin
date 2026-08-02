@@ -20,14 +20,7 @@
           inherit system;
         };
 
-        craneLibOrig = crane.mkLib pkgs;
-        craneLib = craneLibOrig.appendCrateRegistries [
-          (craneLibOrig.registryFromDownloadUrl {
-            indexUrl = "https://solana.solfunmeme.com/nora/cargo/index/";
-            registryPrefix = "sparse+";
-            dl = "file://${nora-cargo}/{crate}/{version}/{crate}-{version}.crate";
-          })
-        ];
+        craneLib = crane.mkLib pkgs;
         src = self;
 
         gitRev = self.shortRev or "dirty";
@@ -41,9 +34,13 @@
           echo "{\"files\":{},\"package\":\"${p.checksum}\"}" > "$out/.cargo-checksum.json"
         '';
 
-        cargoVendorDir = craneLib.vendorCargoDeps {
+        # Use buildDepsOnly with overrideCargoVendorCrate to handle nora packages.
+        # vendorCargoDeps + overrideVendorCargoPackage does not work for sparse+
+        # registries in the Nix sandbox (see commit e7629548).
+        cargoArtifacts = craneLib.buildDepsOnly {
+          name = "kant-pastebin-deps";
           src = src;
-          overrideVendorCargoPackage = p: drv:
+          overrideCargoVendorCrate = p: drv:
             if lib.strings.hasPrefix "sparse+https://solana.solfunmeme.com/nora/cargo/index/" (p.source or "") then
               noraCargoPackage p
             else
@@ -52,7 +49,7 @@
 
         commonArgs = {
           inherit src;
-          inherit cargoVendorDir;
+          inherit cargoArtifacts;
           strictDeps = true;
           doCheck = false;
 
@@ -76,10 +73,7 @@
           '';
         };
 
-        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-
         kant-pastebin = craneLib.cargoBuild (commonArgs // {
-          inherit cargoArtifacts;
           pnameSuffix = "";
 
           meta = with pkgs.lib; {
