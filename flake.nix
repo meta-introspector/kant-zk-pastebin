@@ -20,7 +20,14 @@
           inherit system;
         };
 
-        craneLib = crane.mkLib pkgs;
+        craneLibOrig = crane.mkLib pkgs;
+        craneLib = craneLibOrig.appendCrateRegistries [
+          (craneLibOrig.registryFromDownloadUrl {
+            indexUrl = "https://solana.solfunmeme.com/nora/cargo/index/";
+            registryPrefix = "sparse+";
+            dl = "file://${nora-cargo}/{crate}/{version}/{crate}-{version}.crate";
+          })
+        ];
         src = self;
 
         gitRev = self.shortRev or "dirty";
@@ -37,6 +44,8 @@
         # Use buildDepsOnly with overrideCargoVendorCrate to handle nora packages.
         # vendorCargoDeps + overrideVendorCargoPackage does not work for sparse+
         # registries in the Nix sandbox (see commit e7629548).
+        # appendCrateRegistries tells crane how to download from the nora registry,
+        # while overrideCargoVendorCrate intercepts and uses local .crate files.
         cargoArtifacts = craneLib.buildDepsOnly {
           name = "kant-pastebin-deps";
           src = src;
