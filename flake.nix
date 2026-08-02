@@ -15,6 +15,7 @@
   outputs = { self, nixpkgs, flake-utils, system-manager, crane, nora-cargo }:
     (flake-utils.lib.eachDefaultSystem (system:
       let
+        lib = nixpkgs.lib;
         pkgs = import nixpkgs {
           inherit system;
         };
@@ -43,7 +44,7 @@
         cargoVendorDir = craneLib.vendorCargoDeps {
           src = src;
           overrideVendorCargoPackage = p: drv:
-            if builtins.hasPrefix "sparse+https://solana.solfunmeme.com/nora/cargo/index/" (p.source or "") then
+            if lib.strings.hasPrefix "sparse+https://solana.solfunmeme.com/nora/cargo/index/" (p.source or "") then
               noraCargoPackage p
             else
               drv;
