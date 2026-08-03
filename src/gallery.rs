@@ -69,7 +69,7 @@ pub async fn render_file(path: web::Path<String>) -> Result<HttpResponse> {
     let mime = match ext {
         "png" => "image/png",
         "gif" => "image/gif",
-        _ => mime_guess::from_ext(ext).first_or_octet_stream(),
+        _ => return Ok(HttpResponse::Ok().content_type(mime_guess::from_ext(ext).first_or_octet_stream().to_string()).body(data)),
     };
 
     Ok(HttpResponse::Ok().content_type(mime.to_string()).body(data))
@@ -90,7 +90,7 @@ pub async fn gallery(query: web::Query<std::collections::HashMap<String, String>
     let time_cutoff = match time_filter {
         "today" => now - chrono::Duration::days(1),
         "week" => now - chrono::Duration::weeks(1),
-        "month" => now - chrono::Duration::months(1),
+        "month" => now - chrono::Duration::days(30),
         _ => DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
     };
     let time_cutoff_ts: SystemTime = time_cutoff.into();
@@ -243,6 +243,9 @@ pub async fn gallery(query: web::Query<std::collections::HashMap<String, String>
 <div style="flex:1;text-align:center"><div style="font-size:10px;color:#0ff;margin-bottom:2px">SVG</div>{svg_obj}</div>
 <div style="flex:1;text-align:center"><div style="font-size:10px;color:#0ff;margin-bottom:2px">{render_label}</div><a href="{render_url}"><img src="{render_url}" style="max-width:200px;max-height:150px;border-radius:4px" alt="{title}"></a></div>
 </div><a href="{bp}/svg2anim/{stem}" style="font-size:11px;color:#0f0" onclick="return confirm('Regenerate animation?')">🔄 Re-render</a>"#,
+                        bp = base_path,
+                        stem = stem,
+                        svg_obj = svg_obj,
                         render_label = render_label,
                         render_url = render_url,
                         title = html_escape(&title))
