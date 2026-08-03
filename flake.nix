@@ -41,15 +41,9 @@
           echo "{\"files\":{},\"package\":\"${p.checksum}\"}" > "$out/.cargo-checksum.json"
         '';
 
-        # Use buildDepsOnly with overrideCargoVendorCrate to handle nora packages.
-        # vendorCargoDeps + overrideVendorCargoPackage does not work for sparse+
-        # registries in the Nix sandbox (see commit e7629548).
-        # appendCrateRegistries tells crane how to download from the nora registry,
-        # while overrideCargoVendorCrate intercepts and uses local .crate files.
-        cargoArtifacts = craneLib.buildDepsOnly {
-          name = "kant-pastebin-deps";
+        cargoVendorDir = craneLib.vendorCargoDeps {
           src = src;
-          overrideCargoVendorCrate = p: drv:
+          overrideVendorCargoPackage = p: drv:
             if lib.strings.hasPrefix "sparse+https://solana.solfunmeme.com/nora/cargo/index/" (p.source or "") then
               noraCargoPackage p
             else
@@ -58,7 +52,7 @@
 
         commonArgs = {
           inherit src;
-          inherit cargoArtifacts;
+          inherit cargoVendorDir;
           strictDeps = true;
           doCheck = false;
 
@@ -82,7 +76,10 @@
           '';
         };
 
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
         kant-pastebin = craneLib.cargoBuild (commonArgs // {
+          inherit cargoArtifacts;
           pnameSuffix = "";
 
           meta = with pkgs.lib; {
