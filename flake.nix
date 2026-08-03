@@ -69,6 +69,7 @@ EOF
           inherit src cargoVendorDir;
           strictDeps = true;
           doCheck = false;
+          cargoExtraArgs = "--offline";
           nativeBuildInputs = with pkgs; [ pkg-config ];
           buildInputs = with pkgs; [ openssl ];
           doInstallCargoArtifacts = false;
