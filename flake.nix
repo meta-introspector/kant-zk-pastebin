@@ -58,6 +58,7 @@
 
         cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
           cargoExtraArgs = "--offline";
+          inherit cargoVendorDir;
         });
 
         kant-pastebin = craneLib.cargoBuild (commonArgs // {
