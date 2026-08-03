@@ -16,49 +16,54 @@
     (flake-utils.lib.eachDefaultSystem (system:
       let
         lib = nixpkgs.lib;
-        pkgs = import nixpkgs {
-          inherit system;
-        };
+        pkgs = import nixpkgs { inherit system; };
 
-        craneLibOrig = crane.mkLib pkgs;
-        craneLib = craneLibOrig.appendCrateRegistries [
-          (craneLibOrig.registryFromDownloadUrl {
-            indexUrl = "https://solana.solfunmeme.com/nora/cargo/index/";
-            registryPrefix = "sparse+";
-            dl = "file://${nora-cargo}/{crate}/{version}/{crate}-{version}.crate";
-          })
-        ];
+        craneLib = crane.mkLib pkgs;
         src = self;
-
-        gitRev = self.shortRev or "dirty";
 
         noraCargoPackage = p: pkgs.runCommand "cargo-package-${p.name}-${p.version}" {
           nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
-          crate = nora-cargo + "/${p.name}/${p.version}/${p.name}-${p.version}.crate";
+          crate = "${nora-cargo}/${p.name}/${p.version}/${p.name}-${p.version}.crate";
         } ''
           mkdir -p "$out"
           tar -xzf "$crate" -C "$out" --strip-components=1 --no-same-owner
           echo "{\"files\":{},\"package\":\"${p.checksum}\"}" > "$out/.cargo-checksum.json"
         '';
 
-        cargoVendorDir = craneLib.vendorCargoDeps {
-          src = src;
+        # Vendor deps: crane creates separate dirs per registry.
+        # We then merge them into one so cargo finds ALL packages in one place.
+        rawVendorDeps = craneLib.vendorCargoDeps {
+          inherit src;
           overrideVendorCargoPackage = p: drv:
-            if lib.strings.hasPrefix "sparse+https://solana.solfunmeme.com/nora/cargo/index/" (p.source or "") then
-              noraCargoPackage p
-            else
-              drv;
+            if lib.strings.hasPrefix "sparse+https://solana.solfunmeme.com/nora/cargo/index/" (p.source or "")
+            then noraCargoPackage p
+            else drv;
         };
 
+        cargoVendorDir = pkgs.runCommand "unified-vendor-deps" {} ''
+          mkdir -p "$out/registry"
+          for d in ${rawVendorDeps}/*/; do
+            cp -rn "$d"* "$out/registry/" 2>/dev/null || true
+          done
+          chmod -R u+w "$out/registry"
+          cat > "$out/config.toml" << EOF
+[source.unified]
+directory = "$out/registry"
+[source.crates-io]
+registry = "https://github.com/rust-lang/crates.io-index"
+replace-with = "unified"
+[source.nora]
+registry = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
+replace-with = "unified"
+EOF
+        '';
+
         commonArgs = {
-          inherit src;
-          inherit cargoVendorDir;
+          inherit src cargoVendorDir;
           strictDeps = true;
           doCheck = false;
-
           nativeBuildInputs = with pkgs; [ pkg-config ];
           buildInputs = with pkgs; [ openssl ];
-
           doInstallCargoArtifacts = false;
           installPhase = ''
             runHook preInstall
@@ -81,7 +86,6 @@
         kant-pastebin = craneLib.cargoBuild (commonArgs // {
           inherit cargoArtifacts;
           pnameSuffix = "";
-
           meta = with pkgs.lib; {
             description = "Kant Pastebin — UUCP + zkTLS with IPFS";
             license = licenses.mit;
@@ -89,29 +93,15 @@
           };
         });
       in {
-        packages = {
-          inherit kant-pastebin;
-          default = kant-pastebin;
-        };
-
-        apps.default = {
-          type = "app";
-          program = "${kant-pastebin}/bin/kant-pastebin";
-        };
-
+        packages = { inherit kant-pastebin; default = kant-pastebin; };
+        apps.default = { type = "app"; program = "${kant-pastebin}/bin/kant-pastebin"; };
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            rustc cargo rustfmt clippy
-            openssl.dev pkg-config
-          ];
+          buildInputs = with pkgs; [ rustc cargo rustfmt clippy openssl.dev pkg-config ];
         };
       }
     )) // {
       systemConfigs.kant-pastebin-only = system-manager.lib.makeSystemConfig {
-        modules = [
-          ./pastebin-system.nix
-          { nixpkgs.hostPlatform = "x86_64-linux"; }
-        ];
+        modules = [ ./pastebin-system.nix { nixpkgs.hostPlatform = "x86_64-linux"; } ];
         specialArgs = { pastebin-src = self; };
       };
     };

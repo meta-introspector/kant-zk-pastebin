@@ -9,10 +9,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f7b0a21988c1bf877cf4759ef5ddaac04c1c9fe808c9142ecb78ba97d97a28a"
 dependencies = [
  "bitflags 2.13.1",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "futures-core",
  "futures-sink",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "pin-project-lite",
  "tokio",
  "tokio-util",
@@ -45,7 +45,7 @@ dependencies = [
  "actix-utils",
  "actix-web",
  "bitflags 2.13.1",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "derive_more 2.1.1",
  "futures-core",
  "http-range",
@@ -70,7 +70,7 @@ dependencies = [
  "base64 0.22.1",
  "bitflags 2.13.1",
  "brotli",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "bytestring",
  "derive_more 2.1.1",
  "encoding_rs",
@@ -102,8 +102,8 @@ version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e01ed3140b2f8d422c68afa1ed2e85d996ea619c988ac834d255db32138655cb"
 dependencies = [
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -121,10 +121,10 @@ dependencies = [
  "httparse",
  "local-waker",
  "log",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "mime",
  "rand 0.8.7",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
  "serde_plain",
  "tempfile",
@@ -139,9 +139,9 @@ checksum = "e11eb847f49a700678ea2fa73daeb3208061afa2b9d1a8527c03390f4c4a1c6b"
 dependencies = [
  "darling",
  "parse-size",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -155,7 +155,7 @@ dependencies = [
  "http 0.2.12",
  "regex",
  "regex-lite",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "tracing",
 ]
 
@@ -221,7 +221,7 @@ dependencies = [
  "actix-service",
  "actix-utils",
  "actix-web-codegen",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "bytestring",
  "cfg-if 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "cookie",
@@ -239,7 +239,7 @@ dependencies = [
  "pin-project-lite",
  "regex",
  "regex-lite",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
  "serde_urlencoded",
  "smallvec",
@@ -256,9 +256,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f591380e2e68490b5dfaf1dd1aa0ebe78d84ba7067078512b4ea6e4492d622b8"
 dependencies = [
  "actix-router",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -287,7 +287,7 @@ version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
 dependencies = [
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
 ]
 
 [[package]]
@@ -317,7 +317,7 @@ version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
 ]
 
 [[package]]
@@ -443,7 +443,7 @@ dependencies = [
  "arrow-schema",
  "chrono",
  "half",
- "hashbrown 0.15.5 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "hashbrown 0.15.5",
  "num",
 ]
 
@@ -453,7 +453,7 @@ version = "53.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b5c681a99606f3316f2a99d9c8b6fa3aad0b1d34d8f6d7a1b471893940219d8"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "half",
  "num",
 ]
@@ -520,7 +520,7 @@ dependencies = [
  "indexmap 2.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lexical-core",
  "num",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
 ]
 
@@ -584,7 +584,7 @@ dependencies = [
  "arrow-data",
  "arrow-schema",
  "arrow-select",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "num",
  "regex",
  "regex-syntax",
@@ -596,8 +596,8 @@ version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3203e79f4dd9bdda415ed03cf14dae5a2bf775c683a00f94e9cd1faf0f596e5"
 dependencies = [
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 1.0.109 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "quote 1.0.47",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -737,7 +737,7 @@ dependencies = [
  "gloo-timers",
  "kv-log-macro",
  "log",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "once_cell",
  "pin-project-lite",
  "pin-utils",
@@ -854,9 +854,9 @@ version = "1.0.4"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "b79834656f71332577234b50bfc009996f7449e0c056884e6a02492ded0ca2f3"
 dependencies = [
- "arrayref (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "arrayvec (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "constant_time_eq (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "arrayref",
+ "arrayvec",
+ "constant_time_eq",
 ]
 
 [[package]]
@@ -865,9 +865,9 @@ version = "1.0.4"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "ee29928bad1e3f94c9d1528da29e07a1d3d04817ae8332de1e8b846c8439f4b3"
 dependencies = [
- "arrayref (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "arrayvec (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "constant_time_eq (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "arrayref",
+ "arrayvec",
+ "constant_time_eq",
 ]
 
 [[package]]
@@ -876,11 +876,11 @@ version = "1.8.5"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "0aa83c34e62843d924f905e0f5c866eb1dd6545fc4d719e803d9ba6030371fce"
 dependencies = [
- "arrayref (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "arrayvec (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "cc 1.2.63 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "arrayref",
+ "arrayvec",
+ "cc 1.2.63",
  "cfg-if 1.0.4 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "constant_time_eq (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "constant_time_eq",
  "cpufeatures 0.3.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
 ]
 
@@ -908,7 +908,7 @@ version = "0.12.0"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "cdd35008169921d80bc60d3d0ab416eecb028c4cd653352907921d95084790be"
 dependencies = [
- "hybrid-array 0.4.12 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "hybrid-array 0.4.12",
 ]
 
 [[package]]
@@ -917,7 +917,7 @@ version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
- "hybrid-array 0.4.14 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "hybrid-array 0.4.14",
 ]
 
 [[package]]
@@ -960,8 +960,8 @@ version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f7dc094d718f2e1c1559ad110e27eeaae14a5465d3d56dd6dbd793079fbd530"
 dependencies = [
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "serde_core 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
+ "serde_core 1.0.229",
 ]
 
 [[package]]
@@ -994,7 +994,7 @@ version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 dependencies = [
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
 ]
 
 [[package]]
@@ -1003,7 +1003,7 @@ version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86566c496f2f47d9b8147a4c8b02ffdb69c919fe0c2b2e7195d22cbba0e635c9"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
 ]
 
 [[package]]
@@ -1021,7 +1021,7 @@ version = "0.1.13+1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "225bff33b2141874fe80d71e07d6eec4f85c5c216453dd96388240f96e1acc14"
 dependencies = [
- "cc 1.4.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "cc 1.4.0",
  "pkg-config",
 ]
 
@@ -1043,7 +1043,7 @@ checksum = "5add81bb678e6cb321aff7fa0dc7689ad82b112dbc032cea19f91d6b8e3582b9"
 dependencies = [
  "find-msvc-tools 0.1.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "jobserver",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "shlex 2.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -1079,7 +1079,7 @@ dependencies = [
  "async-std",
  "async-tungstenite",
  "base64 0.22.1",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "cfg-if 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "chromiumoxide_cdp",
  "chromiumoxide_types",
@@ -1089,7 +1089,7 @@ dependencies = [
  "futures-timer",
  "pin-project-lite",
  "reqwest 0.12.28",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
  "thiserror 1.0.69 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
@@ -1106,7 +1106,7 @@ checksum = "cadbfb52fa0aeca43626f6c42ca04184b108b786f8e45198dc41a42aedcf2e50"
 dependencies = [
  "chromiumoxide_pdl",
  "chromiumoxide_types",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
 ]
 
@@ -1117,13 +1117,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c197aeb42872c5d4c923e7d8ad46d99a58fd0fec37f6491554ff677a6791d3c9"
 dependencies = [
  "chromiumoxide_types",
- "either 1.17.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "either 1.17.0",
  "heck 0.4.1",
  "once_cell",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "regex",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
 ]
 
@@ -1133,7 +1133,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "923486888790528d55ac37ec2f7483ed19eb8ccbb44701878e5856d1ceadf5d8"
 dependencies = [
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
 ]
 
@@ -1181,7 +1181,7 @@ checksum = "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e"
 dependencies = [
  "ciborium-io",
  "ciborium-ll",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
 ]
 
 [[package]]
@@ -1206,7 +1206,7 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21a304f95f84d169a6f31c4d0a30d784643aaa0bbc9c1e449a2c23e963ec4971"
 dependencies = [
- "multibase 0.9.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "multibase 0.9.3",
  "multihash 0.19.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "unsigned-varint 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -1217,7 +1217,7 @@ version = "0.11.3"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "21a304f95f84d169a6f31c4d0a30d784643aaa0bbc9c1e449a2c23e963ec4971"
 dependencies = [
- "multibase 0.9.2 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "multibase 0.9.2",
  "multihash 0.19.5 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
  "unsigned-varint 0.8.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
 ]
@@ -1251,9 +1251,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d012d2b9d65aca7f18f4d9878a045bc17899bba951561ba5ec3c2ba1eed9a061"
 dependencies = [
  "heck 0.5.0",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 3.0.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -1354,7 +1354,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f"
 dependencies = [
  "core-foundation-sys",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
 ]
 
 [[package]]
@@ -1369,7 +1369,7 @@ version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
 ]
 
 [[package]]
@@ -1378,7 +1378,7 @@ version = "0.2.17"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
- "libc 0.2.186 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.186",
 ]
 
 [[package]]
@@ -1387,7 +1387,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
 ]
 
 [[package]]
@@ -1396,7 +1396,7 @@ version = "0.3.0"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
 dependencies = [
- "libc 0.2.186 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.186",
 ]
 
 [[package]]
@@ -1465,7 +1465,7 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
- "hybrid-array 0.4.14 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "hybrid-array 0.4.14",
 ]
 
 [[package]]
@@ -1474,7 +1474,7 @@ version = "0.2.2"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
- "hybrid-array 0.4.12 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "hybrid-array 0.4.12",
 ]
 
 [[package]]
@@ -1495,10 +1495,10 @@ checksum = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e"
 dependencies = [
  "fnv",
  "ident_case",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "strsim",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1508,8 +1508,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
  "darling_core",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1551,7 +1551,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding 2.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1561,7 +1561,7 @@ source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding 2.11.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.117 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -1581,9 +1581,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bad9c72e7ca2137e0dc3813245a0d282fd6daad32fd800af018306a9169b5fe8"
 dependencies = [
  "defmt-parser",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1592,7 +1592,7 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e"
 dependencies = [
- "thiserror 2.0.19 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1607,9 +1607,9 @@ version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1619,10 +1619,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6edb4b64a43d977b8e99788fe3a04d483834fba1215a7e02caa415b626497f7f"
 dependencies = [
  "convert_case 0.4.0",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "rustc_version",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1641,10 +1641,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb"
 dependencies = [
  "convert_case 0.10.0",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "rustc_version",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "syn 2.0.119",
  "unicode-xid",
 ]
 
@@ -1680,7 +1680,7 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
- "block-buffer 0.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "block-buffer 0.12.1",
  "const-oid",
  "crypto-common 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -1691,7 +1691,7 @@ version = "0.11.3"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
- "block-buffer 0.12.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "block-buffer 0.12.0",
  "crypto-common 0.2.2 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
 ]
 
@@ -1703,7 +1703,7 @@ checksum = "9b0aa9ae3a1b700e0ac9f707cdff5c3893f4f11a3b1b317c5113a422ef785809"
 dependencies = [
  "getrandom 0.2.17",
  "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
- "sha3 0.10.9 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "sha3 0.10.9",
  "subtle",
  "zeroize",
 ]
@@ -1724,7 +1724,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "redox_users",
  "winapi",
 ]
@@ -1735,9 +1735,9 @@ version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 3.0.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -1820,7 +1820,7 @@ dependencies = [
  "log",
  "parquet",
  "rayon",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_bytes 0.11.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json",
  "serde_yaml",
@@ -1835,7 +1835,7 @@ version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "windows-sys 0.61.2",
 ]
 
@@ -1889,7 +1889,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
 dependencies = [
  "cfg-if 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
 ]
 
 [[package]]
@@ -1899,7 +1899,7 @@ source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
 dependencies = [
  "cfg-if 1.0.4 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "libc 0.2.186 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.186",
 ]
 
 [[package]]
@@ -2022,9 +2022,9 @@ version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d6d3cde68c518367be28956066ddfef33813991b77a55005a69dae04bf3b10b"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2057,7 +2057,7 @@ dependencies = [
  "futures-macro",
  "futures-sink",
  "futures-task",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "pin-project-lite",
  "slab",
 ]
@@ -2089,7 +2089,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "wasi",
 ]
 
@@ -2100,7 +2100,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "r-efi 5.3.0",
  "wasip2",
 ]
@@ -2112,7 +2112,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
 ]
@@ -2124,7 +2124,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b903b73e45dc0c6c596f2d37eccece7c1c8bb6e4407b001096387c63d0d93724"
 dependencies = [
  "bitflags 2.13.1",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "libgit2-sys",
  "log",
  "openssl-probe",
@@ -2174,7 +2174,7 @@ version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0beca50380b1fc32983fc1cb4587bfa4bb9e78fc259aad4a0032d2080309222d"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "fnv",
  "futures-core",
  "futures-sink",
@@ -2256,7 +2256,7 @@ version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "601cbb57e577e2f5ef5be8e7b83f0f63994f25aa94d673e54a92d5c516d101f1"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "fnv",
  "itoa",
 ]
@@ -2267,7 +2267,7 @@ version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "918d3568bebf352712bc2ef3d46a8bcf1a75b373be6539de198e9105cbbf9ce0"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "itoa",
 ]
 
@@ -2277,7 +2277,7 @@ version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ceab25649e9960c0311ea418d17bee82c0dcec1bd053b5f9a66e265a693bed2"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "http 0.2.12",
  "pin-project-lite",
 ]
@@ -2288,7 +2288,7 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca2a8f2913ee65f60facd6a5905613afaa448497a0230cc41ce022d93290bc2c"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "http 1.5.0",
 ]
 
@@ -2298,7 +2298,7 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9f41fd6a08e4d4ec69df65976da761afd5ad5e58a9d4acb46bd1c953a9e3ff2"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "futures-core",
  "http 1.5.0",
  "http-body 1.1.0",
@@ -2356,7 +2356,7 @@ version = "0.14.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41dfc780fdec9373c01bae43289ea34c972e40ee3c9f6b3c8801a35f35586ce7"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "futures-channel",
  "futures-core",
  "futures-util",
@@ -2381,7 +2381,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d22053281f852e11534f5198498373cbb59295120a20771d90f7ed1897490a72"
 dependencies = [
  "atomic-waker",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "futures-channel",
  "futures-core",
  "http 1.5.0",
@@ -2415,14 +2415,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
  "base64 0.22.1",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "futures-channel",
  "futures-util",
  "http 1.5.0",
  "http-body 1.1.0",
  "hyper 1.11.0",
  "ipnet",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "percent-encoding",
  "pin-project-lite",
  "socket2 0.6.5",
@@ -2452,7 +2452,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
- "cc 1.4.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "cc 1.4.0",
 ]
 
 [[package]]
@@ -2573,7 +2573,7 @@ dependencies = [
  "crossbeam-deque",
  "globset",
  "log",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "regex-automata",
  "same-file",
  "walkdir",
@@ -2594,8 +2594,8 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "hashbrown 0.17.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "serde_core 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
+ "serde_core 1.0.229",
 ]
 
 [[package]]
@@ -2621,7 +2621,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "090f624976d72f0b0bb71b86d58dc16c15e069193067cb3a3a09d655246cbbda"
 dependencies = [
  "cid 0.11.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_bytes 0.11.19 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -2632,7 +2632,7 @@ source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "090f624976d72f0b0bb71b86d58dc16c15e069193067cb3a3a09d655246cbbda"
 dependencies = [
  "cid 0.11.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "serde 1.0.228 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.228",
  "serde_bytes 0.11.19 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
 ]
 
@@ -2642,9 +2642,9 @@ version = "0.2.2"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "0e51fc90b345e57d8d5346dcef5eb16d51d1d19572a8a2d23c15009904e68244"
 dependencies = [
- "bytes 1.11.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.11.1",
  "ipld-core 0.4.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quick-protobuf (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "quick-protobuf",
  "thiserror 1.0.69 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
 ]
 
@@ -2678,7 +2678,7 @@ dependencies = [
  "log",
  "portable-atomic",
  "portable-atomic-util",
- "serde_core 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde_core 1.0.229",
 ]
 
 [[package]]
@@ -2697,9 +2697,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a69dcb3a21cfb32ce1cd056169337ca284af0766dd766e7878819b251a49204"
 dependencies = [
  "jiff-core",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2709,7 +2709,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
 dependencies = [
  "getrandom 0.4.3",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
 ]
 
 [[package]]
@@ -2739,25 +2739,21 @@ dependencies = [
  "data-encoding 2.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "dirs-next",
  "env_logger",
- "erdfa-publish (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "erdfa-publish",
  "flate2",
  "futures",
  "futures-util",
  "hex",
  "ipld-core 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "ipld-dagpb (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
  "lazy_static",
  "libloading",
  "log",
  "mime_guess",
- "multibase 0.9.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "multihash-codetable (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "multihash-derive (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quick-protobuf (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "multibase 0.9.3",
  "regex-lite",
  "reqwest 0.11.27",
- "rust-unixfs (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "rust-unixfs",
+ "serde 1.0.229",
  "serde_bytes 0.11.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json",
  "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2813,7 +2809,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "602d7ee77b8854f55e3c8acba88f84ef97fd3cf838ff229a0193c82f1bd4233b"
 dependencies = [
  "getrandom 0.2.17",
- "sha3 0.10.9 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "sha3 0.10.9",
  "subtle",
  "zeroize",
 ]
@@ -2838,7 +2834,7 @@ checksum = "c4f99d3ef9863a4445c1b77825e4534cf3c36e9ee707eff6ffc1f1e772add166"
 dependencies = [
  "getrandom 0.2.17",
  "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
- "sha3 0.10.9 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "sha3 0.10.9",
  "subtle",
  "zeroize",
 ]
@@ -2924,8 +2920,8 @@ version = "0.17.0+1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10472326a8a6477c3c20a64547b0059e4b0d086869eee31e6d7da728a8eb7224"
 dependencies = [
- "cc 1.4.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "cc 1.4.0",
+ "libc 0.2.189",
  "libssh2-sys",
  "libz-sys",
  "openssl-sys",
@@ -2954,7 +2950,7 @@ version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2026a5056764a10b2bf5d56488cba40da507f5493a6a429340e2004d9ed085fa"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
 ]
 
 [[package]]
@@ -2963,8 +2959,8 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c04141a07bb0c0bc461cb657808764de571702a59bc5c726c400ac9a7625e3ab"
 dependencies = [
- "cc 1.4.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "cc 1.4.0",
+ "libc 0.2.189",
  "libz-sys",
  "openssl-sys",
  "pkg-config",
@@ -2977,8 +2973,8 @@ version = "1.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
 dependencies = [
- "cc 1.4.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "cc 1.4.0",
+ "libc 0.2.189",
  "pkg-config",
  "vcpkg",
 ]
@@ -2998,7 +2994,7 @@ dependencies = [
  "byteorder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "linear-map",
  "linux-perf-event-reader",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "thiserror 1.0.69 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -3010,7 +3006,7 @@ checksum = "41c30164e39b8f970203c30de536149edba8a76251aa28e6afeaa5062435788e"
 dependencies = [
  "bitflags 1.3.2",
  "byteorder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "thiserror 1.0.69 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -3073,8 +3069,8 @@ version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fda04ab3764e6cde78b9974eec4f779acaba7c4e84b36eca3cf77c581b85d27"
 dependencies = [
- "cc 1.4.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "cc 1.4.0",
+ "libc 0.2.189",
  "pkg-config",
 ]
 
@@ -3084,9 +3080,9 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "757aee279b8bdbb9f9e676796fd459e4207a1f986e87886700abf589f5abf771"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -3095,9 +3091,9 @@ version = "0.1.2"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "757aee279b8bdbb9f9e676796fd459e4207a1f986e87886700abf589f5abf771"
 dependencies = [
- "proc-macro2 1.0.106 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.45 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.117 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -3144,7 +3140,7 @@ version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30d65c71f1ce40ab09135ce117d742b9f8a19ff91a41a8b57ed50bc2de59c427"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "log",
  "wasi",
  "windows-sys 0.61.2",
@@ -3199,15 +3195,15 @@ version = "0.2.2"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "60384411b100398c5b2fdca476eed82e9898d09f2c60d1b1b66c5080ebe06118"
 dependencies = [
- "blake2b_simd (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "blake2s_simd (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "blake3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "blake2b_simd",
+ "blake2s_simd",
+ "blake3",
  "digest 0.11.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "multihash-derive (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "ripemd (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "multihash-derive",
+ "ripemd",
  "sha1 0.11.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
  "sha2 0.11.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "sha3 0.11.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "sha3 0.11.0",
 ]
 
 [[package]]
@@ -3217,7 +3213,7 @@ source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "4723acdce756db211a53f01b3419dbdf63cb48cef5df86260f55309364735fbf"
 dependencies = [
  "multihash 0.19.5 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "multihash-derive-impl (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "multihash-derive-impl",
 ]
 
 [[package]]
@@ -3226,10 +3222,10 @@ version = "0.1.3"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "f932556f78452e5604cef711349d337ec081a9aa3c96e67b3127c8f5df05d550"
 dependencies = [
- "proc-macro-crate (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "proc-macro2 1.0.106 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.45 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.117 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro-crate",
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "syn 2.0.117",
  "synstructure 0.13.2 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
 ]
 
@@ -3336,8 +3332,8 @@ version = "0.9.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b47e7e6bb2c38cd930d25a23b40fa52e068c10e85f3e03a7f5ba5aaca5713695"
 dependencies = [
- "cc 1.4.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "cc 1.4.0",
+ "libc 0.2.189",
  "pkg-config",
  "vcpkg",
 ]
@@ -3374,7 +3370,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
 dependencies = [
  "cfg-if 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "redox_syscall",
  "smallvec",
  "windows-link",
@@ -3395,10 +3391,10 @@ dependencies = [
  "arrow-schema",
  "arrow-select",
  "base64 0.22.1",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "chrono",
  "half",
- "hashbrown 0.15.5 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "hashbrown 0.15.5",
  "num",
  "num-bigint",
  "paste",
@@ -3441,7 +3437,7 @@ version = "2.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7df728be843c7070fab6ab7c328c4e9e9d78e23bf749c0669c86ee7ebfa050a2"
 dependencies = [
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "ucd-trie",
 ]
 
@@ -3463,9 +3459,9 @@ checksum = "6a7a9205cfb6f596a9e8b689c0a15f9ceb7a1aafae7aaf788150ac65b29975b6"
 dependencies = [
  "pest",
  "pest_meta",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -3603,7 +3599,7 @@ version = "3.5.0"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
- "toml_edit 0.25.12+spec-1.1.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "toml_edit 0.25.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -3613,9 +3609,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
 dependencies = [
  "proc-macro-error-attr",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 1.0.109 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 1.0.109",
  "version_check 0.9.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -3625,8 +3621,8 @@ version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "version_check 0.9.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -3663,7 +3659,7 @@ version = "1.0.45"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
- "proc-macro2 1.0.106 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.106",
 ]
 
 [[package]]
@@ -3672,7 +3668,7 @@ version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
 ]
 
 [[package]]
@@ -3693,7 +3689,7 @@ version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "rand_chacha",
  "rand_core 0.6.4",
 ]
@@ -3740,7 +3736,7 @@ version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
 dependencies = [
- "either 1.17.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "either 1.17.0",
  "rayon-core",
 ]
 
@@ -3781,7 +3777,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
 dependencies = [
  "aho-corasick",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "regex-automata",
  "regex-syntax",
 ]
@@ -3793,7 +3789,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fcfdb36bda0c880c5931cdc7a2bcdc8ba4556847b9d912bca70bc94708711ad"
 dependencies = [
  "aho-corasick",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
  "regex-syntax",
 ]
 
@@ -3816,7 +3812,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd67538700a17451e7cba03ac727fb961abb7607553461627b97de0b89cf4a62"
 dependencies = [
  "base64 0.21.7",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "encoding_rs",
  "futures-core",
  "futures-util",
@@ -3835,7 +3831,7 @@ dependencies = [
  "pin-project-lite",
  "rustls 0.21.12",
  "rustls-pemfile",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper 0.1.2",
@@ -3858,7 +3854,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "futures-core",
  "http 1.5.0",
  "http-body 1.1.0",
@@ -3869,7 +3865,7 @@ dependencies = [
  "log",
  "percent-encoding",
  "pin-project-lite",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper 1.0.2",
@@ -3889,10 +3885,10 @@ version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
 dependencies = [
- "cc 1.4.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "cc 1.4.0",
  "cfg-if 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.17",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "untrusted",
  "windows-sys 0.52.0",
 ]
@@ -3924,10 +3920,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bcfc4d6f53af43755f7a723e4b6b8794fcce052a178dd8c6c1dadc5f5343097"
 dependencies = [
  "mime_guess",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "rust-embed-utils",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "syn 2.0.119",
  "walkdir",
 ]
 
@@ -3947,14 +3943,14 @@ version = "0.5.1"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "c6d3eadb39df5a598445aca058dd00217c96f7e2311c45c53388164fc42d11fb"
 dependencies = [
- "either 1.16.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "either 1.16.0",
  "filetime 0.2.29 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
  "ipld-core 0.4.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "ipld-dagpb (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "ipld-dagpb",
  "multihash 0.19.5 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "multihash-codetable (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "multihash-derive (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quick-protobuf (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "multihash-codetable",
+ "multihash-derive",
+ "quick-protobuf",
  "sha2 0.10.9 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
 ]
 
@@ -3975,7 +3971,7 @@ checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
 dependencies = [
  "bitflags 2.13.1",
  "errno",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "linux-raw-sys 0.4.15",
  "windows-sys 0.59.0",
 ]
@@ -3988,7 +3984,7 @@ checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
 dependencies = [
  "bitflags 2.13.1",
  "errno",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "linux-raw-sys 0.12.1",
  "windows-sys 0.61.2",
 ]
@@ -4114,7 +4110,7 @@ version = "1.0.228"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
- "serde_core 1.0.228 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde_core 1.0.228",
 ]
 
 [[package]]
@@ -4123,8 +4119,8 @@ version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
- "serde_core 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "serde_derive 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde_core 1.0.229",
+ "serde_derive 1.0.229",
 ]
 
 [[package]]
@@ -4133,8 +4129,8 @@ version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
 dependencies = [
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "serde_core 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
+ "serde_core 1.0.229",
 ]
 
 [[package]]
@@ -4143,8 +4139,8 @@ version = "0.11.19"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
 dependencies = [
- "serde 1.0.228 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "serde_core 1.0.228 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.228",
+ "serde_core 1.0.228",
 ]
 
 [[package]]
@@ -4153,7 +4149,7 @@ version = "1.0.228"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
 dependencies = [
- "serde_derive 1.0.228 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde_derive 1.0.228",
 ]
 
 [[package]]
@@ -4162,7 +4158,7 @@ version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
 dependencies = [
- "serde_derive 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde_derive 1.0.229",
 ]
 
 [[package]]
@@ -4171,9 +4167,9 @@ version = "1.0.228"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
- "proc-macro2 1.0.106 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.45 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.117 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -4182,9 +4178,9 @@ version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 3.0.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4194,9 +4190,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "itoa",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "serde_core 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
+ "serde 1.0.229",
+ "serde_core 1.0.229",
  "zmij",
 ]
 
@@ -4206,7 +4202,7 @@ version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ce1fc6db65a611022b23a0dec6975d63fb80a302cb3388835ff02c097258d50"
 dependencies = [
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
 ]
 
 [[package]]
@@ -4215,7 +4211,7 @@ version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
 dependencies = [
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
 ]
 
 [[package]]
@@ -4227,7 +4223,7 @@ dependencies = [
  "form_urlencoded",
  "itoa",
  "ryu",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
 ]
 
 [[package]]
@@ -4239,7 +4235,7 @@ dependencies = [
  "indexmap 2.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "itoa",
  "ryu",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "unsafe-libyaml",
 ]
 
@@ -4327,7 +4323,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77fd7028345d415a4034cf8777cd4f8ab1851274233b45f84e3d955502d93874"
 dependencies = [
  "digest 0.10.7 (registry+https://github.com/rust-lang/crates.io-index)",
- "keccak 0.1.6 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "keccak 0.1.6",
 ]
 
 [[package]]
@@ -4337,7 +4333,7 @@ source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "be176f1a57ce4e3d31c1a166222d9768de5954f811601fb7ca06fc8203905ce1"
 dependencies = [
  "digest 0.11.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "keccak 0.2.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "keccak 0.2.0",
 ]
 
 [[package]]
@@ -4359,7 +4355,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
 ]
 
 [[package]]
@@ -4408,7 +4404,7 @@ version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "windows-sys 0.52.0",
 ]
 
@@ -4418,7 +4414,7 @@ version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "windows-sys 0.61.2",
 ]
 
@@ -4452,8 +4448,8 @@ version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "unicode-ident 1.0.24 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -4463,8 +4459,8 @@ version = "2.0.117"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99"
 dependencies = [
- "proc-macro2 1.0.106 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.45 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
  "unicode-ident 1.0.24 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
 ]
 
@@ -4474,8 +4470,8 @@ version = "2.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "unicode-ident 1.0.24 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -4485,8 +4481,8 @@ version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "unicode-ident 1.0.24 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -4511,9 +4507,9 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -4522,9 +4518,9 @@ version = "0.13.2"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
 dependencies = [
- "proc-macro2 1.0.106 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.45 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.117 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -4545,7 +4541,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a75fb188eb626b924683e3b95e3a48e63551fcfb51949de2f06a9d91dbee93c9"
 dependencies = [
  "core-foundation-sys",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
 ]
 
 [[package]]
@@ -4555,7 +4551,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
 dependencies = [
  "filetime 0.2.29 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "xattr",
 ]
 
@@ -4588,7 +4584,7 @@ dependencies = [
  "pest_derive",
  "rand 0.8.7",
  "regex",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
  "slug",
  "unicode-segmentation",
@@ -4618,7 +4614,7 @@ version = "2.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09a43598840e33d5b0331f38c5e30d13bb11c11210a4b58f0d9b18a5a5eefcd9"
 dependencies = [
- "thiserror-impl 2.0.19 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "thiserror-impl 2.0.19",
 ]
 
 [[package]]
@@ -4627,9 +4623,9 @@ version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -4638,9 +4634,9 @@ version = "1.0.69"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
- "proc-macro2 1.0.106 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.45 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.117 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -4649,9 +4645,9 @@ version = "2.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 3.0.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4674,7 +4670,7 @@ dependencies = [
  "deranged",
  "num-conv",
  "powerfmt",
- "serde_core 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde_core 1.0.229",
  "time-core",
  "time-macros",
 ]
@@ -4720,8 +4716,8 @@ version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
+ "libc 0.2.189",
  "mio",
  "parking_lot",
  "pin-project-lite",
@@ -4737,9 +4733,9 @@ version = "2.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78773a2a397f451582ce068015985c33193cf6dea8b74d2a639fe457b2f07b0e"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 3.0.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4758,10 +4754,10 @@ version = "0.7.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
 dependencies = [
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "futures-core",
  "futures-sink",
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "pin-project-lite",
  "tokio",
 ]
@@ -4772,10 +4768,10 @@ version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
 dependencies = [
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_spanned",
- "toml_datetime 0.6.11 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "toml_edit 0.22.27 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "toml_datetime 0.6.11",
+ "toml_edit 0.22.27",
 ]
 
 [[package]]
@@ -4784,7 +4780,7 @@ version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
 dependencies = [
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
 ]
 
 [[package]]
@@ -4793,7 +4789,7 @@ version = "1.1.1+spec-1.1.0"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
 dependencies = [
- "serde_core 1.0.228 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde_core 1.0.228",
 ]
 
 [[package]]
@@ -4803,11 +4799,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
 dependencies = [
  "indexmap 2.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_spanned",
- "toml_datetime 0.6.11 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "toml_datetime 0.6.11",
  "toml_write",
- "winnow 0.7.15 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "winnow 0.7.15",
 ]
 
 [[package]]
@@ -4817,9 +4813,9 @@ source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "d2153edc6955a6c354fad8f5efd38b6a8769bdccf9fe50f8e1329f81b0baa5d7"
 dependencies = [
  "indexmap 2.14.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "toml_datetime 1.1.1+spec-1.1.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "toml_parser (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "winnow 1.0.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "winnow 1.0.3",
 ]
 
 [[package]]
@@ -4828,7 +4824,7 @@ version = "1.1.2+spec-1.1.0"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
- "winnow 1.0.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "winnow 1.0.3",
 ]
 
 [[package]]
@@ -4859,7 +4855,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
  "bitflags 2.13.1",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "futures-util",
  "http 1.5.0",
  "http-body 1.1.0",
@@ -4900,9 +4896,9 @@ version = "0.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -4927,13 +4923,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e2e2ce1e47ed2994fd43b04c8f618008d4cabdd5ee34027cf14f9d918edd9c8"
 dependencies = [
  "byteorder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "bytes 1.12.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "bytes 1.12.1",
  "data-encoding 2.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "http 1.5.0",
  "httparse",
  "log",
  "rand 0.8.7",
- "sha1 0.10.7 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "sha1 0.10.7",
  "thiserror 1.0.69 (registry+https://github.com/rust-lang/crates.io-index)",
  "utf-8",
 ]
@@ -5032,7 +5028,7 @@ dependencies = [
  "once_cell",
  "rustls 0.23.43",
  "rustls-pki-types",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
  "url",
  "webpki-roots 0.26.11",
@@ -5047,7 +5043,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
 ]
 
 [[package]]
@@ -5075,7 +5071,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5afb1a60e207dca502682537fefcfd9921e71d0b83e9576060f09abc6efab23"
 dependencies = [
  "indexmap 2.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
  "utoipa-gen",
 ]
@@ -5087,10 +5083,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20c24e8ab68ff9ee746aad22d39b5535601e6416d1b0feeabf78be986a5c4392"
 dependencies = [
  "proc-macro-error",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "regex",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -5103,7 +5099,7 @@ dependencies = [
  "mime_guess",
  "regex",
  "rust-embed",
- "serde 1.0.229 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "serde 1.0.229",
  "serde_json",
  "utoipa",
  "zip 0.6.6",
@@ -5202,7 +5198,7 @@ version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "167ce5e579f6bcf889c4f7175a8a5a585de84e8ff93976ce393efa5f2837aab1"
 dependencies = [
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "quote 1.0.47",
  "wasm-bindgen-macro-support",
 ]
 
@@ -5213,9 +5209,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3997c7839262f4ef12cf90b818d6340c18e80f263f1a94bf157d0ec4420380e"
 dependencies = [
  "bumpalo",
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
  "wasm-bindgen-shared",
 ]
 
@@ -5268,7 +5264,7 @@ version = "6.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ee928febd44d98f2f459a4a79bd4d928591333a494a10a868418ac1b39cf1f"
 dependencies = [
- "either 1.17.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "either 1.17.0",
  "home",
  "rustix 0.38.44",
  "winsafe",
@@ -5324,9 +5320,9 @@ version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -5335,9 +5331,9 @@ version = "0.59.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -5527,7 +5523,7 @@ version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
 ]
 
 [[package]]
@@ -5536,7 +5532,7 @@ version = "1.0.3"
 source = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 checksum = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1"
 dependencies = [
- "memchr 2.8.1 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.1",
 ]
 
 [[package]]
@@ -5583,7 +5579,7 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
 dependencies = [
- "libc 0.2.189 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "libc 0.2.189",
  "rustix 1.1.4",
 ]
 
@@ -5613,9 +5609,9 @@ version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de844c262c8848816172cef550288e7dc6c7b7814b4ee56b3e1553f275f1858e"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
  "synstructure 0.13.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -5634,9 +5630,9 @@ version = "0.8.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fe976fb70c78cd64cccfe3a6fc142244e8a77b70959b30faf9d0ac37ee228eb"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -5654,9 +5650,9 @@ version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11532158c46691caf0f2593ea8358fed6bbf68a0315e80aae9bd41fbade684a1"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
  "synstructure 0.13.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -5675,9 +5671,9 @@ version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -5708,9 +5704,9 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "625dc425cab0dca6dc3c3319506e6593dcb08a9f387ea3b284dbd52a92c40555"
 dependencies = [
- "proc-macro2 1.0.107 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "quote 1.0.47 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "syn 2.0.119 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -5737,8 +5733,8 @@ dependencies = [
  "displaydoc",
  "flate2",
  "indexmap 2.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "memchr 2.8.3 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
- "thiserror 2.0.19 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "memchr 2.8.3",
+ "thiserror 2.0.19",
  "zopfli",
 ]
 
@@ -5784,6 +5780,6 @@ version = "2.0.16+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
 dependencies = [
- "cc 1.4.0 (sparse+https://solana.solfunmeme.com/nora/cargo/index/)",
+ "cc 1.4.0",
  "pkg-config",
 ]
