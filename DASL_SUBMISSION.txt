@@ -1,0 +1,10 @@
+/mnt/data1/kant/pastebin/DASL_PLAN.md
+/mnt/data1/kant/pastebin/flake.nix
+/mnt/data1/kant/pastebin/.cargo/config.toml
+/mnt/data1/kant/pastebin/pastebin-system.nix
+/mnt/data1/kant/pastebin/deploy.sh
+/mnt/data1/kant/pastebin/Cargo.toml
+/mnt/data1/kant/pastebin/Cargo.lock
+/mnt/data1/kant/pastebin/NEXT_STEPS.md
+/mnt/data1/kant/pastebin/scripts/svg2anim-worker.sh
+/mnt/data1/kant/pastebin/src/gallery.rs

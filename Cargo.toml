@@ -21,6 +21,8 @@ ciborium = "0.2"
 serde_bytes = "0.11"
 dirs-next = "2"
 rust-unixfs = { version = "*", registry = "nora" }
+ipld-dagpb = { version = "0.2.2", registry = "nora" }
+quick-protobuf = { version = "0.8", registry = "nora" }
 ipld-core = "0.4.1"
 multibase = "0.9"
 actix-multipart = "0.7"
