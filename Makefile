@@ -16,7 +16,8 @@ help:
 	@echo ""
 	@echo "Build & Run:"
 	@echo "  make build       — Nix build (nix build .#kant-pastebin)"
-	@echo "  make run         — Run locally without nix"
+	@echo "  make dev         — Cargo build via nix develop"
+	@echo "  make run         — Run via nix develop"
 	@echo ""
 	@echo "Deploy:"
 	@echo "  make deploy      — Full deployment (nix build, commit, push, activate, restart)"
@@ -51,8 +52,11 @@ help:
 build:
 	nix build .#kant-pastebin --no-link
 
+dev:
+	nix develop -c cargo build --release
+
 run:
-	cargo run --release
+	nix develop -c cargo run --release
 
 # ── Deploy ──
 
