@@ -59,12 +59,10 @@ deploy() {
   fi
   log "Step 1: Nix build OK"
 
-  NORA_DEV_FLAKE="${PASTEBIN_DEV_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#devShells.default}"
-
-  log "Step 1b: Optional nora registry check (for local cargo build)"
+  log "Step 1b: Cargo build check via nix develop"
   if curl -sf --max-time 5 http://127.0.0.1:4000/health > /dev/null 2>&1; then
-    log "Nora registry reachable at localhost:4000. Running cargo build check via git+file devShell."
-    nix develop "$NORA_DEV_FLAKE" -c cargo build --release >> "$LOG_FILE" 2>&1 || log "WARNING: cargo build failed, but nix build succeeded — proceeding."
+    log "Nora registry reachable at localhost:4000. Running cargo build via nix develop."
+    nix develop . -c cargo build --release >> "$LOG_FILE" 2>&1 || log "WARNING: cargo build failed, but nix build succeeded — proceeding."
   else
     log "Nora registry not reachable at localhost:4000. Skipping cargo build check (nix build already verified compilation)."
   fi
