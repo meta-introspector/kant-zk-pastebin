@@ -61,9 +61,15 @@ fn ipfs_repo() -> Option<String> {
 /// Block path: `{repo}/blocks/{shard}/{key}.data`
 /// - `key` = base32upper(multihash)
 /// - `shard` = next-to-last 2 characters of `key` (go-ipfs sharding scheme)
-fn write_block(cid: &Cid, block: &[u8]) {
+fn write_block(cid: &impl std::fmt::Display, block: &[u8]) {
     let Some(repo) = ipfs_repo() else { return };
-    let mh_bytes = cid.hash().to_bytes();
+    // Parse the CID string with our local Cid type to extract multihash bytes
+    let cid_str = cid.to_string();
+    let local_cid: Cid = match cid_str.parse() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let mh_bytes = local_cid.hash().to_bytes();
     let key = data_encoding::BASE32_NOPAD.encode(&mh_bytes);
     let shard = if key.len() >= 3 {
         &key[key.len() - 3..key.len() - 1]
