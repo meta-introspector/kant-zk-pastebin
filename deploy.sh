@@ -9,7 +9,13 @@ PASTEBIN_UPSTREAM="$(git -C "$PASTEBIN_REPO" rev-parse --abbrev-ref --symbolic-f
 if [ -n "$PASTEBIN_UPSTREAM" ]; then
   PASTEBIN_BRANCH="${PASTEBIN_UPSTREAM#*/}"
 fi
-FLAKE="${PASTEBIN_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only}"
+
+# Use the all-services config from ~/projects/system-manager which includes
+# pastebin + nora + tiles + svg2anim + nginx — all services together.
+# This prevents activating pastebin-only from removing nora's systemd units.
+SYSTEM_MANAGER_DIR="${SYSTEM_MANAGER_DIR:-/home/mdupont/projects/system-manager}"
+FLAKE="${PASTEBIN_FLAKE:-git+file://${SYSTEM_MANAGER_DIR}#systemConfigs.all-services}"
+
 LOG_DIR="${PASTEBIN_DIR}/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LOG_FILE="${LOG_DIR}/deploy-${TIMESTAMP}.log"
@@ -19,6 +25,13 @@ log() {
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "[$ts] $msg" | tee -a "$LOG_FILE"
+}
+
+log_err() {
+  local msg="$1"
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "[$ts] ERROR: $msg" | tee -a "$LOG_FILE" >&2
 }
 
 run_sudo() {
@@ -34,10 +47,11 @@ usage() {
 Usage: $0 [deploy|restart|switch] [--sudo]
 
 Commands:
-  deploy    Nix build check, optional cargo build (if nora reachable), git commit+push, nix build, activate, restart, diagnose
-  restart   Restart the installed pastebin service, then diagnose
-  switch    Build + activate system-manager config with sudo (alias for switch.sh)
-  --sudo    Run deploy steps that need root via sudo (auto-detected if not root)
+  deploy    Nix build pastebin, cargo build check, git commit, build + activate
+            all-services system-manager config (pastebin + nora + tiles + svg + nginx),
+            restart services, diagnose
+  restart   Restart pastebin + svg2anim-worker services, then diagnose
+  switch    Build + activate all-services system-manager config with sudo
 
 Options:
   --sudo    Force sudo even if already root
@@ -51,12 +65,16 @@ deploy() {
   log "=== Deploy started ==="
   log "Branch: $PASTEBIN_BRANCH"
   log "Flake: $FLAKE"
+  log "Pastebin dir: $PASTEBIN_DIR"
+  log "Log file: $LOG_FILE"
 
   log "Step 1: Nix build check (verifies Rust compilation with vendored deps)"
-  if ! nix build .#kant-pastebin --no-link >> "$LOG_FILE" 2>&1; then
-    log "ERROR: Nix build failed. Cannot proceed without compileable codebase."
+  local build_output
+  build_output="$(nix build .#kant-pastebin --no-link 2>&1)" || {
+    log_err "Nix build failed. Cannot proceed without compileable codebase."
+    log "BUILD OUTPUT: $build_output"
     exit 1
-  fi
+  }
   log "Step 1: Nix build OK"
 
   log "Step 1b: Cargo build check via nix develop"
@@ -72,38 +90,37 @@ deploy() {
   git commit -m "deploy: auto-commit before nix build $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
   log "Local commit verified: $(git rev-parse HEAD)"
 
-  log "Step 4: Nix build system-manager config from git source: $FLAKE"
-  SM_STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
+  log "Step 3: Update pastebin-src in system-manager flake.lock"
+  cd "$SYSTEM_MANAGER_DIR"
+  nix flake update pastebin-src >> "$LOG_FILE" 2>&1 || log "WARNING: flake update failed, proceeding with existing lock"
+  log "Step 3: Flake lock updated"
+
+  log "Step 4: Nix build all-services system-manager config: $FLAKE"
+  cd "$PASTEBIN_DIR"
+  SM_STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json 2>>"$LOG_FILE" | jq -r '.[0].outputs.out')" || {
+    log_err "system-manager config build failed"
+    exit 1
+  }
   log "Built: $SM_STORE_PATH"
 
   if [ ! -x "$SM_STORE_PATH/bin/activate" ]; then
-    log "ERROR: activation script not found at $SM_STORE_PATH/bin/activate"
+    log_err "activation script not found at $SM_STORE_PATH/bin/activate"
     exit 1
   fi
 
-  log "Activating system-manager configuration"
-  run_sudo rm -f /etc/systemd/system/kant-pastebin.service \
-                    /etc/systemd/system/nginx.service \
-                    /etc/systemd/system/nginx-log-setup.service \
-                    /etc/systemd/system/ssl-selfsigned.service \
-                    /etc/systemd/system/certbot-renew.service \
-                    /etc/systemd/system/certbot-renew.timer
+  log "Step 5: Activating system-manager configuration (all services)"
   if ! run_sudo "$SM_STORE_PATH/bin/activate" >> "$LOG_FILE" 2>&1; then
-    log "ERROR: system-manager activation failed — service restart skipped"
+    log_err "system-manager activation failed — service restart skipped"
     exit 1
   fi
   log "Activation OK"
   run_sudo systemctl daemon-reload
 
-  log "Restarting pastebin application service"
-  if ! run_sudo systemctl restart kant-pastebin.service >> "$LOG_FILE" 2>&1; then
-    log "WARNING: kant-pastebin.service restart failed — unit may not be loaded yet. Check: systemctl status kant-pastebin.service"
-  fi
-
-  log "Restarting svg2anim-worker service"
-  if ! run_sudo systemctl restart svg2anim-worker.service >> "$LOG_FILE" 2>&1; then
-    log "WARNING: svg2anim-worker.service restart failed — unit may not be loaded yet. Check: systemctl status svg2anim-worker.service"
-  fi
+  log "Step 6: Restarting services"
+  run_sudo systemctl restart kant-pastebin.service >> "$LOG_FILE" 2>&1 || log "WARNING: kant-pastebin.service restart failed"
+  run_sudo systemctl restart svg2anim-worker.service >> "$LOG_FILE" 2>&1 || log "WARNING: svg2anim-worker.service restart failed"
+  run_sudo systemctl restart nora-dir.service >> "$LOG_FILE" 2>&1 || log "WARNING: nora-dir.service restart failed"
+  run_sudo systemctl restart nora.service >> "$LOG_FILE" 2>&1 || log "WARNING: nora.service restart failed"
 
   log "=== Deploy complete ==="
   "$PASTEBIN_DIR/diagnose.sh" | tee -a "$LOG_FILE"
@@ -111,19 +128,25 @@ deploy() {
 
 restart_pastebin() {
   run_sudo systemctl restart kant-pastebin.service
+  run_sudo systemctl restart svg2anim-worker.service
   "$PASTEBIN_DIR/diagnose.sh"
 }
 
 switch_system_manager() {
   cd "$PASTEBIN_DIR"
 
-  echo "=== Switch: build + activate pastebin system-manager config ==="
+  echo "=== Switch: build + activate all-services system-manager config ==="
   echo "Flake: $FLAKE"
 
   echo "Building pastebin package..."
   nix build .#kant-pastebin --no-link >> "$LOG_FILE" 2>&1 || true
+
+  echo "Updating pastebin-src in system-manager flake.lock..."
+  cd "$SYSTEM_MANAGER_DIR"
+  nix flake update pastebin-src >> "$LOG_FILE" 2>&1 || true
+
   echo "Building system-manager config..."
-  STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json | jq -r '.[0].outputs.out')"
+  STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json 2>>"$LOG_FILE" | jq -r '.[0].outputs.out')"
   echo "Built: $STORE_PATH"
 
   if [ ! -x "$STORE_PATH/bin/activate" ]; then
@@ -137,16 +160,20 @@ switch_system_manager() {
   echo "Reloading systemd..."
   run_sudo systemctl daemon-reload
 
-  echo "Restarting pastebin..."
+  echo "Restarting services..."
   run_sudo systemctl restart kant-pastebin.service 2>/dev/null || true
+  run_sudo systemctl restart nora.service 2>/dev/null || true
+  run_sudo systemctl restart svg2anim-worker.service 2>/dev/null || true
 
   echo ""
   echo "=== Verifying ==="
-  if systemctl is-active --quiet kant-pastebin.service 2>/dev/null; then
-    echo "  ✅ kant-pastebin.service"
-  else
-    echo "  ⚠️  kant-pastebin.service not active"
-  fi
+  for svc in kant-pastebin nora nginx svg2anim-worker; do
+    if systemctl is-active --quiet "$svc.service" 2>/dev/null; then
+      echo "  ✅ $svc.service"
+    else
+      echo "  ⚠️  $svc.service not active"
+    fi
+  done
 }
 
 case "${1:-deploy}" in
