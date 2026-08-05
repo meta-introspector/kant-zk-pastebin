@@ -1,19 +1,31 @@
 # Kant Pastebin — Deploy Runbook
 
-> Operational guide for deploying, diagnosing, and recovering the Kant Pastebin service.
+> Operational guide for deploying, diagnosing, and recovering the Kant Pastebin + Nora services.
 
 ## Architecture
 
 ```
 Internet → nginx (443) → /pastebin/ → kant-pastebin (:8090)
+                          /nora/      → nora (:4000)
                                        /pastebin/beta/ → kant-pastebin-beta (:8150)
 ```
 
 | Component | Port | Service | Binary |
 |-----------|------|---------|--------|
 | Main pastebin | 8090 | `kant-pastebin.service` | `nix store .../kant-pastebin-0.1.0/bin/kant-pastebin` |
+| Nora registry | 4000 | `nora.service` | `nix store .../nora/bin/nora serve` |
+| SVG2Anim worker | — | `svg2anim-worker.service` | Background worker |
 | Beta pastebin | 8150 | `kant-pastebin-beta.service` | (separate instance) |
 | Legacy beta | 8081 | `kant-pastebin-beta` (PID 1250) | Old process, no unit file |
+
+## CRITICAL: System-Manager Coexistence Rule
+
+**All coexisting services must be in the SAME system-manager config.**
+System-manager removes any unit files not in the currently activating config.
+Separate configs for coexisting services = mutual destruction.
+
+The `pastebin-system.nix` includes pastebin + nora + svg2anim together in
+`kant-pastebin-only` config. Never deploy separate configs for these services.
 
 ## Quick Commands
 
@@ -107,6 +119,13 @@ nix build .#kant-pastebin --no-link --print-out-paths
 - **Symptoms**: HTTP 502 on `/pastebin/`, nothing listening on :8090
 - **Fix**: Rebuilt the system-manager config, re-applied the unit file, restarted service
 - **Prevention**: Added `diagnose.sh` to `deploy.sh` for quick triage
+
+### 2026-08-05: Nora services removed by pastebin deploy
+
+- **Cause**: Pastebin `deploy.sh` activated `kant-pastebin-only` config which only defined pastebin + svg2anim. System-manager removed nora's unit files during activation.
+- **Symptoms**: `nora.service` inactive after pastebin deploys. Deploy log showed `Removing symlink: /etc/systemd/system/nora.service`.
+- **Fix**: Merged nora services into `pastebin-system.nix`. Both deploy scripts now use `kant-pastebin-only` config which includes all three services.
+- **Prevention**: Document coexistence rule in skills, memory, and runbook. Never deploy separate system-manager configs for coexisting services.
 
 ### 2026-06-20: Large Post Split/Share Hardening
 
