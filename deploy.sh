@@ -76,7 +76,7 @@ deploy() {
   log "Step 1: Nix build OK"
 
   log "Step 1b: Cargo build check via nix develop"
-  if curl -sf --max-time 5 http://127.0.0.1:4000/health > /dev/null 2>&1; then
+  if curl -sf http://127.0.0.1:4000/health > /dev/null 2>&1; then
     log "Nora registry reachable at localhost:4000. Running cargo build via nix develop."
     nix develop . -c cargo build --release >> "$LOG_FILE" 2>&1 || log "WARNING: cargo build failed, but nix build succeeded — proceeding."
   else
