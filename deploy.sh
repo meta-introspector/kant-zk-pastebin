@@ -10,11 +10,9 @@ if [ -n "$PASTEBIN_UPSTREAM" ]; then
   PASTEBIN_BRANCH="${PASTEBIN_UPSTREAM#*/}"
 fi
 
-# Use the all-services config from ~/projects/system-manager which includes
-# pastebin + nora + tiles + svg2anim + nginx — all services together.
-# This prevents activating pastebin-only from removing nora's systemd units.
-SYSTEM_MANAGER_DIR="${SYSTEM_MANAGER_DIR:-/home/mdupont/projects/system-manager}"
-FLAKE="${PASTEBIN_FLAKE:-git+file://${SYSTEM_MANAGER_DIR}#systemConfigs.all-services}"
+# Use the pastebin-only config which now includes nora services too.
+# This prevents activating pastebin from removing nora's systemd units.
+FLAKE="${PASTEBIN_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only}"
 
 LOG_DIR="${PASTEBIN_DIR}/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -90,13 +88,7 @@ deploy() {
   git commit -m "deploy: auto-commit before nix build $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
   log "Local commit verified: $(git rev-parse HEAD)"
 
-  log "Step 3: Update pastebin-src in system-manager flake.lock"
-  cd "$SYSTEM_MANAGER_DIR"
-  nix flake update pastebin-src >> "$LOG_FILE" 2>&1 || log "WARNING: flake update failed, proceeding with existing lock"
-  log "Step 3: Flake lock updated"
-
-  log "Step 4: Nix build all-services system-manager config: $FLAKE"
-  cd "$PASTEBIN_DIR"
+  log "Step 3: Nix build system-manager config: $FLAKE"
   SM_STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json 2>>"$LOG_FILE" | jq -r '.[0].outputs.out')" || {
     log_err "system-manager config build failed"
     exit 1
@@ -108,7 +100,7 @@ deploy() {
     exit 1
   fi
 
-  log "Step 5: Activating system-manager configuration (all services)"
+  log "Step 4: Activating system-manager configuration (pastebin + nora + svg2anim)"
   if ! run_sudo "$SM_STORE_PATH/bin/activate" >> "$LOG_FILE" 2>&1; then
     log_err "system-manager activation failed — service restart skipped"
     exit 1
@@ -116,7 +108,7 @@ deploy() {
   log "Activation OK"
   run_sudo systemctl daemon-reload
 
-  log "Step 6: Restarting services"
+  log "Step 5: Restarting services"
   run_sudo systemctl restart kant-pastebin.service >> "$LOG_FILE" 2>&1 || log "WARNING: kant-pastebin.service restart failed"
   run_sudo systemctl restart svg2anim-worker.service >> "$LOG_FILE" 2>&1 || log "WARNING: svg2anim-worker.service restart failed"
   run_sudo systemctl restart nora-dir.service >> "$LOG_FILE" 2>&1 || log "WARNING: nora-dir.service restart failed"

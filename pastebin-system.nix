@@ -1,8 +1,9 @@
-{ config, lib, pkgs, pastebin-src, ... }:
+{ config, lib, pkgs, pastebin-src, nora-src, ... }:
 
 let
   system = pkgs.stdenv.hostPlatform.system;
   kant-pastebin = pastebin-src.packages.${system}.kant-pastebin;
+  nora = nora-src.packages.${system}.default;
 in
 {
   config = {
@@ -16,6 +17,13 @@ in
       homeMode = "0755";
       extraGroups = [ "mdupont" ];
       shell = "${pkgs.bash}/bin/bash";
+    };
+
+    users.groups.nora.gid = 30038;
+    users.users.nora = {
+      uid = 944;
+      isSystemUser = true;
+      group = "nora";
     };
 
     systemd.services.kant-pastebin = {
@@ -93,10 +101,93 @@ in
       };
     };
 
+    # ─── Nora Data Dir ──────────────────────────────────────
+    systemd.services.nora-dir = {
+      enable = true;
+      description = "Create NORA data directories";
+      before = [ "nora.service" ];
+      wantedBy = [ "system-manager.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        mkdir -p /mnt/data1/nora/{storage,config}
+        install -m 644 ${pkgs.writeText "nora.toml" ''
+          [server]
+          host = "127.0.0.1"
+          port = 4000
+
+          [storage]
+          mode = "local"
+          path = "/mnt/data1/nora/storage"
+
+          [auth]
+          enabled = false
+          anonymous_read = true
+
+          [cargo]
+          enabled = true
+          proxy = "https://crates.io"
+          proxy_timeout = 30
+
+          [docker]
+          enabled = false
+
+          [npm]
+          enabled = false
+
+          [pypi]
+          enabled = false
+
+          [registries]
+          enable = ["cargo"]
+
+          [rate_limit]
+          enabled = false
+        ''} /mnt/data1/nora/config/nora.toml
+        chown -R nora:nora /mnt/data1/nora
+      '';
+    };
+
+    # ─── Nora Registry (:4000) ──────────────────────────────
+    systemd.services.nora = {
+      enable = true;
+      description = "NORA Artifact Registry — Cargo, Docker, npm, ...";
+      after = [ "network-online.target" "nora-dir.service" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "system-manager.target" ];
+      serviceConfig = {
+        Type = "simple";
+        User = "nora";
+        Group = "nora";
+        ExecStart = "${nora}/bin/nora serve";
+        Restart = "on-failure";
+        RestartSec = "5";
+        WorkingDirectory = "/mnt/data1/nora";
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectControlGroups = true;
+      };
+      environment = {
+        RUST_LOG = "info";
+        NORA_HOST = "127.0.0.1";
+        NORA_PORT = "4000";
+        NORA_STORAGE_PATH = "/mnt/data1/nora/storage";
+        NORA_CONFIG_PATH = "/mnt/data1/nora/config/nora.toml";
+        NORA_PUBLIC_URL = "https://solana.solfunmeme.com/nora/";
+        NORA_RATE_LIMIT_ENABLED = "false";
+      };
+    };
+
     systemd.tmpfiles.rules = [
       "d /srv/kant/svg-spool 0755 kant kant -"
       "d /srv/kant/svg-spool/svg2anim-jobs 0755 kant kant -"
       "d /srv/kant/svg-spool/svg2anim-results 0755 kant kant -"
+      "d /var/spool/uucp/pastebin 0755 kant kant -"
     ];
   };
 }
