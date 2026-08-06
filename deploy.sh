@@ -46,7 +46,7 @@ Usage: $0 [deploy|restart|switch] [--sudo]
 
 Commands:
   deploy    Nix build pastebin, cargo build check, git commit, build + activate
-            all-services system-manager config (pastebin + nora + tiles + svg + nginx),
+            kant-pastebin-only system-manager config (pastebin + nora + svg2anim),
             restart services, diagnose
   restart   Restart pastebin + svg2anim-worker services, then diagnose
   switch    Build + activate all-services system-manager config with sudo
@@ -77,8 +77,8 @@ deploy() {
 
   log "Step 1b: Cargo build check via nix develop"
   if curl -sf http://127.0.0.1:4000/health > /dev/null 2>&1; then
-    log "Nora registry reachable at localhost:4000. Running cargo build via nix develop."
-    nix develop . -c cargo build --release >> "$LOG_FILE" 2>&1 || log "WARNING: cargo build failed, but nix build succeeded — proceeding."
+    log "Nora registry reachable at localhost:4000. Running cargo build via nix develop (timeout 120s)."
+    timeout 120 nix develop . -c cargo build --release >> "$LOG_FILE" 2>&1 || log "WARNING: cargo build failed or timed out, but nix build succeeded — proceeding."
   else
     log "Nora registry not reachable at localhost:4000. Skipping cargo build check (nix build already verified compilation)."
   fi

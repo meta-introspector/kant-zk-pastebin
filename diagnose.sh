@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-PASTEBIN_DIR="${PASTEBIN_DIR:-/home/mdupont/pastebin}"
+PASTEBIN_DIR="${PASTEBIN_DIR:-/mnt/data1/kant/pastebin}"
 DOMAIN="${PASTEBIN_DOMAIN:-solana.solfunmeme.com}"
 BIND_PORT="${PASTEBIN_BIND_PORT:-8090}"
 BETA_PORT="${PASTEBIN_BETA_PORT:-8081}"

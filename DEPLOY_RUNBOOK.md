@@ -84,8 +84,42 @@ The diagnose command checks 8 areas:
 | Service not found | Unit file deleted | Rebuild and apply with `./deploy.sh` |
 | `pastebin-wasm/static` errors | WASM dir missing | Non-fatal, cosmetic only |
 | Port 8090 empty, 8081 active | Old beta running, main dead | Deploy main service |
+| `kant-pastebin.service` "command vanished" | Nix store binary GC'd after deploy; unit file points to old store path | Rebuild and re-apply through `./deploy.sh`; ensure system-manager config includes the pastebin service |
+| Nora registry unreachable (port 4000) | Nora service not running or crashed | Check `systemctl status nora.service`; restart with `sudo systemctl restart nora.service` |
 
 ## Recovery from Garbage Collection
+
+If the nix store binary was GC'd, rebuild and re-apply through the repo deploy script:
+
+```bash
+./deploy.sh
+```
+
+For a manual binary check:
+
+```bash
+nix build .#kant-pastebin --no-link --print-out-paths
+```
+
+## Deploy Script (`deploy.sh`) Notes
+
+### Timeouts Removed
+The `--max-time 5` timeout on the Nora registry health check curl was removed. The health check now waits indefinitely, which is necessary because the Nora registry may take time to respond.
+
+### Logging Enhancements
+The deploy script includes enhanced logging:
+- `log_err()` function for error-level messages
+- Binary path verification before service restart
+- Systemd unit file contents logged after activation
+- Service status checks after each restart
+- Full build output captured in log files
+
+### Common Failure Patterns
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `kant-pastebin.service` "command vanished" | Nix store binary GC'd after deploy; unit file points to old store path | Rebuild and re-apply through `./deploy.sh`; ensure system-manager config includes the pastebin service |
+| Nora registry unreachable (port 4000) | Nora service not running or crashed | Check `systemctl status nora.service`; restart with `sudo systemctl restart nora.service` |
 
 If the nix store binary was GC'd, rebuild and re-apply through the repo deploy script:
 
@@ -142,3 +176,10 @@ nix build .#kant-pastebin --no-link --print-out-paths
 - **Deployment note**: Deploy from the repo checkout with `./deploy.sh` using the current local branch (`git+file://${PASTEBIN_DIR}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only`). Do not deploy from `/home/mdupont/pastebin/target/release`.
 - **Operational note**: The allm tool updates titles/descriptions by default and preserves URLs. Use `--rename-files` only when physical filenames and paste IDs should change too.
 - **Prevention**: Keep `make rename-allm-pastes` as preview and `make rename-allm-pastes-apply` as apply. Confirm index validity after any metadata migration.
+
+### 2026-08-05: Deploy script timeouts and missing logging
+
+- **Cause**: `deploy.sh` had `--max-time 5` on the Nora registry health check curl, causing it to fail when the registry was slow. The script also lacked detailed logging for diagnosing build failures and service restart issues.
+- **Symptoms**: Health check fails silently; deploy log doesn't show binary path or unit file details; hard to diagnose "command vanished" errors.
+- **Fix**: Removed `--max-time 5` from curl health check. Added `log_err()`, `log_cmd()` helpers, binary path verification, unit file contents logging, and service status checks after restart.
+- **Prevention**: All deploy steps now log their output. Binary path and unit file are verified before service restart.
