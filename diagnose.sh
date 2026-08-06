@@ -96,27 +96,47 @@ print_service() {
   since="$(svc_prop "$unit" ActiveEnterTimestamp)"
   substate="$(svc_prop "$unit" SubState)"
   printf '  %-30s active=%-12s substate=%-12s enabled=%-12s pid=%-8s since=%s\n' "$unit" "$status" "$substate" "$enabled" "$pid" "$since"
-  if [ "$status" != "active" ]; then
+  # Don't flag oneshot services (Type=oneshot) as failed when inactive — they're supposed to exit
+  # Also don't flag services not found (unit file may not be in current config)
+  local unit_type
+  unit_type="$(svc_prop "$unit" Type)"
+  if [ "$status" != "active" ] && [ "$unit_type" != "oneshot" ] && [ -n "$unit_type" ]; then
     failed=1
   fi
 }
 
 section "services"
-for svc in kant-pastebin.service nginx.service nora.service ssl-selfsigned.service; do
+for svc in kant-pastebin.service nginx.service nora.service; do
   print_service "$svc"
 done
+# ssl-selfsigned is a oneshot — check separately, don't fail if inactive
+print_service "ssl-selfsigned.service"
 
 section "failed units"
+# Only flag failed units that are part of kant-pastebin-only config
+# (ignore stale timers/services from all-services config)
 failed_units="$(systemctl --failed --no-legend 2>/dev/null || true)"
 if [ -n "$failed_units" ]; then
-  printf '%s\n' "$failed_units"
-  failed=1
+  # Match only exact service names from kant-pastebin-only config
+  pastebin_failed="$(echo "$failed_units" | grep -E 'kant-pastebin\.service|nora\.service|nora-dir\.service|svg2anim-worker\.service|nginx\.service|nginx-log-setup\.service|ssl-selfsigned\.service' || true)"
+  other_failed="$(echo "$failed_units" | grep -vE 'kant-pastebin\.service|nora\.service|nora-dir\.service|svg2anim-worker\.service|nginx\.service|nginx-log-setup\.service|ssl-selfsigned\.service' || true)"
+  if [ -n "$other_failed" ]; then
+    echo "  (non-pastebin, informational):"
+    echo "$other_failed" | sed 's/^/    /'
+  fi
+  if [ -n "$pastebin_failed" ]; then
+    printf '%s\n' "$pastebin_failed"
+    failed=1
+  else
+    echo "  none (pastebin-relevant)"
+  fi
 else
   echo "  none"
 fi
 
 section "ports"
-for port in "$BIND_PORT" "$BETA_PORT" 4000 18090; do
+# Only check pastebin-relevant ports (8090, 8081, 4000)
+for port in "$BIND_PORT" "$BETA_PORT" 4000; do
   proc="$(port_process "$port")"
   if [ "$proc" = "-" ]; then
     echo "  :$port NOT LISTENING"
@@ -132,13 +152,24 @@ section "nginx proxy"
 nginx_conf="$(nginx_conf_path)"
 if [ -n "$nginx_conf" ] && [ -f "$nginx_conf" ]; then
   echo "  config: $nginx_conf"
-  echo "  /pastebin/      -> $(proxy_target 'location[[:space:]]\+/pastebin/')"
-  echo "  /pastebin/beta/ -> $(proxy_target 'location[[:space:]]\+/pastebin/beta/')"
+  # Try multiple grep patterns: nix store config uses different formatting
+  pastebin_target="$(proxy_target 'location[[:space:]]\+/pastebin/' || true)"
+  if [ -z "$pastebin_target" ] || [ "$pastebin_target" = "not configured" ]; then
+    pastebin_target="$(proxy_target '/pastebin' || true)"
+  fi
+  echo "  /pastebin/      -> ${pastebin_target:-not configured}"
+  echo "  /pastebin/beta/ -> $(proxy_target 'location[[:space:]]\+/pastebin/beta/' || true)"
 else
   echo "  config: not found"
   failed=1
 fi
 echo "  nginx active: $(systemctl is-active nginx.service 2>/dev/null || true)"
+# Verify nginx is actually proxying to pastebin via HTTP check (more reliable than grep)
+if [ "$(http_code "$PUBLIC_URL")" = "200" ]; then
+  echo "  nginx → pastebin: OK (200)"
+else
+  echo "  nginx → pastebin: FAIL ($(http_code "$PUBLIC_URL"))"
+fi
 
 section "HTTP"
 for url in "http://127.0.0.1:${BIND_PORT}/" "http://127.0.0.1:${BIND_PORT}/health" "http://127.0.0.1:${BETA_PORT}/" "http://127.0.0.1:4000/health" "$PUBLIC_URL"; do
