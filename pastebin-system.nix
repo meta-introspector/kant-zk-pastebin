@@ -97,7 +97,7 @@ in
         Type = "simple"; User = "kant"; Group = "kant";
         SupplementaryGroups = [ "mdupont" ];
         WorkingDirectory = "/mnt/data1/kant/pastebin";
-        ExecStart = "${kant-pastebin}/bin/bash /mnt/data1/kant/pastebin/scripts/svg2anim-worker.sh";
+        ExecStart = "${pkgs.bash}/bin/bash /mnt/data1/kant/pastebin/scripts/svg2anim-worker.sh";
         Restart = "always"; RestartSec = "10";
         TimeoutStartSec = 0; TimeoutStopSec = 0; TimeoutAbortSec = 0; TimeoutSec = 0;
         StandardOutput = "journal"; StandardError = "journal";
@@ -393,7 +393,7 @@ in
     };
 
     systemd.services.qa-team-tile = {
-      enable = true;
+      enable = false;  # Binary GC'd — needs rebuild from ~/dasl/dasl-testing/harnesses/qa-team-tile/
       description = "QA Team Tile — cross-impl QA dashboard";
       after = [ "network.target" ];
       wantedBy = [ "system-manager.target" ];
@@ -409,7 +409,7 @@ in
     };
 
     systemd.services.fuzzing-team-tile = {
-      enable = true;
+      enable = false;  # Binary GC'd — needs rebuild from ~/dasl/dasl-testing/harnesses/fuzz-team-tile/
       description = "Fuzzing Team Tile — fuzz coverage dashboard";
       after = [ "network.target" ];
       wantedBy = [ "system-manager.target" ];
@@ -456,7 +456,7 @@ in
     };
 
     systemd.services.zombie-cft-tile = {
-      enable = true;
+      enable = false;  # Binary not built — needs rebuild from ~/zombie-cft-tile/
       description = "Zombie CFT Tile — Monster containment chamber";
       after = [ "network.target" ];
       wantedBy = [ "system-manager.target" ];
@@ -509,10 +509,11 @@ in
       wantedBy = [ "system-manager.target" ];
       serviceConfig = {
         Type = "oneshot"; RemainAfterExit = true;
-        User = "www-data"; Group = "www-data";
+        User = "root"; Group = "root";
       };
       script = ''
         mkdir -p /var/log/nginx/error-docs
+        chown www-data:www-data /var/log/nginx/error-docs
         touch /var/log/nginx/research.access.log /var/log/nginx/research.error.log
         chown www-data:www-data /var/log/nginx/research.access.log /var/log/nginx/research.error.log
         chmod 664 /var/log/nginx/research.access.log /var/log/nginx/research.error.log
