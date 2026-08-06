@@ -442,7 +442,7 @@ in
     };
 
     systemd.services.dasl-plan-tile = {
-      enable = true;
+      enable = false;  # Script not found — needs dasl-plan-tile-server.py
       description = "DASL Plan Tile — GOAP planner dashboard";
       after = [ "network.target" ];
       wantedBy = [ "system-manager.target" ];
