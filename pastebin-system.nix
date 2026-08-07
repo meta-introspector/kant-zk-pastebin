@@ -9,12 +9,13 @@ let
   nora = nora-src.packages.${system}.default;
   daslTilesRust = dasl-tiles-rust.packages.${system}.tile-server;
   DASL_TESTING = "${HOME}/dasl/dasl-testing";
-  # Nix store binaries — built from flakes in ~/dasl/dasl-testing/harnesses/
-  SERDE   = "/nix/store/r1x7czr8yxc5c3lbq5qnibzm18sjmc65-dasl-service-serde-ipld-dagcbor-0.1.0";
-  N0      = "/nix/store/12f3zpbyk6sm2ywzd1axa33fhjmwa0ds-dasl-service-n0-dasl-0.1.0";
-  LIBIPLD = "/nix/store/s1wdbhksxppmchciy3j4xc48sw4sfbja-dasl-service-libipld-0.1.0";
-  QA      = "/nix/store/j0h7lv10pixirs2xqzva2x9yxbxg5czc-dasl-qa-team-tile-0.1.0";
-  FUZZ    = "/nix/store/psgg003ykzx4gi82njbw001w7bnq9ff5-dasl-fuzz-team-tile-0.1.0";
+  # Harness binaries — built from ~/dasl/dasl-testing/harnesses/ (cargo build --release)
+  SERDE   = "${DASL_TESTING}/harnesses/serde_ipld_dagcbor/target/release";
+  N0      = "${DASL_TESTING}/harnesses/n0_dasl/target/release";
+  LIBIPLD = "${DASL_TESTING}/harnesses/libipld/target/release";
+  QA      = "${DASL_TESTING}/harnesses/qa-team-tile/target/release";
+  FUZZ    = "${DASL_TESTING}/harnesses/fuzz-team-tile/target/release";
+  ZOMBIE  = "/mnt/data1/nix/vendor/rust/cargo2nix/submodules/rust-build/compiler/zombie_driver2/target/debug";
   LEAN4_CBOR = "${HOME}/dasl/ipld-car-ipc-shmem-linux/target/release/lean4-cbor-bridge";
   LEAN4_REPL = "${HOME}/dasl/ipld-car-ipc-shmem-linux/target/release/lean4-repl";
   STATICSPLIT_JSON = "/nix/store/4iglmyjm8ykkz8cya16k2xmzx7kb04c3-staticsplitjson/bin/staticsplitjson";
@@ -351,7 +352,7 @@ in
       wantedBy = [ "system-manager.target" ];
       serviceConfig = {
         Type = "simple"; User = "dasl"; Group = "dasl";
-        ExecStart = "${SERDE}/bin/service 18007";
+        ExecStart = "${SERDE}/service 18007";
         Restart = "always"; RestartSec = "5";
         StandardOutput = "journal"; StandardError = "journal";
         NoNewPrivileges = true; PrivateTmp = true; PrivateDevices = true;
@@ -367,7 +368,7 @@ in
       wantedBy = [ "system-manager.target" ];
       serviceConfig = {
         Type = "simple"; User = "dasl"; Group = "dasl";
-        ExecStart = "${N0}/bin/service 18009";
+        ExecStart = "${N0}/service 18009";
         Restart = "always"; RestartSec = "5";
         StandardOutput = "journal"; StandardError = "journal";
         NoNewPrivileges = true; PrivateTmp = true; PrivateDevices = true;
@@ -383,7 +384,7 @@ in
       wantedBy = [ "system-manager.target" ];
       serviceConfig = {
         Type = "simple"; User = "dasl"; Group = "dasl";
-        ExecStart = "${LIBIPLD}/bin/service 18011";
+        ExecStart = "${LIBIPLD}/service 18011";
         Restart = "always"; RestartSec = "5";
         StandardOutput = "journal"; StandardError = "journal";
         NoNewPrivileges = true; PrivateTmp = true; PrivateDevices = true;
@@ -393,13 +394,13 @@ in
     };
 
     systemd.services.qa-team-tile = {
-      enable = false;  # Binary GC'd — needs rebuild from ~/dasl/dasl-testing/harnesses/qa-team-tile/
+      enable = true;
       description = "QA Team Tile — cross-impl QA dashboard";
       after = [ "network.target" ];
       wantedBy = [ "system-manager.target" ];
       serviceConfig = {
         Type = "simple"; User = "dasl"; Group = "dasl";
-        ExecStart = "${QA}/bin/service 18142";
+        ExecStart = "${QA}/qa-team-tile 18142";
         Restart = "always"; RestartSec = "5";
         StandardOutput = "journal"; StandardError = "journal";
         NoNewPrivileges = true; PrivateTmp = true; PrivateDevices = true;
@@ -409,13 +410,13 @@ in
     };
 
     systemd.services.fuzzing-team-tile = {
-      enable = false;  # Binary GC'd — needs rebuild from ~/dasl/dasl-testing/harnesses/fuzz-team-tile/
+      enable = true;
       description = "Fuzzing Team Tile — fuzz coverage dashboard";
       after = [ "network.target" ];
       wantedBy = [ "system-manager.target" ];
       serviceConfig = {
         Type = "simple"; User = "dasl"; Group = "dasl";
-        ExecStart = "${FUZZ}/bin/service 18143";
+        ExecStart = "${FUZZ}/fuzz-team-tile 18143";
         Restart = "always"; RestartSec = "5";
         StandardOutput = "journal"; StandardError = "journal";
         NoNewPrivileges = true; PrivateTmp = true; PrivateDevices = true;
@@ -442,13 +443,28 @@ in
     };
 
     systemd.services.dasl-plan-tile = {
-      enable = false;  # Script not found — needs dasl-plan-tile-server.py
+      enable = true;
       description = "DASL Plan Tile — GOAP planner dashboard";
       after = [ "network.target" ];
       wantedBy = [ "system-manager.target" ];
       serviceConfig = {
         Type = "simple"; User = "mdupont"; Group = "mdupont";
-        ExecStart = "${pkgs.python3}/bin/python3 ${HOME}/dasl-planning/scripts/dasl-plan-tile-server.py";
+        ExecStart = "${pkgs.python3}/bin/python3 ${HOME}/dasl-planning/tile-servers/goap-planner-tile-server.py --port 8888";
+        Restart = "always"; RestartSec = "5";
+        NoNewPrivileges = true; PrivateTmp = true;
+      };
+      environment = { HOME = HOME; };
+    };
+
+    # ─── GOAP Planner Tile (:8842) ─────────────────────────
+    systemd.services.goap-planner-tile = {
+      enable = true;
+      description = "GOAP Planner Tile — A* plan + sheaf scanner dashboard";
+      after = [ "network.target" ];
+      wantedBy = [ "system-manager.target" ];
+      serviceConfig = {
+        Type = "simple"; User = "mdupont"; Group = "mdupont";
+        ExecStart = "${pkgs.python3}/bin/python3 ${HOME}/dasl-planning/tile-servers/goap-planner-tile-server.py --port 8842";
         Restart = "always"; RestartSec = "5";
         NoNewPrivileges = true; PrivateTmp = true;
       };
@@ -456,13 +472,13 @@ in
     };
 
     systemd.services.zombie-cft-tile = {
-      enable = false;  # Binary not built — needs rebuild from ~/zombie-cft-tile/
+      enable = true;
       description = "Zombie CFT Tile — Monster containment chamber";
       after = [ "network.target" ];
       wantedBy = [ "system-manager.target" ];
       serviceConfig = {
         Type = "simple"; User = "zombie"; Group = "zombie";
-        ExecStart = "/mnt/data1/time-2026/06-june/25/zombie-cft-tile/target/release/zombie-cft-tile -d solana.solfunmeme.com -p 8095";
+        ExecStart = "${ZOMBIE}/zombie-cft-tile --port 8095";
         Restart = "always"; RestartSec = "5";
         StandardOutput = "journal"; StandardError = "journal";
         NoNewPrivileges = true; PrivateTmp = true;
