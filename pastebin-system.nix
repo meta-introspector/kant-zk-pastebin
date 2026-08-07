@@ -1,4 +1,4 @@
-{ config, lib, pkgs, pastebin-src, nora-src, dasl-tiles-rust, ... }:
+{ config, lib, pkgs, pastebin-src, nora-src, ... }:
 
 let
   system = pkgs.stdenv.hostPlatform.system;
@@ -7,7 +7,7 @@ let
   domain = "solana.solfunmeme.com";
   kant-pastebin = pastebin-src.packages.${system}.kant-pastebin;
   nora = nora-src.packages.${system}.default;
-  daslTilesRust = dasl-tiles-rust.packages.${system}.tile-server;
+  daslTilesRust = "/nix/store/syy7kivh3sfprsbmsqxyxhad1a1j1rx8-dasl-tiles-rust-0.1.0";
   DASL_TESTING = "${HOME}/dasl/dasl-testing";
   # Harness binaries — built from ~/dasl/dasl-testing/harnesses/ (cargo build --release)
   SERDE   = "${DASL_TESTING}/harnesses/serde_ipld_dagcbor/target/release";
