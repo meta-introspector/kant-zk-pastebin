@@ -39,7 +39,7 @@ process_svg() {
         local gif_fn="${ts}_${stem}.gif"
         local gif_path="${RESULTS_DIR}/${gif_fn}"
         log "Anim SVG: $src -> $gif_fn"
-        if ! "$SVG2TILE_CLI" --input "$src" --output "$gif_path" --fps "$FPS" --width "$MAX_WIDTH" --height "$MAX_HEIGHT" 2>&1; then
+        if ! "$SVG2TILE_CLI" "$src" --output "$gif_path" --fps "$FPS" --width "$MAX_WIDTH" --height "$MAX_HEIGHT" 2>&1; then
             log "svg2tile-cli failed for $src"
             return 1
         fi
@@ -48,7 +48,7 @@ process_svg() {
         local png_fn="${ts}_${stem}.png"
         local png_path="${RESULTS_DIR}/${png_fn}"
         log "Static SVG: $src -> $png_fn"
-        if ! "$SVG2TILE_CLI" --input "$src" --output "$png_path" --width "$MAX_WIDTH" --height "$MAX_HEIGHT" 2>&1; then
+        if ! "$SVG2TILE_CLI" "$src" --output "$png_path" --width "$MAX_WIDTH" --height "$MAX_HEIGHT" 2>&1; then
             log "svg2tile-cli failed for $src"
             return 1
         fi

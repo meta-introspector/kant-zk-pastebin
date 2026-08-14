@@ -30,7 +30,7 @@
 set -euo pipefail
 
 ARISTO_LIST="${1:-${ARISTO_LIST:-$HOME/aristotle-results/all_svg.txt}}"
-SPOOL="${2:-${JOBS_DIR:-/srv/kant/svg2anim-jobs}}"
+SPOOL="${2:-${JOBS_DIR:-/var/spool/uucp/pastebin/svg2anim-jobs}}"
 DEDUP="${QUEUE_DEDUP:-1}"
 
 mkdir -p "$SPOOL"
