@@ -214,19 +214,32 @@ fn extract_tar_from_reader<R: Read>(reader: R, filename: &str) -> Result<Archive
 
         total_size += size;
 
-        // Read content for text files (smallish files only)
+        // Read content for all files (smallish files only) — no binary
+        // filter: preserve every file's content (lossy for binary).
+        let mut raw = Vec::new();
         let content = if size < 1024 * 1024 {
-            let mut buf = Vec::new();
-            entry.read_to_end(&mut buf).ok();
-            let is_text = guess_is_text(&buf);
-            if is_text {
-                Some(String::from_utf8_lossy(&buf).to_string())
-            } else {
-                None
-            }
+            entry.read_to_end(&mut raw).ok();
+            Some(String::from_utf8_lossy(&raw).to_string())
         } else {
             None
         };
+
+        // Recursive unpack: nested archives (.tar.gz/.tgz/.zip inside)
+        let lower_path = path.to_lowercase();
+        let is_nested = lower_path.ends_with(".tar.gz")
+            || lower_path.ends_with(".tgz")
+            || lower_path.ends_with(".tar.bz2")
+            || lower_path.ends_with(".tar.xz")
+            || lower_path.ends_with(".zip");
+        if is_nested && !raw.is_empty() {
+            if let Ok(nested) = extract(&raw, &path) {
+                for mut ne in nested.entries {
+                    ne.path = format!("{}/{}", path, ne.path);
+                    entries.push(ne);
+                }
+                continue;
+            }
+        }
 
         entries.push(ArchiveEntry {
             path,
@@ -298,12 +311,7 @@ fn extract_zip(data: &[u8], filename: &str) -> Result<ArchiveResult, String> {
         let content = if size < 1024 * 1024 {
             let mut buf = Vec::new();
             file.read_to_end(&mut buf).ok();
-            let is_text = guess_is_text(&buf);
-            if is_text {
-                Some(String::from_utf8_lossy(&buf).to_string())
-            } else {
-                None
-            }
+            Some(String::from_utf8_lossy(&buf).to_string())
         } else {
             None
         };
