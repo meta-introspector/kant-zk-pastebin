@@ -29,6 +29,10 @@ struct Args {
     /// Output height in pixels
     #[arg(short = 'H', long)]
     height: Option<u32>,
+
+    /// Maximum frames for animated GIFs (cap long/looping SVGs)
+    #[arg(long, default_value_t = 30)]
+    max_frames: u32,
 }
 
 fn main() {
@@ -82,7 +86,16 @@ fn render_animated(_args: &Args, svg_data: &[u8], output: &PathBuf) {
     let (w, h) = anim::resolve_size(&doc, _args.width, _args.height);
     let anims = anim::extract_animations(&doc);
     let max_dur = anims.iter().map(|a| a.dur).fold(0.0, f64::max);
-    let total_frames = (max_dur * _args.fps as f64).ceil().max(1.0) as u32;
+    let mut total_frames = (max_dur * _args.fps as f64).ceil().max(1.0) as u32;
+    // Cap long/looping animations (e.g. dur="64s" repeatCount="indefinite")
+    // so a single tile conversion can't burn CPU for minutes.
+    if total_frames > _args.max_frames {
+        eprintln!(
+            "Capping {} frames -> {} (max_frames={}, dur={:.1}s)",
+            total_frames, _args.max_frames, _args.max_frames, max_dur
+        );
+        total_frames = _args.max_frames;
+    }
     let delay_ms = (1000.0 / _args.fps as f64) as u16;
 
     eprintln!(

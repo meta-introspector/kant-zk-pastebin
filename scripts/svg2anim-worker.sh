@@ -39,7 +39,7 @@ process_svg() {
         local gif_fn="${ts}_${stem}.gif"
         local gif_path="${RESULTS_DIR}/${gif_fn}"
         log "Anim SVG: $src -> $gif_fn"
-        if ! "$SVG2TILE_CLI" "$src" --output "$gif_path" --fps "$FPS" --width "$MAX_WIDTH" --height "$MAX_HEIGHT" 2>&1; then
+        if ! timeout "${SVG2ANIM_TIMEOUT:-60}" "$SVG2TILE_CLI" "$src" --output "$gif_path" --fps "$FPS" --width "$MAX_WIDTH" --height "$MAX_HEIGHT" --max-frames 30 2>&1; then
             log "svg2tile-cli failed for $src"
             return 1
         fi
