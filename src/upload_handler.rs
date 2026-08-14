@@ -185,7 +185,14 @@ pub async fn upload_file(req: HttpRequest, body: web::Bytes) -> Result<HttpRespo
     };
 
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
-    fs::write(&cid_file, &id).ok();
+    // Content-addressed dedup: the same content hashes to the same CID.
+    // Keep the FIRST id for a given CID — overwriting it would make the
+    // second post resolve to the wrong id (the duplicate-post glitch).
+    if fs::metadata(&cid_file).is_err() {
+        fs::write(&cid_file, &id).ok();
+    } else {
+        info!("[upload] duplicate content CID {local_cid} — keeping first id, not overwriting");
+    }
 
     write_index_entry(
         &uucp_dir,
