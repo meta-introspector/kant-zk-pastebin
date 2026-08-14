@@ -340,7 +340,7 @@ form.onsubmit = async (e) => {{
       fd.append('file', fileInput.files[0]);
       fd.append('title', document.getElementById('title').value || '');
       fd.append('description', document.getElementById('description').value || '');
-      const isArchive = fn.endsWith('.tar.gz') || fn.endsWith('.tar.bz2') || fn.endsWith('.tar.xz') || fn.endsWith('.zip');
+      const isArchive = fn.endsWith('.tar.gz') || fn.endsWith('.tgz') || fn.endsWith('.tar.bz2') || fn.endsWith('.tar.xz') || fn.endsWith('.zip') || fn.endsWith('.gz') || fn.endsWith('.bz2') || fn.endsWith('.xz');
       res = await fetch(basePath + (isArchive ? '/upload-archive' : '/upload'), {{ method: 'POST', body: fd }});
     }} else {{
       const data = {{
