@@ -154,19 +154,43 @@ function readBody(req, limit) {
   });
 }
 
-function serveStatic(cfg, res, urlPath) {
+// Serving `web/` as the document root leaves the Lean-extracted kernel, which
+// lives in the sibling `dist/`, outside the tree: `/dist/kant_kernel.wasm` used
+// to 404, and the page reported that as a kernel validation failure. Requests
+// under /dist/ therefore also look in the directory next to the static root.
+function staticCandidates(cfg, rel) {
   const root = path.resolve(cfg.staticDir);
+  const safe = path.normalize(rel).replace(/^(\.\.[/\\])+/, "");
+  const inRoot = path.join(root, safe);
+  const files = inRoot.startsWith(root) ? [inRoot] : [];
+  const distRoot = path.resolve(root, "..", "dist");
+  const under = /^[/\\]dist[/\\](.+)$/.exec(safe);
+  if (under) {
+    const sibling = path.join(distRoot, under[1]);
+    if (sibling.startsWith(distRoot)) files.push(sibling);
+  }
+  return files;
+}
+
+function serveStatic(cfg, res, urlPath) {
   const rel = urlPath === "/" ? "/index.html" : urlPath;
-  const file = path.join(root, path.normalize(rel).replace(/^(\.\.[/\\])+/, ""));
-  if (!file.startsWith(root)) { res.writeHead(403); res.end(); return; }
-  fs.readFile(file, (err, data) => {
-    if (err) { res.writeHead(404, { "content-type": "text/plain" }); res.end("not found"); return; }
-    res.writeHead(200, {
-      "content-type": MIME[path.extname(file)] ?? "application/octet-stream",
-      "cache-control": "no-cache",
+  const files = staticCandidates(cfg, rel);
+  const attempt = (i) => {
+    if (i >= files.length) {
+      res.writeHead(404, { "content-type": "text/plain" });
+      res.end("not found");
+      return;
+    }
+    fs.readFile(files[i], (err, data) => {
+      if (err) { attempt(i + 1); return; }
+      res.writeHead(200, {
+        "content-type": MIME[path.extname(files[i])] ?? "application/octet-stream",
+        "cache-control": "no-cache",
+      });
+      res.end(data);
     });
-    res.end(data);
-  });
+  };
+  attempt(0);
 }
 
 export function createServer(cfg = CONFIG, rooms = new Rooms(cfg)) {

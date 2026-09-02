@@ -1,3 +1,86 @@
+# Summary of changes for run c5a69e86-5748-4a3b-ae95-7e5a2b0cc0f9
+## What you asked for
+
+> the qr code did not show `https://kant.cicada71.net/#6b7a…` — only `6b7a696e76697465:…`. Can you make a qr code with the invite link and a custom icon and text for the qrcode?
+
+Done, and the three follow-on problems from the same session (the camera that could not be turned off, the join link that did not join across devices, and copying a paste giving encoded text) are addressed too.
+
+## The QR code now carries the link, with your icon and your words
+
+`RequestProject/Kant/InviteCard.lean` — the invite code's payload is the whole page URL, the configured origin + `#` + the invitation, and around it a card with a picture drawn in the middle and a line of text under it. Proved and machine-checked (standard axioms only, no `sorry`):
+
+- `inviteUrl_origin_prefix` — the payload begins with the site, so any camera app offers an openable link;
+- `inviteUrl_not_bare` — with a non-empty origin the code is provably *not* the bare `kzinvite:…` string any more;
+- `parseInviteUrl_inviteUrl`, `inviteUrl_fits_qr` — it still reads back as exactly the invitation, and still fits in one code;
+- `inviteCardSvg_icon_used`, `_caption_visible`, `_url_visible` — the icon, the words and the link really appear on the card;
+- `inviteCard_icon_area_bound` — the icon covers at most a twenty-fifth of the modules, inside the error-correction budget, so drawing on the code does not stop it scanning;
+- `inviteCard_no_markup`, `inviteCardSvg_roundTrip` — nothing typed can break out of its SVG element, and the exported picture reads back as the same invitation.
+
+Both the caption and the icon are editable on the share screen; defaults come from `caption =` / `picture =` in `web/kant.config`. There is also a command-line maker, `scripts/invite-card.mjs`, which accepts a bare code, a link or a whole message and refuses to write a card that does not read back — run against your own code it produces a card carrying `https://kant.cicada71.net/#6b7a696e76697465:…`.
+
+## The rest of the session's complaints
+
+- **Camera** — `RequestProject/Kant/Onboarding.lean`. A red **Stop the camera** button, plus `camera_implies_scan`: in *every* reachable state a running camera means the scan screen is the one on show, so the off button is always in front of you. The camera also goes off on back, on leave, on tapping any other screen, and on a code being read.
+- **Joining** — `RequestProject/Kant/Join.lean`. The link is found in whatever you paste: in a sentence, in brackets, with a full stop after it, with a trailing newline, or as a bare code (`findInvite_in_message`, `findInvite_trailing_newline`, `message_same_room`).
+- **Two devices not finding each other** — the client used to point the relay at `location.origin`, which on a static host has no relay endpoints, and every failure was swallowed. Now the relay is named by `relay =` in `web/kant.config`, probed on `/health` at startup with a *visible* verdict, and carried absolutely inside the invitation so both sides use the same one. `web/join-test.mjs` runs the real `server/relay.mjs` and drives two clients that share no browser.
+- **Copying gives encoded text** — `RequestProject/Kant/PlainText.lean`: `copyPlain_eq_content` (you get the characters typed), `bodyOf_copyPlainWithMeta` / `metaOf_copyPlainWithMeta` (with the details attached under a `-- ` line, both parts come back exactly), `copyPlainWithMeta_link_visible`.
+
+## The interface
+
+`web/index.html` is now a six-screen guided client — welcome, share, join, scan, chat, more — with one link and one code to share, a spoken three-step guide with a mute button, a tolerant join box, and plain-text copying. The previous all-in-one page is preserved unchanged as `web/lab.html` (reachable from **More → Open the workbench**), and gained the two plain-text copy buttons. `docs/UX-FLOW.md` has the use-case and sequence diagrams, the onboarding script, and the theorem behind each promise; `README.md` is updated.
+
+## Verification
+
+Full `lake build` clean (8063 jobs), no `sorry`, no new axioms. All web suites pass: `test`, `net-test` 32, `qr-test` 15, `site-test` 47, `uucp-test` 28, `wasm-test`, and three new ones — `flow-test` 85 (the flow module against the Lean statements), `join-test` 14 (two clients, one real relay), `page-test` 43 (drives `web/index.html` itself in a minimal DOM).
+
+# Summary of changes for run 985ad272-8adf-45ef-ad91-79827f699885
+Codes, links and cards now carry the whole page URL — `https://kant.cicada71.net/#ff81…f605` — with the part before the `#` coming from a configuration file, and a card can carry text and a picture and be shared in chat.
+
+**The specification, proved in Lean** (`RequestProject/Kant/SiteCard.lean`, no `sorry`, only the standard axioms `propext` / `Classical.choice` / `Quot.sound`):
+
+- **A configuration file for the URL.** `kant.config` is `key = value` lines naming `origin`, `caption`, `picture` and `alt`; a line without an `=` is a comment. `parseConfig_renderConfig` — what the client writes is read back unchanged; `parseConfig_ignores_comment` — comments change nothing.
+- **The whole URL in every code.** `addressUrl cfg addr = origin ++ "#" ++ addr`. Proved: `pasteUrl_length` (origin, a `#`, exactly 64 hex characters), `pasteUrl_address` / `urlAddress_addressUrl` (the address comes back out), `addressUrl_injective`, `qrPayload_origin_prefix` (a plain scanner gets an openable link), `parseQrPayload_qrPayload` (this client still recovers the exact payload from the fragment), `isAscii_pasteUrl`, `pasteUrl_fits_qr`.
+- **The share card: URL + text + picture.** A card is the URL, the caption printed under the code, the picture drawn in the middle, and its description; `cardSvg` renders all of it as one SVG. Proved: `readCard_cardSvg` (the exported picture still carries the card), `cardSvg_caption_visible` / `cardSvg_picture_used` / `cardSvg_url_visible`, `card_text_no_markup` and `cardSvg_caption_recoverable` (nothing can break out of its element, and the caption recovers exactly), `logo_area_bound` (the picture covers at most a twenty-fifth of the modules, inside the error-correction budget), and `cardOf_roundTrip` end to end.
+- **Sharing it in chat.** `readChatCard_chatMsg` — a card sent into a room arrives as the same card; `chatMsg_tamper` — a line whose witness disagrees with its body is refused rather than shown as somebody else's card; `readChatText_chatText` — a card pasted as plain text (caption, link, then the machine-readable line) comes back whole.
+
+`RequestProject/Kant/Demo.lean` runs the whole story as build-time `#guard`s, including the exact URL from the request: the sample post's page URL is `https://kant.cicada71.net/#ff810f291f187b808a0183f83c0466874573ef5c4c6d7d9ed430c6f7d710f605`, a card with a caption full of markup still reads back, and a card travels through a chat room and a plain-text paste.
+
+**The tooling** (unverified transcriptions, pinned to Lean-computed vectors):
+- `web/kant.config` (the shipped configuration) and `web/kant-logo.svg`; `web/kant-site.mjs` implements the configuration, the full-URL builders, the card, its SVG rendering and the chat helpers.
+- `web/index.html` gained section 9, “The share card”: it shows the page URL under section 1, builds a card from the current paste or any URL you type, takes your text and a picture (file or URL), and offers Show, Copy the URL, Copy the card, Download SVG, Download PNG, Share… (system share sheet) and **Send it to the room**; it also reads a card back from a pasted card, a pasted link or a dropped `.svg`. The chat view renders a shared card as its picture, text and link. The chat invite code and the sneakernet code now encode the full link rather than a bare payload.
+- `scripts/sneakernet.mjs publish` takes its origin from `kant.config` (overridable with `--config` / `--base`) and additionally emits `card.svg` and `card.txt`.
+
+**Verification**: `lake build` succeeds (8059 jobs); no `sorry`/`admit` anywhere in the Lean sources; all test scripts pass — `web/test.mjs`, `web/wasm-test.mjs`, `web/net-test.mjs` (32), `web/qr-test.mjs` (15), `web/uucp-test.mjs` (28) and the new `web/site-test.mjs` (47 checks against the Lean golden vectors, including the shipped `kant.config`). `docs/SITE-CARD.md` documents the format, the proofs and the scope; the README module map, theorem index, feature list and test list were updated. Caveat: a card's text and link travel in the clear, exactly like the page they point at. Everything is committed.
+
+# Summary of changes for run 1efda6e6-e0bd-4d42-9c3b-ff5dee759460
+## What that message actually meant
+
+The kernel was fine; the page never received it. I reproduced the failure exactly: when the site is served with `web/` as the document root (which is the normal deployment — `node server/relay.mjs --static web`, an object store, a pinned directory, a USB stick), the loader asked for `/dist/kant_kernel.wasm`, the host answered with a 404 body, and the loader — which checked neither the HTTP status nor the wasm magic number — handed those nine bytes of "not found" straight to `WebAssembly.validate`. Hence "kant_kernel.wasm failed validation". The binary itself validates and instantiates with all 21 exports.
+
+## The fix (delivery)
+
+- `web/kant-wasm.mjs` now tries several locations (`../dist/kant_kernel.wasm`, `./kant_kernel.wasm`, `./dist/kant_kernel.wasm`), rejects any response that is not OK, is empty, or does not begin with `\0asm`, and reports the real reason for each attempt (`HTTP 404`, `not a wasm module ("<!doctype html>…")`) instead of blaming validation.
+- `web/kant-kernel-embedded.mjs` (generated by `node scripts/embed-kernel.mjs`) is a base64 copy of the same 799 bytes. The loader falls back to it, so the proved kernel now also runs from `file://`, offline, and on hosts that ship only `web/`. `web/sw.js` caches it as part of the application shell.
+- `server/relay.mjs --static web` now serves `/dist/…` from the sibling directory with `content-type: application/wasm`, so the real binary is published; a path-escape attempt (`/dist/../README.md`) still 404s.
+- `web/index.html` reports which copy loaded ("from the copy bundled with this page", or the URL).
+- `web/wasm-test.mjs` gained regression tests for exactly this: a 404 host, an SPA that returns HTML for every path, a host serving the real binary, the default checkout layout, the relay's `/dist` mount, and a byte-for-byte check that the embedded copy matches `dist/kant_kernel.wasm`.
+
+## The fix (proof): validity is no longer something you have to take on trust
+
+New module `RequestProject/Wasm/Decode.lean` covers both phases a WebAssembly engine performs, with no `sorry` and only the standard axioms:
+
+- `decodeModule` — a reader written against the binary format alone (magic, version, section ids and declared sizes, LEB128 fields, vector lengths, opcodes, the function-to-type identity map, export indices, no trailing bytes).
+- `decodeModule_module` — **reading undoes writing**: any emitted file decodes back to exactly the module encoded (signature arities, function indices, export names as UTF-8 bytes, compiled bodies).
+- `typecheck` / `typecheck_compile` — the specification's stack-typing rules for this fragment, and a proof that every well-formed body leaves exactly one `i64`.
+- `module_validates` — both statements together for any well-formed module.
+- In `RequestProject/Wasm/Extraction.lean`: `kernelBytes_decodes` and `kernelBytes_validates` for the module `lake exe emitwasm` actually writes, plus build-time `#guard`s that run the decoder on those bytes and check the 21 exports.
+
+So a consumer that calls the kernel invalid is not reading `dist/kant_kernel.wasm`.
+
+## Verification
+
+`lake build` succeeds (8058 jobs); no `sorry`/`admit` anywhere in the sources; the new theorems depend only on `propext`, `Quot.sound` (and `Classical.choice` where used elsewhere). `lake exe emitwasm dist` reproduces the identical 799-byte binary. All test scripts pass: `web/wasm-test.mjs` (59 golden vectors, JS agreement and the new delivery tests), `web/test.mjs`, `web/net-test.mjs` (32), `web/qr-test.mjs` (15), `web/uucp-test.mjs` (28). `README.md` and `docs/WASM-EXTRACTION.md` document the diagnosis, the new proofs and the two-command regeneration (`lake exe emitwasm dist && node scripts/embed-kernel.mjs`). Everything is committed.
+
 # Summary of changes for run 3de8ea40-2885-4dda-840f-c7b2ec0ae6f2
 Added a relay-free **static sneakernet** mode: the system now spreads state only by codes people move — DMs, tweets, QR codes, links, files — and a relay becomes an optional accelerator rather than a requirement.
 

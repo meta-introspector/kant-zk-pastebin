@@ -129,6 +129,99 @@ for (const [a, b] of [[0, 0], [1, 2], [2, 1], [7, 13], [1000, 999]]) {
   check(kernel.cantorPair(a, b) === BigInt(js.pair(a, b)), `cantor_pair vs JS (${a}, ${b})`);
 }
 
+// --- delivery ------------------------------------------------------------
+// Regression tests for the reported "wasm kernel: unavailable
+// (kant_kernel.wasm failed validation) — falling back to the JS core": the
+// loader used to hand a 404 error page to WebAssembly.validate.
+
+import { createServer } from "node:http";
+import { kernelBytes as embeddedBytes, KERNEL_LENGTH } from "./kant-kernel-embedded.mjs";
+import { kernelSource, KERNEL_URLS } from "./kant-wasm.mjs";
+
+// The bundled base64 copy is the same binary, byte for byte.
+const embedded = embeddedBytes();
+check(embedded.length === wasmBytes.length, "embedded kernel has a different length");
+check(KERNEL_LENGTH === wasmBytes.length, "KERNEL_LENGTH disagrees with the binary");
+check(
+  embedded.every((b, i) => b === wasmBytes[i]),
+  "embedded kernel differs from dist/kant_kernel.wasm — rerun scripts/embed-kernel.mjs",
+);
+check(WebAssembly.validate(embedded), "embedded kernel fails WebAssembly.validate");
+
+// A host that serves only web/ answers /dist/kant_kernel.wasm with a 404 body.
+// The loader must not mistake that for an invalid module: it falls back to the
+// embedded copy and still gives a working kernel.
+const notFound = createServer((_req, res) => {
+  res.writeHead(404, { "content-type": "text/plain" });
+  res.end("not found");
+});
+await new Promise((r) => notFound.listen(0, "127.0.0.1", r));
+const base = `http://127.0.0.1:${notFound.address().port}`;
+{
+  const { bytes, source } = await kernelSource([new URL("/dist/kant_kernel.wasm", base)]);
+  check(source.startsWith("embedded"), `404 should fall back to the embedded copy, got ${source}`);
+  check(bytes.length === wasmBytes.length, "fallback returned the wrong bytes");
+  const k = await loadKernel(new URL("/dist/kant_kernel.wasm", base));
+  check(k.embedded === true, "loadKernel should report the embedded source");
+  check(k.witness(js.utf8("hello")) === js.witness(js.utf8("hello")), "fallback kernel computes");
+}
+await new Promise((r) => notFound.close(r));
+
+// A host that serves the real binary is preferred over the embedded copy, and
+// a host that answers with something else entirely is reported honestly.
+const serving = createServer((req, res) => {
+  if (req.url === "/dist/kant_kernel.wasm") {
+    res.writeHead(200, { "content-type": "application/wasm" });
+    res.end(Buffer.from(wasmBytes));
+  } else {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end("<!doctype html><title>single page app</title>");
+  }
+});
+await new Promise((r) => serving.listen(0, "127.0.0.1", r));
+const live = `http://127.0.0.1:${serving.address().port}`;
+{
+  const good = await kernelSource([new URL("/dist/kant_kernel.wasm", live)]);
+  check(!good.source.startsWith("embedded"), "a served binary should be used in preference");
+  check(good.bytes.every((b, i) => b === wasmBytes[i]), "served bytes differ from dist/");
+  // An SPA that answers every path with index.html: bytes arrive, but they are
+  // HTML. The loader must recognise that rather than blame validation.
+  const spa = await kernelSource([new URL("/nowhere/kant_kernel.wasm", live)]);
+  check(spa.source.startsWith("embedded"), "an HTML body should fall back to the embedded copy");
+}
+await new Promise((r) => serving.close(r));
+
+// The default candidate list finds the binary in a repository checkout.
+{
+  const { source } = await kernelSource(KERNEL_URLS);
+  check(!source.startsWith("embedded"), "the checkout copy should be found by default");
+}
+
+// The relay serves /dist/ even when its document root is web/.
+{
+  const { createServer: createRelay, CONFIG } = await import("../server/relay.mjs");
+  const relay = createRelay({
+    ...CONFIG,
+    staticDir: new URL(".", import.meta.url).pathname,
+  });
+  await new Promise((r) => relay.listen(0, "127.0.0.1", r));
+  const port = relay.address().port;
+  const res = await fetch(`http://127.0.0.1:${port}/dist/kant_kernel.wasm`);
+  check(res.ok, `relay --static web should serve /dist/kant_kernel.wasm, got HTTP ${res.status}`);
+  if (res.ok) {
+    check(
+      res.headers.get("content-type") === "application/wasm",
+      "the relay should label the kernel application/wasm",
+    );
+    const got = new Uint8Array(await res.arrayBuffer());
+    check(got.length === wasmBytes.length && got.every((b, i) => b === wasmBytes[i]),
+      "the relay served the wrong bytes for the kernel");
+  }
+  const escape = await fetch(`http://127.0.0.1:${port}/dist/../README.md`);
+  check(escape.status === 404, "the /dist/ mount must not expose the repository root");
+  await new Promise((r) => relay.close(r));
+}
+
 if (failures === 0) {
   console.log(
     `ok — ${wasmBytes.length} byte module, ${expectedExports.length} exports, ` +

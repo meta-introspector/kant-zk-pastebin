@@ -21,6 +21,11 @@ This module re-exports the whole port.  The layers, bottom up:
 | `Kant.Sync` | IPFS/iroh/libp2p/torrent/archive.org replication | eventual consistency |
 | `Kant.Rendezvous` | peer discovery, rosters, the chat QR invite | order-free gossip, one code one room |
 | `Kant.Relay` | the room mailbox served by the relay | append-only log, unforgeable chat, identical transcripts |
+| `Kant.SiteCard` | the deployment configuration, page URLs, share cards | config round trip, whole-URL codes, cards that read back, chat sharing |
+| `Kant.InviteCard` | the invite code: whole-link payload, custom icon and text | openable link, icon and caption on the card, round trip |
+| `Kant.Join` | pasting a link however it arrives | junk-tolerant joining, same room |
+| `Kant.Onboarding` | screens, the camera switch, the guided first run | camera always stoppable, one link, tasks that finish |
+| `Kant.PlainText` | copying a post as readable text, with optional details | plain text out, footer separable, text survives the footer |
 | `Kant.Uucp` | the relay-free static sneakernet: DMs, tweets, bang paths | mailbag round trips, no news without a paste, relay redundancy, snapshot staleness |
 | `Kant.Credits` | serving credits | no overdraft, credit conservation |
 | `Kant.CodeMovie` | snippet playback | RLE, Gödel numbers, circuits |
@@ -43,6 +48,11 @@ import RequestProject.Kant.Stego
 import RequestProject.Kant.Sync
 import RequestProject.Kant.Rendezvous
 import RequestProject.Kant.Relay
+import RequestProject.Kant.SiteCard
+import RequestProject.Kant.InviteCard
+import RequestProject.Kant.Join
+import RequestProject.Kant.Onboarding
+import RequestProject.Kant.PlainText
 import RequestProject.Kant.Uucp
 import RequestProject.Kant.Credits
 import RequestProject.Kant.CodeMovie

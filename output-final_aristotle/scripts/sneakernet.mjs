@@ -13,7 +13,7 @@
 //   node scripts/sneakernet.mjs init      site --name alice [--room <hex>]
 //   node scripts/sneakernet.mjs write     site "something to say"
 //   node scripts/sneakernet.mjs paste     site <file|url|-|text>
-//   node scripts/sneakernet.mjs publish   site [--base https://host/path/]
+//   node scripts/sneakernet.mjs publish   site [--base https://host/path/] [--config kant.config]
 //   node scripts/sneakernet.mjs tweets    site [--carrier tweet]
 //   node scripts/sneakernet.mjs status    site
 //   node scripts/sneakernet.mjs serve     site [--port 8080]   (read-only files)
@@ -29,6 +29,7 @@ import {
   SneakerNode, packBag, openBag, bagUrl, readBagUrl, thread, readThread,
   bagForCarrier, CARRIER_CAPACITY,
 } from "../web/kant-uucp.mjs";
+import * as SITE from "../web/kant-site.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const STATE = "sneakernet.json";
@@ -45,6 +46,18 @@ function parseFlags(argv) {
 }
 
 const statePath = (dir) => path.join(dir, STATE);
+
+/** The deployment configuration: `kant.config` unless another file is named. */
+function siteConfig(file) {
+  const candidates = file ? [file] : [path.join(HERE, "..", "web", "kant.config")];
+  for (const c of candidates) {
+    if (!fs.existsSync(c)) continue;
+    const cfg = SITE.parseConfig(fs.readFileSync(c, "utf8"));
+    if (cfg && SITE.configWf(cfg)) return { config: cfg, source: c };
+    console.error(`sneakernet: ignoring ${c} (not a well-formed configuration)`);
+  }
+  return { config: { ...SITE.DEFAULT_CONFIG }, source: "built-in" };
+}
 
 function loadState(dir) {
   const p = statePath(dir);
@@ -104,7 +117,11 @@ function cmdPaste(dir, arg) {
 
 function cmdPublish(dir, flags) {
   const st = loadState(dir);
+  const { config, source } = siteConfig(flags.config);
+  // The origin comes from the configuration file unless --base overrides it,
+  // so every code and link published here carries the whole URL.
   if (flags.base) st.base = flags.base;
+  if (!st.base) st.base = config.origin;
   const bag = st.node.bag();
   const parts = bagForCarrier(bag, "tweet");
   const link = st.base ? bagUrl(st.base, st.node.spool) : "";
@@ -118,7 +135,8 @@ function cmdPublish(dir, flags) {
   const qrDir = path.join(dir, "qr");
   fs.rmSync(qrDir, { recursive: true, force: true });
   fs.mkdirSync(qrDir, { recursive: true });
-  const codes = bag.length <= CARRIER_CAPACITY.qr ? [bag] : parts;
+  const single = link && link.length <= CARRIER_CAPACITY.qr;
+  const codes = single ? [link] : (bag.length <= CARRIER_CAPACITY.qr ? [bag] : parts);
   codes.forEach((code, i) => {
     try {
       fs.writeFileSync(path.join(qrDir, `bag-${String(i).padStart(3, "0")}.svg`),
@@ -126,7 +144,22 @@ function cmdPublish(dir, flags) {
     } catch (e) { console.error(`  (no QR for part ${i}: ${e.message})`); }
   });
 
-  fs.writeFileSync(path.join(dir, "index.html"), page(st, bag, parts, link));
+  // The share card: the same link, with the configured text and picture, in
+  // one SVG that still carries the card itself (Kant.SiteCard.readCard_cardSvg).
+  let card = null;
+  if (link) {
+    card = SITE.cardFor(config, link);
+    try {
+      fs.writeFileSync(path.join(dir, "card.svg"), SITE.renderCard(card, { scale: 6 }));
+      fs.writeFileSync(path.join(dir, "card.txt"), SITE.chatText(card) + "\n");
+      const logo = path.join(HERE, "..", "web", "kant-logo.svg");
+      if (config.picture === "./kant-logo.svg" && fs.existsSync(logo)) {
+        fs.copyFileSync(logo, path.join(dir, "kant-logo.svg"));
+      }
+    } catch (e) { console.error(`  (no share card: ${e.message})`); card = null; }
+  }
+
+  fs.writeFileSync(path.join(dir, "index.html"), page(st, bag, parts, link, card));
   saveState(dir, st);
 
   console.log(`published ${st.node.spool.length} line(s) to ${dir}`);
@@ -134,7 +167,9 @@ function cmdPublish(dir, flags) {
   console.log(`  thread.txt   ${parts.length} tweet-sized part(s)`);
   console.log(`  qr/          ${codes.length} code(s)`);
   if (link) console.log(`  link.txt     ${link.length} characters`);
+  if (card) console.log(`  card.svg     the share card (text + picture), card.txt to paste in chat`);
   console.log(`  index.html   a page that reads itself back`);
+  console.log(`  site         ${st.base} (from ${flags.base ? "--base" : source})`);
 }
 
 function cmdTweets(dir, flags) {
@@ -184,7 +219,7 @@ function cmdServe(dir, flags) {
 const escape = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-function page(st, bag, parts, link) {
+function page(st, bag, parts, link, card) {
   const lines = st.node.view()
     .map((m) => `<li><b>${escape(m.sender)}</b> <span class=seq>#${m.seq}</span> ${escape(msgText(m))}</li>`)
     .join("\n");
@@ -208,6 +243,10 @@ the bag below by DM, tweet it as the thread, or show them the QR code.</p>
 <h2>the bag</h2>
 <pre id="bag">${escape(bag)}</pre>
 ${link ? `<p>as a link: <a href="${escape(link)}">${escape(link.slice(0, 80))}…</a></p>` : ""}
+${card ? `<h2>the share card</h2>
+<p><img src="card.svg" alt="${escape(card.alt)}" width="320"></p>
+<p class="note">The card carries the whole URL, the text and the picture; it reads back as itself.
+To send it in a chat, paste <a href="card.txt">card.txt</a>.</p>` : ""}
 <h2>as ${parts.length} tweet(s)</h2>
 <pre>${escape(parts.join("\n\n"))}</pre>
 <p class="note">Codes: <a href="qr/">qr/</a> · raw bag: <a href="bag.txt">bag.txt</a> ·

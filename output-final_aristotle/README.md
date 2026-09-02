@@ -29,6 +29,11 @@ node web/wasm-test.mjs    # validates and runs the extracted .wasm, and cross-ch
 node web/net-test.mjs     # 32 checks of discovery, chat and the relay (incl. a real relay end-to-end)
 node web/qr-test.mjs      # 15 checks of the QR encoder used for the chat code
 node web/uucp-test.mjs    # 28 checks of the relay-free sneakernet (bags, tweets, bang paths, static pages)
+node web/site-test.mjs    # 47 checks of the configuration file, the whole-URL codes and the share card
+node web/flow-test.mjs    # 85 checks of the guided flow: dressed invite codes, tolerant joining, screens, plain-text copy
+node web/join-test.mjs    # 14 checks of the cross-device join: two clients, one real relay, no shared browser
+node web/page-test.mjs    # 43 checks driving web/index.html itself in a minimal DOM
+node scripts/invite-card.mjs '<code or link>'        # a scannable invite card: link + icon + caption, as SVG
 node scripts/sneakernet.mjs init site --name alice   # a static sneakernet site: no server to run
 node server/relay.mjs --port 8787 --static web    # the relay + the client, on your own machine
 python3 -m http.server -d web 8080   # then open http://localhost:8080/
@@ -56,6 +61,11 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 | new (discovery) | `RequestProject/Kant/Rendezvous.lean` | how two clients find each other: peer announcements, rosters, and the chat code (QR invite) that names a room |
 | new (relay/chat) | `RequestProject/Kant/Relay.lean` | the append-only room log a relay serves, self-certifying chat messages, and the client's view of a room |
 | new (sneakernet) | `RequestProject/Kant/Uucp.lean` | the relay-free static sneakernet: mailbags carried by DM, tweet thread, QR code or link; bang-path store and forward; the static site and its snapshot staleness |
+| new (site/card) | `RequestProject/Kant/SiteCard.lean` | the deployment configuration file, the whole page URL every code and link carries, and the share card (URL + text + picture) shared in chat |
+| new (invite card) | `RequestProject/Kant/InviteCard.lean` | the invite code carries the whole link, with a custom icon drawn on it and a custom line of text under it |
+| new (joining) | `RequestProject/Kant/Join.lean` | finding the invitation in a pasted message however it arrives — in a sentence, in brackets, with a full stop or a newline after it |
+| new (onboarding) | `RequestProject/Kant/Onboarding.lean` | the screens, the camera switch, and the guided first run with its spoken prompts |
+| new (plain text) | `RequestProject/Kant/PlainText.lean` | copying a post as the text a human reads, with its title, link, address and time optional and separable |
 | new (text) | `RequestProject/Kant/Text.lean` | ASCII transcoding, field framing, substring search, numeric byte encoding |
 | — | `RequestProject/Kant/Pipeline.lean` | end-to-end paste → address → frame → stego → recover theorem |
 | — | `RequestProject/Kant/Demo.lean` | `#guard`-checked worked examples of every layer |
@@ -173,6 +183,20 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 - `Kant.Uucp.sneakernet_matches_relay` — what a node displays after pasting a bag is exactly what a relay client displays after being handed the same messages: the relay is redundant, not merely optional.
 - `Kant.Uucp.thread_fits_tweet`, `readThread_thread`, `readThread_perm` — a bag too big for one tweet goes out as numbered parts, each inside the 280-character limit, collected in any order.
 - `Kant.Uucp.relay_keeps_current`, `stale_without_paste` — the one exception: connected to a relay you are current without pasting anything; disconnected and pasting nothing, your view does not change at all.
+- `Kant.SiteCard.parseConfig_renderConfig` — the deployment configuration file (`kant.config`: origin, caption, picture, description) is written and read back unchanged; a line without an `=` is a comment.
+- `Kant.SiteCard.pasteUrl_length`, `pasteUrl_address`, `urlAddress_addressUrl` — a page URL is the configured origin, a `#`, and the 64-hex address of the content, and the address comes back out of it.
+- `Kant.SiteCard.qrPayload_origin_prefix`, `parseQrPayload_qrPayload`, `pasteUrl_fits_qr` — a code carries the **whole URL**: an ordinary scanner gets an openable link, this client still recovers the exact payload, and the URL fits in one code.
+- `Kant.SiteCard.readCard_cardSvg`, `cardSvg_caption_visible`, `cardSvg_picture_used`, `cardSvg_url_visible` — a share card exported as a picture, caption and logo included, reads back as the same card, and the text, picture and URL really appear in it.
+- `Kant.SiteCard.card_text_no_markup`, `cardSvg_caption_recoverable` — no caption, URL or picture reference can break out of its element, and the caption recovers exactly.
+- `Kant.SiteCard.logo_area_bound` — the picture in the middle of the code covers at most a twenty-fifth of its modules, well inside the error-correction budget.
+- `Kant.SiteCard.readChatCard_chatMsg`, `readChatText_chatText`, `chatMsg_tamper` — a card shared in a room arrives as the same card, a card pasted as plain text into any chat comes back whole, and a doctored line is refused rather than shown as somebody else's card.
+- `Kant.InviteCard.inviteUrl_origin_prefix`, `inviteUrl_not_bare`, `parseInviteUrl_inviteUrl`, `inviteUrl_fits_qr` — the invite code carries the whole page link rather than the bare `kzinvite:…` payload, so any camera app offers an openable link; it still reads back as exactly the invitation, and it still fits in one code.
+- `Kant.InviteCard.inviteCardSvg_icon_used`, `inviteCardSvg_caption_visible`, `inviteCardSvg_url_visible`, `inviteCard_icon_area_bound`, `inviteCard_no_markup`, `inviteCardSvg_roundTrip` — the custom icon is drawn on the code, the custom words are printed under it, the link is printed too, the icon stays inside the error-correction budget, nothing typed can break out of its element, and the exported picture reads back whole.
+- `Kant.Join.findInvite_inviteUrl`, `findInvite_copyInvite`, `findInvite_in_message`, `findInvite_trailing_newline`, `wordInvite_junk`, `message_same_room` — a link pasted with any junk around it joins, a bare code still joins, a word that is not a code is never mistaken for one, and both sides land in the same room.
+- `Kant.Onboarding.camera_implies_scan` — in every state the interface can reach, a running camera means the scan screen is the one on show: the off button is always in front of the user. With `camera_off_after_stop`/`_back`/`_leave`/`_goto`/`_join`, `back_goes_home` and `screen_reachable`.
+- `Kant.Onboarding.qrText_eq_shareText`, `share_then_join`, `join_lands_in_room` — there is one thing to share, not two; what one side shows the other side accepts; and following it puts you in the room, on the chat screen, with the camera off.
+- `Kant.Onboarding.first_run_completes`, `join_run_completes`, `nextTask_eq_none_iff`, `step_progress_mono`, `hushed_says_nothing`, `promptFor_ne_empty` — both scripted first runs finish, the guide stops exactly when everything is done, a task once done stays done, and the voice really is silent when hushed.
+- `Kant.PlainText.copyPlain_eq_content`, `copyPlain_ne_copyText`, `bodyOf_copyPlainWithMeta`, `metaOf_copyPlainWithMeta`, `copyPlainWithMeta_link_visible` — copying a post gives the characters that were typed rather than an encoding of them; with the details attached, the text and the four details are both recoverable, and the whole page link really is printed in the footer.
 - `Kant.Uucp.Site.serve_static`, `visitor_catches_up`, `snapshot_is_stale` — the static server has no state to lose, a visitor who pastes the page catches up with the publisher, and a line written after publication stays invisible until a fresher code is pasted.
 
 **End to end**
@@ -191,7 +215,35 @@ cards and picture strips are specified in
 Lean uses `Nat`). `web/test.mjs` pins it to golden values computed by Lean —
 run it with `node web/test.mjs`.
 
-`web/index.html` is the client. It lets you
+`web/index.html` is the **simple client**: six screens, one link to share, one
+code to show, a guide that talks you through the first run, and a camera that
+can always be switched off. Its design — with the use-case and sequence
+diagrams, and the theorem behind each promise — is
+[`docs/UX-FLOW.md`](docs/UX-FLOW.md).
+
+- **one link, one code.** The invite code carries the whole page link
+  (`https://<origin>/#kzinvite…`), not the bare `kzinvite:…` payload, so any
+  camera app offers to open it. Around it is a card: your own words printed
+  under the code and your own picture drawn in the middle of it, both editable
+  on the share screen, and the link printed underneath for a human to read.
+- **joining is forgiving.** Paste the whole message your friend sent — the link
+  in a sentence, in brackets, with a full stop after it, with a trailing
+  newline — and it still joins.
+- **the camera is always stoppable.** A red **Stop the camera** button, and the
+  camera also goes off on back, on leave, on tapping any other screen and on a
+  code being read. That the camera can never run behind another screen is
+  proved, not tested.
+- **the guide talks.** Three tasks, spoken aloud and printed, with a mute
+  button that really does silence it.
+- **copying gives you the words.** Copy a note as plain text, or as plain text
+  with its title, link, address and time under a `-- ` line.
+- **it says when it cannot reach anybody.** The relay is named in
+  `web/kant.config` and probed on startup; with none configured the first
+  screen says that only tabs of this browser will find each other, instead of
+  failing silently.
+
+`web/lab.html` is the **workbench** — the whole control panel, reachable from
+**More → Open the workbench**. It lets you
 
 - paste text or fetch a URL, and address it by DASL CID + witness;
 - pin it locally (Cache Storage via `web/sw.js`) so it gets a servable `/pin/<witness>` URL, and earn ledger credits when the service worker serves it;
@@ -207,18 +259,31 @@ run it with `node web/test.mjs`.
 - **share cards**: copy a readable headline plus a link whose fragment carries the post, the results or the whole page, ready to drop into any chat window or social feed;
 - **strips of stills**: when a share is too big for one picture, export it as a numbered set of PNGs — drop any collection of them back in, in any order, and the share is reassembled;
 - **keep going with no relay at all**: write lines offline, copy your whole spool as one mailbag for a DM, as a link, as a QR code or as a numbered tweet thread; paste anybody's bag, link or thread back in (a doctored one is refused whole); the spool survives reloads, and the page is exactly as fresh as the last code pasted into it;
+- **share the whole URL, with your text and your picture**: every code, link and card carries `https://<origin>/#<address>`, with the origin read from `web/kant.config`; section 9 builds a **share card** — the code with a caption under it and a picture in the middle — that you can show, copy, download as SVG or PNG, hand to the system share sheet, or send straight into the chat room, and read back from a pasted card, a link or a dropped `.svg`;
 - **find other clients and chat**: open or join a room, show the room's **chat QR code** (drawn by `web/kant-qr.mjs`, no dependencies) or copy it as text or a link, scan someone else's code with the camera, watch the peer list fill in, and talk — over a relay, over WebRTC once the relay has introduced you, or over `BroadcastChannel` between tabs of the same browser.
 
+`web/kant-flow.mjs` is the transcription of `Kant.Join`, `Kant.Onboarding`,
+`Kant.InviteCard` and `Kant.PlainText` — the guided flow the simple client is
+built out of.
 `web/kant-net.mjs` is the transcription of `Kant.Rendezvous` and `Kant.Relay`
 plus the transports; `web/kant-uucp.mjs` is the transcription of `Kant.Uucp`,
-the relay-free sneakernet; `web/kant-qr.mjs` is a self-contained QR encoder for
-the chat code and the mailbag. See
-[`docs/DISCOVERY-AND-CHAT.md`](docs/DISCOVERY-AND-CHAT.md) and
-[`docs/STATIC-SNEAKERNET.md`](docs/STATIC-SNEAKERNET.md).
+the relay-free sneakernet; `web/kant-site.mjs` is the transcription of
+`Kant.SiteCard`, the configuration file, the full-URL codes and the share card;
+`web/kant-qr.mjs` is a self-contained QR encoder for the chat code, the mailbag
+and the card. See [`docs/DISCOVERY-AND-CHAT.md`](docs/DISCOVERY-AND-CHAT.md),
+[`docs/STATIC-SNEAKERNET.md`](docs/STATIC-SNEAKERNET.md) and
+[`docs/SITE-CARD.md`](docs/SITE-CARD.md).
+
+Where the codes point is configuration, not code: `web/kant.config` names the
+`origin` (`https://kant.cicada71.net/` by default), the caption and the picture
+of the share card, and the `relay` two different devices should meet through
+(empty by default — see [`server/README.md`](server/README.md) for how to put
+one up). Edit that file — or pass `--config` / `--base` to
+`scripts/sneakernet.mjs publish` — to point a deployment somewhere else.
 
 Everything in `web/` and `server/` is *unverified*: it is checked only by the
 test scripts (`web/test.mjs`, `web/wasm-test.mjs`, `web/net-test.mjs`,
-`web/qr-test.mjs`, `web/uucp-test.mjs`), not by proof.
+`web/qr-test.mjs`, `web/uucp-test.mjs`, `web/site-test.mjs`), not by proof.
 
 ## WASM
 
@@ -228,8 +293,9 @@ itself**: its bytes are computed by a verified encoder
 involved.
 
 ```
-lake exe emitwasm dist    # writes dist/kant_kernel.wasm and dist/kernel-vectors.json
-node web/wasm-test.mjs    # WebAssembly.validate + run + cross-check
+lake exe emitwasm dist        # writes dist/kant_kernel.wasm and dist/kernel-vectors.json
+node scripts/embed-kernel.mjs # refreshes web/kant-kernel-embedded.mjs, the fallback copy
+node web/wasm-test.mjs        # WebAssembly.validate + run + cross-check + delivery tests
 ```
 
 Twenty-one `i64` functions are exported (hex digits, the FNV-1a digest round
@@ -247,7 +313,23 @@ definitions (`witness`, `frames`, `embedBlob`, `godel`, …) are not exported
 directly; `web/kant-wasm.mjs` obtains `fnv1a`, `hexEncode`, `digest` and
 `witness` by folding the verified per-step exports instead. `web/index.html`
 loads the kernel on start-up and recomputes each paste's witness inside
-WebAssembly, falling back to the JavaScript core if the binary is not served.
+WebAssembly.
+
+That the binary is a *valid* module is itself proved, in both the senses an
+engine uses: `RequestProject/Wasm/Decode.lean` gives a reader for the binary
+format and proves that reading undoes writing (`decodeModule_module`,
+`kernelBytes_decodes` — every section size, LEB128 field and opcode parses back
+to the module that was encoded, with no trailing bytes), and a stack type
+checker with `typecheck_compile` / `kernelBytes_validates` (every exported body
+leaves exactly one `i64`, the result type its signature declares).
+
+Delivery is handled separately from validity: the loader tries several
+locations, reports the real reason each one failed (`HTTP 404`, `not a wasm
+module (…)`) instead of blaming validation, and falls back to
+`web/kant-kernel-embedded.mjs`, a base64 copy of the same bytes, so the proved
+kernel still runs from `file://`, offline, or on a host that ships only `web/`.
+`server/relay.mjs --static web` serves `/dist/kant_kernel.wasm` from the sibling
+directory as `application/wasm`.
 
 ## Networking
 

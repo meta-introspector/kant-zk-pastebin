@@ -13,7 +13,9 @@ them evaluated to `false` the build would fail.  They exercise
 * the credit ledger,
 * Gödel numbering of a code movie and of a circuit,
 * the relay-free sneakernet: mailbags, tweet threads, bang paths and a
-  static page that is only as fresh as the moment it was published.
+  static page that is only as fresh as the moment it was published,
+* the deployment configuration file, the full page URL every code
+  carries, and the share card (text plus picture) shared in chat.
 -/
 import RequestProject.Kant.Bytes
 import RequestProject.Kant.Dasl
@@ -35,6 +37,7 @@ import RequestProject.Kant.Strip
 import RequestProject.Kant.Rendezvous
 import RequestProject.Kant.Relay
 import RequestProject.Kant.Uucp
+import RequestProject.Kant.SiteCard
 
 set_option autoImplicit false
 set_option relaxedAutoImplicit false
@@ -490,5 +493,91 @@ open Kant.Rendezvous Kant.Uucp in
 #guard ((Site.empty.publish "/feed.txt".toList
       (demoAlice.write demoInvite.room "third".toUTF8.toList)).visit
     "/feed.txt".toList (Node.blank "vic".toList)).spool.length = 3
+
+/-! ## The site configuration, the page URL, and the share card
+
+The configuration file names the deployment; every code and link then
+carries the whole URL of the page, `origin ++ "#" ++ address`. -/
+
+open Kant.SiteCard in
+/-- The deployment this checkout is configured for (`kant.config`). -/
+def demoConfig : Kant.SiteCard.Config :=
+  ⟨"https://kant.cicada71.net/".toList, "kant-zk-pastebin".toList, "./kant-logo.svg".toList,
+   "the Kant pastebin logo".toList⟩
+
+open Kant.SiteCard in
+-- The configuration file is written and read back unchanged.
+#guard String.ofList (renderConfig demoConfig) =
+  "origin = https://kant.cicada71.net/\ncaption = kant-zk-pastebin\n\
+   picture = ./kant-logo.svg\nalt = the Kant pastebin logo\n"
+open Kant.SiteCard in
+#guard parseConfig (renderConfig demoConfig) == some demoConfig
+open Kant.SiteCard in
+-- A comment line is ignored.
+#guard parseConfig ("# where this deployment lives".toList ++ '\n' :: renderConfig demoConfig)
+    == some demoConfig
+
+open Kant.SiteCard in
+-- The page URL of the sample post: the configured origin, a `'#'`, and
+-- the 64-hex address of the content.
+#guard String.ofList (pasteUrl demoConfig samplePaste) =
+  "https://kant.cicada71.net/#ff810f291f187b808a0183f83c0466874573ef5c4c6d7d9ed430c6f7d710f605"
+open Kant.SiteCard in
+#guard (pasteUrl demoConfig samplePaste).length = 91
+open Kant.SiteCard in
+#guard String.ofList (urlAddress (pasteUrl demoConfig samplePaste)) = String.ofList samplePaste.witness
+open Kant.SiteCard in
+-- The code carries the whole URL, and the client still reads the payload
+-- out of the fragment.
+#guard parseQrPayload (qrPayload demoConfig (Kant.Clipboard.ofPaste samplePaste))
+    == some (Kant.Clipboard.ofPaste samplePaste)
+
+open Kant.SiteCard in
+/-- The share card for the sample post: its URL, the configured caption
+and the configured picture. -/
+def demoCard : Kant.SiteCard.Card := cardOf demoConfig samplePaste
+
+open Kant.SiteCard in
+#guard (cardLine demoCard).length = 304
+open Kant.SiteCard in
+#guard String.ofList (Kant.Bytes.witness (Kant.Text.asciiBytes (cardLine demoCard))) =
+  "fe2f60c16f4c13313602b158fd9e158a01f33032d2041c97fa1d8f5f8e9bc970"
+open Kant.SiteCard in
+#guard readCardLine (cardLine demoCard) == some demoCard
+
+open Kant.SiteCard in
+/-- A tiny five-by-five stand-in for the code's modules. -/
+def demoModules : List (List Bool) :=
+  [[true, false, true, false, true], [false, true, false, true, false],
+   [true, true, false, false, true], [false, false, true, true, false],
+   [true, false, true, false, true]]
+
+open Kant.SiteCard in
+-- The exported picture still carries the card, caption, logo and all.
+#guard readCard (cardSvg demoCard demoModules 8 4) == some demoCard
+open Kant.SiteCard in
+#guard Kant.Text.containsSub (Kant.Erdfa.escape demoCard.caption) (cardSvg demoCard demoModules 8 4)
+open Kant.SiteCard in
+#guard Kant.Text.containsSub (Kant.Erdfa.escape demoCard.picture) (cardSvg demoCard demoModules 8 4)
+open Kant.SiteCard in
+#guard Kant.Text.containsSub (Kant.Erdfa.escape demoCard.url) (cardSvg demoCard demoModules 8 4)
+open Kant.SiteCard in
+-- A caption full of markup cannot break the document.
+#guard readCard (cardSvg ⟨demoCard.url, "</svg><script>alert(1)</script>".toList,
+    demoCard.picture, demoCard.alt⟩ demoModules 8 4)
+  == some ⟨demoCard.url, "</svg><script>alert(1)</script>".toList, demoCard.picture, demoCard.alt⟩
+open Kant.SiteCard in
+#guard ¬ Kant.Text.containsSub "<script>".toList
+  (Kant.Erdfa.escape "</svg><script>alert(1)</script>".toList)
+
+open Kant.SiteCard in
+-- Shared in a chat room, the card arrives as the same card.
+#guard readChatCard (Kant.Relay.printMsg (chatMsg "room7".toList "alice".toList 3 demoCard))
+    == some demoCard
+open Kant.SiteCard in
+-- Pasted as plain text into any chat window, it still comes back whole.
+#guard readChatText (chatText demoCard) == some demoCard
+open Kant.SiteCard in
+#guard (Kant.SiteCard.splitCh '\n' (chatText demoCard)).length = 3
 
 end Kant.Demo
