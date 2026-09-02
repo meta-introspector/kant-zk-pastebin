@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>kant-zk-pastebin — verified core</title>
+<style>
+  body { font-family: monospace; max-width: 1000px; margin: 20px auto; padding: 0 16px;
+         background: #0a0a0a; color: #0f0; }
+  h1, h2 { color: #0ff; }
+  textarea, input { width: 100%; background: #111; color: #0f0; border: 1px solid #0f0;
+                    padding: 8px; font-family: monospace; }
+  button { background: #0f0; color: #000; border: none; padding: 8px 14px; margin: 4px 4px 4px 0;
+           cursor: pointer; font-family: monospace; }
+  .meta { color: #8f8; white-space: pre-wrap; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  canvas { border: 1px solid #0f0; image-rendering: pixelated; }
+  small { color: #7a7; }
+</style>
+</head>
+<body>
+<h1>kant-zk-pastebin</h1>
+<p><small>Browser front end over <code>web/kantzk.mjs</code>, the JavaScript transcription of the
+Lean 4 core in <code>RequestProject/Kant/</code>.  The Lean development is the proved artefact:
+content addressing, framing under a 5 MB cap, out-of-order reassembly, LSB steganography,
+replica convergence, the credit ledger and Gödel numbering all have machine-checked proofs there.
+This page is unverified glue.</small></p>
+<div class="meta" id="wasm">wasm kernel: loading…</div>
+
+<h2>1. Paste or load</h2>
+<textarea id="content" rows="8">The Critique of Pure Paste</textarea>
+<div class="row">
+  <input id="url" placeholder="https://… or ipfs://CID or an archive.org item URL" />
+</div>
+<button id="load">Load URL into paste</button>
+<button id="hash">Address it</button>
+<div class="meta" id="addr"></div>
+
+<h2>2. Export under a channel cap</h2>
+<div class="row">
+  <label>channel
+    <select id="channel"></select>
+  </label>
+  <button id="frame">Frame it</button>
+  <button id="stego">Stego PNG</button>
+  <button id="svg">SVG</button>
+  <button id="video">≤5 MB WebM</button>
+  <button id="speak">Speak the witness</button>
+</div>
+<div class="meta" id="frames"></div>
+<div class="row">
+  <canvas id="carrier" width="256" height="256"></canvas>
+  <canvas id="gl" width="256" height="256"></canvas>
+</div>
+
+<h2>3. Pin, serve, earn</h2>
+<div class="row">
+  <button id="pin">Pin locally</button>
+  <button id="serve">Record a serve (simulated peer fetch)</button>
+  <button id="list">List pinned</button>
+</div>
+<div class="meta" id="ledger"></div>
+
+<script type="module">
+import * as K from "./kantzk.mjs";
+import { loadKernel, KERNEL_EXPORTS } from "./kant-wasm.mjs";
+
+const $ = (id) => document.getElementById(id);
+const store = new K.Store();
+const ledger = new K.Ledger();
+const me = "this-browser";
+let current = null;
+let kernel = null;
+
+// --- the Lean-extracted WebAssembly kernel ------------------------------
+// dist/kant_kernel.wasm is emitted by `lake exe emitwasm dist`; every export
+// is proved in RequestProject/Wasm/KernelSpec.lean to compute the matching
+// Kant definition. The page degrades to the JS core if it cannot be fetched.
+(async () => {
+  try {
+    kernel = await loadKernel();
+    $("wasm").textContent =
+      `wasm kernel: ${kernel.bytes.length} bytes, ${KERNEL_EXPORTS.length} proved exports — ` +
+      `witnesses on this page are computed inside WebAssembly`;
+    if (current) address();
+  } catch (e) {
+    kernel = null;
+    $("wasm").textContent =
+      `wasm kernel: unavailable (${e.message}) — falling back to the JS core`;
+  }
+})();
+
+// --- channels -----------------------------------------------------------
+for (const [name, cap] of Object.entries(K.CHANNEL_CAPACITY)) {
+  const o = document.createElement("option");
+  o.value = name;
+  o.textContent = `${name} (${cap} B)`;
+  $("channel").appendChild(o);
+}
+$("channel").value = "qr";
+
+// --- addressing ---------------------------------------------------------
+function address() {
+  current = K.makePaste({
+    id: "paste_" + Date.now(),
+    title: "browser paste",
+    content: $("content").value,
+    timestamp: new Date().toISOString(),
+  });
+  const o = current.coords;
+  $("addr").textContent =
+    `witness : ${current.witness}\n` +
+    `dasl    : ${K.daslHex(current.cid)}  (type ${K.cidType(current.cid)})\n` +
+    `orbifold: (${o.l}, ${o.m}, ${o.n})  in Z/71 x Z/59 x Z/47\n` +
+    `bytes   : ${current.content.length}\n` +
+    `permalink: #${current.witness}` +
+    (kernel
+      ? "\nwasm    : witness " +
+        (kernel.witness(current.content) === current.witness
+          ? "recomputed in WebAssembly, agrees"
+          : "MISMATCH")
+      : "");
+  location.hash = current.witness;
+  return current;
+}
+$("hash").onclick = address;
+
+// --- loading a URL (http, ipfs://, archive.org item) --------------------
+$("load").onclick = async () => {
+  const raw = $("url").value.trim();
+  if (!raw) return;
+  const url = raw.startsWith("ipfs://")
+    ? "https://ipfs.io/ipfs/" + raw.slice("ipfs://".length)
+    : raw;
+  try {
+    const r = await fetch(url);
+    $("content").value = await r.text();
+    address();
+  } catch (e) {
+    $("addr").textContent = "fetch failed (CORS or offline): " + e;
+  }
+};
+
+// --- framing ------------------------------------------------------------
+function currentFrames() {
+  const p = current ?? address();
+  const cap = K.CHANNEL_CAPACITY[$("channel").value];
+  return K.frames(cap, p.content);
+}
+
+$("frame").onclick = () => {
+  const fs = currentFrames();
+  const back = K.reassemble([...fs].sort(() => Math.random() - 0.5));
+  $("frames").textContent =
+    `${fs.length} frame(s), max ${Math.max(0, ...fs.map((f) => f.payload.length))} B\n` +
+    `shuffled reassembly matches: ${K.fromUtf8(back) === $("content").value}`;
+};
+
+// --- stego PNG ----------------------------------------------------------
+function carrierImage() {
+  const c = $("carrier");
+  const ctx = c.getContext("2d");
+  const img = ctx.createImageData(c.width, c.height);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 100 + ((i / 4) % 57);
+    img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
+  }
+  return { c, ctx, img };
+}
+
+$("stego").onclick = () => {
+  const p = current ?? address();
+  const { c, ctx, img } = carrierImage();
+  // one payload bit per colour sample, skipping alpha
+  const samples = [];
+  for (let i = 0; i < img.data.length; i += 4) samples.push(img.data[i], img.data[i + 1], img.data[i + 2]);
+  if (K.capacityBytes(samples) < p.content.length) {
+    $("frames").textContent = "carrier too small for this paste";
+    return;
+  }
+  const hidden = K.embedBlob(samples, Array.from(p.content));
+  let j = 0;
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i] = hidden[j++]; img.data[i + 1] = hidden[j++]; img.data[i + 2] = hidden[j++];
+  }
+  ctx.putImageData(img, 0, 0);
+  const recovered = K.extractBlob(p.content.length, hidden);
+  $("frames").textContent =
+    `hidden ${p.content.length} B in ${samples.length} samples; recovered exactly: ` +
+    `${K.fromUtf8(recovered) === $("content").value}`;
+  c.toBlob((b) => download(b, "stego.png"));
+};
+
+// --- SVG ----------------------------------------------------------------
+$("svg").onclick = () => {
+  const p = current ?? address();
+  const rows = K.frames(64, p.content).map((f, i) =>
+    `<text x="4" y="${16 + 14 * i}" font-family="monospace" font-size="11" fill="#0f0">` +
+    `${f.seq}: ${K.hexEncode(f.payload).slice(0, 96)}</text>`).join("\n  ");
+  const svg =
+`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="${24 + 14 * K.frames(64, p.content).length}">
+  <rect width="100%" height="100%" fill="#000"/>
+  <text x="4" y="12" font-family="monospace" font-size="11" fill="#0ff">${K.escapeHtml(K.daslHex(p.cid))} ${p.witness.slice(0, 16)}…</text>
+  ${rows}
+</svg>`;
+  download(new Blob([svg], { type: "image/svg+xml" }), "paste.svg");
+};
+
+// --- ≤5 MB WebM export --------------------------------------------------
+$("video").onclick = async () => {
+  const p = current ?? address();
+  const fs = K.frames(1024, p.content);
+  const c = $("carrier");
+  const ctx = c.getContext("2d");
+  const stream = c.captureStream(8);
+  const rec = new MediaRecorder(stream, { mimeType: "video/webm" });
+  const parts = [];
+  rec.ondataavailable = (e) => parts.push(e.data);
+  rec.onstop = () => {
+    const blob = new Blob(parts, { type: "video/webm" });
+    if (blob.size > K.SOCIAL_LIMIT) {
+      $("frames").textContent = `export ${blob.size} B exceeds the 5 MB cap — use more frames`;
+    } else {
+      download(blob, "paste.webm");
+    }
+  };
+  rec.start();
+  for (const f of fs.length ? fs : [{ seq: 0, payload: [] }]) {
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = "#0f0"; ctx.font = "12px monospace";
+    ctx.fillText(`frame ${f.seq + 1}/${fs.length}`, 8, 16);
+    ctx.fillText(K.hexEncode(f.payload).slice(0, 30), 8, 34);
+    await new Promise((r) => setTimeout(r, 125));
+  }
+  rec.stop();
+};
+
+// --- text to speech -----------------------------------------------------
+$("speak").onclick = () => {
+  const p = current ?? address();
+  const u = new SpeechSynthesisUtterance(
+    "Witness " + p.witness.slice(0, 8).split("").join(" ") +
+    ". Orbifold " + p.coords.l + ", " + p.coords.m + ", " + p.coords.n + ".");
+  speechSynthesis.speak(u);
+};
+
+// --- WebGL playback of a code movie -------------------------------------
+(function playMovie() {
+  const gl = $("gl").getContext("webgl");
+  if (!gl) return;
+  const vs = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs, "attribute vec2 p; void main(){ gl_Position = vec4(p,0.0,1.0); }");
+  gl.compileShader(vs);
+  const fsSrc = `precision mediump float; uniform float t; uniform vec3 c;
+    void main(){ vec2 uv = gl_FragCoord.xy/256.0;
+      float v = sin(uv.x*c.x + t) * cos(uv.y*c.y - t) * 0.5 + 0.5;
+      gl_FragColor = vec4(v*0.2, v, v*0.4, 1.0); }`;
+  const fs = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fs, fsSrc); gl.compileShader(fs);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog); gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "p");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const tLoc = gl.getUniformLocation(prog, "t");
+  const cLoc = gl.getUniformLocation(prog, "c");
+  // the "code movie": orbifold coordinates drive the shader, looping with
+  // the movie's own period (see `Kant.CodeMovie.frameAt_periodic`)
+  const movie = [[71, 59, 47], [47, 71, 59], [59, 47, 71]];
+  let t = 0;
+  (function loop() {
+    const f = K.frameAt(movie, Math.floor(t) % movie.length);
+    gl.uniform1f(tLoc, t);
+    gl.uniform3f(cLoc, f[0] / 8, f[1] / 8, f[2] / 8);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    t += 0.05;
+    requestAnimationFrame(loop);
+  })();
+})();
+
+// --- pin / serve / earn -------------------------------------------------
+$("pin").onclick = () => {
+  const p = current ?? address();
+  store.put(p);
+  localStorage.setItem("kantzk:" + p.witness, JSON.stringify({
+    witness: p.witness, dasl: K.daslHex(p.cid), content: K.fromUtf8(p.content),
+  }));
+  navigator.serviceWorker?.ready.then((reg) =>
+    reg.active?.postMessage({
+      kind: "pin",
+      witness: p.witness,
+      body: K.fromUtf8(p.content),
+      contentType: "text/plain; charset=utf-8",
+    })
+  );
+  $("ledger").textContent =
+    `pinned ${p.witness}\n${store.entries.length} block(s) held\n` +
+    `servable at ${location.origin}${location.pathname.replace(/[^/]*$/, "")}pin/${p.witness}`;
+};
+
+$("serve").onclick = () => {
+  const p = current ?? address();
+  ledger.serve(me, p.content.length);
+  $("ledger").textContent =
+    `served ${p.content.length} B → balance ${ledger.balance(me)} credit(s)\n` +
+    `total credit ever created here: ${ledger.totalEarned()}`;
+};
+
+$("list").onclick = () => {
+  const keys = Object.keys(localStorage).filter((k) => k.startsWith("kantzk:"));
+  $("ledger").textContent = keys.map((k) => k.slice(7)).join("\n") || "(nothing pinned)";
+};
+
+function download(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+  // A real serve out of the pin cache earns credit, exactly as
+  // `Kant.Credits.Ledger.serve` specifies.
+  navigator.serviceWorker.addEventListener("message", (ev) => {
+    if (ev.data?.kind !== "served") return;
+    const held = store.entries.find((p) => p.witness === ev.data.witness);
+    const bytes = held ? held.content.length : 0;
+    ledger.serve(me, bytes);
+    $("ledger").textContent =
+      `served ${ev.data.witness} (${bytes} B) → balance ${ledger.balance(me)} credit(s)`;
+  });
+}
+
+address();
+</script>
+</body>
+</html>
