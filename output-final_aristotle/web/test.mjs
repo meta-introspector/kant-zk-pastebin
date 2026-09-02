@@ -89,5 +89,164 @@ check("sub-KiB earns nothing", L.balance("peer-b"), 0);
 check("overdraft refused", L.spend("peer-a", 5), null);
 check("spend debits", L.spend("peer-a", 3).balance("peer-a"), 1);
 
+
+// --- feed, clipboard and memes (golden values from Lean) ----------------
+const samplePaste = K.makePaste({
+  id: "paste_20260902_000000",
+  title: "Kant <ZK> Pastebin",
+  content: "The Critique of Pure Paste",
+  timestamp: "20260902_000000",
+});
+const replyPaste = K.makePaste({
+  id: "paste_20260902_000100",
+  title: "Re: Kant <ZK> Pastebin",
+  content: "Antinomies of pure pasting",
+  timestamp: "20260902_000100",
+  replyTo: samplePaste.witness,
+});
+
+check("copyText", K.copyText(samplePaste),
+  "6b7a7061737465:70617374655f32303236303930325f303030303030:4b616e74203c5a4b3e20506173746562696e:" +
+  "546865204372697469717565206f662050757265205061737465:32303236303930325f303030303030:00:" +
+  "666638313066323931663138376238303861303138336638336330343636383734353733656635633463366437643965643433306336663764373130663630" +
+  "35");
+check("copyText of a reply", K.copyText(replyPaste),
+  "6b7a7061737465:70617374655f32303236303930325f303030313030:52653a204b616e74203c5a4b3e20506173746562696e:" +
+  "416e74696e6f6d696573206f6620707572652070617374696e67:32303236303930325f303030313030:" +
+  "01666638313066323931663138376238303861303138336638336330343636383734353733656635633463366437643965643433306336663764373130663" +
+  "63035:" +
+  "386162383933626538636364376362373038386436613530363566626630393466666632333264336430393664633564346230383737616265633465663139" +
+  "32");
+check("paste of copied text", K.pasteText(K.copyText(samplePaste)).witness, samplePaste.witness);
+check("paste of a copied reply", K.pasteText(K.copyText(replyPaste)).replyTo, samplePaste.witness);
+check("copyReceipt", K.copyReceipt(K.receiptOf(samplePaste, 7)),
+  "6b7a726573756c74:" +
+  "666638313066323931663138376238303861303138336638336330343636383734353733656635633463366437643965643433306336663764373130663630" +
+  "35:da5132a0b0f291f1:1a:07");
+check("paste of copied results", K.pasteReceipt(K.copyReceipt(K.receiptOf(samplePaste, 7))),
+  { witness: samplePaste.witness, cid: samplePaste.cid, bytes: 26, credits: 7 });
+check("tampering refused",
+  K.toPaste({ tag: K.TAG_PASTE, fields: [
+    K.asciiBytes(samplePaste.id), K.asciiBytes(samplePaste.title),
+    [0, ...samplePaste.content], K.asciiBytes(samplePaste.timestamp),
+    K.optField(null), K.asciiBytes(samplePaste.witness)] }),
+  null);
+check("share link round trip",
+  K.toPaste(K.parseShareUrl(K.shareUrl("https://kant.zk/p", K.ofPaste(samplePaste)))).witness,
+  samplePaste.witness);
+
+const feedStore = new K.Store().sync([samplePaste, replyPaste]);
+check("feed length", K.view(feedStore).length, 2);
+check("newest first", K.newest(K.feed(feedStore))[0].id, replyPaste.id);
+check("timeKey", K.timeKey(samplePaste), 20260902000000);
+check("search hits", K.search("pure", K.feed(feedStore)).length, 1);
+check("search misses", K.search("Hegel", K.feed(feedStore)).length, 0);
+check("thread", K.thread(samplePaste, K.feed(feedStore)).length, 2);
+check("paging is lossless",
+  K.paginate(1, K.feed(feedStore)).flat().map((p) => p.witness),
+  K.feed(feedStore).map((p) => p.witness));
+check("row body readable", K.unescapeHtml(K.row(samplePaste).body), "The Critique of Pure Paste");
+
+check("copy every post, paste them all back",
+  K.pasteAll(K.copyAll([samplePaste, replyPaste])).map((p) => p.witness),
+  [samplePaste.witness, replyPaste.witness]);
+check("a broken bundle is refused", K.pasteAll("6b7a66656564:00"), null);
+
+const memeCarrier = Array(8192).fill(128);
+check("meme payload length", K.memePayload(K.ofPaste(samplePaste)).length, 315);
+check("meme first samples", K.memeOfPaste(memeCarrier, samplePaste).slice(0, 24),
+  [128, 129, 128, 128, 129, 128, 129, 129, 128, 129, 128, 129, 129, 128, 129, 128,
+   128, 129, 128, 128, 129, 129, 128, 129]);
+check("meme round trip",
+  K.memeToPaste(K.memeOfPaste(memeCarrier, samplePaste)).witness, samplePaste.witness);
+check("meme carries the results",
+  K.memeToReceipt(K.memeOfReceipt(memeCarrier, K.receiptOf(samplePaste, 7))).credits, 7);
+check("meme does not disturb the picture",
+  K.memeOfPaste(memeCarrier, samplePaste).every((v, i) => Math.floor(v / 2) === 64), true);
+check("meme size unchanged", K.memeOfPaste(memeCarrier, samplePaste).length, memeCarrier.length);
+check("a page of the feed fits in one meme",
+  K.memeToPastes(K.memeOfPastes(Array(16384).fill(128), [samplePaste, replyPaste]))
+    .map((p) => p.witness),
+  [samplePaste.witness, replyPaste.witness]);
+check("a picture with nothing hidden decodes to nothing",
+  K.memeDecode(Array(8192).fill(128)), null);
+
+// --- quote reposts and share cards --------------------------------------
+const sampleQuote = K.quoteWith(replyPaste, samplePaste);
+check("quote text length", K.copyQuote(sampleQuote).length, 1528);
+check("quote text prefix", K.copyQuote(sampleQuote).slice(0, 40),
+  "6b7a71756f7465:3662376137303631373337343");
+check("copy a quote, paste it back",
+  [K.pasteQuote(K.copyQuote(sampleQuote)).comment.witness,
+   K.pasteQuote(K.copyQuote(sampleQuote)).original.witness],
+  [replyPaste.witness, samplePaste.witness]);
+check("a doctored quotation is refused",
+  K.pasteQuote(K.envelopeEncode({
+    tag: K.TAG_QUOTE,
+    fields: [K.asciiBytes(K.copyText(replyPaste)), K.asciiBytes("6b7a7061737465:00")],
+  })), null);
+
+const briefPost = {
+  id: "a1", title: "hi", content: K.utf8("yes"), timestamp: "20260902",
+  witness: K.witness(K.utf8("yes")), cid: K.nestedCid(K.utf8("yes")), replyTo: null,
+};
+const briefRemark = {
+  id: "a2", title: "re", content: K.utf8("no"), timestamp: "20260903",
+  witness: K.witness(K.utf8("no")), cid: K.nestedCid(K.utf8("no")), replyTo: null,
+};
+const briefQuote = K.quoteWith(briefRemark, briefPost);
+check("a short quote fits a small meme",
+  K.memePayload(K.ofQuote(briefQuote)).length, 737);
+check("a quote travels as one picture",
+  K.memeToQuote(K.memeOfQuote(memeCarrier, briefQuote)).original.witness, briefPost.witness);
+
+const cardBase = "https://kant.zk/p";
+check("card headline", K.headline(samplePaste),
+  "Kant &lt;ZK&gt; Pastebin " +
+  "ff810f291f187b808a0183f83c0466874573ef5c4c6d7d9ed430c6f7d710f605");
+check("post card length", K.postCard(cardBase, samplePaste).length, 418);
+check("post card prefix", K.postCard(cardBase, samplePaste).slice(0, 100),
+  "Kant &lt;ZK&gt; Pastebin " +
+  "ff810f291f187b808a0183f83c0466874573ef5c4c6d7d9ed430c6f7d710f605\nhttps://ka");
+check("a post pasted from a card is the same post",
+  K.toPaste(K.readCard(K.postCard(cardBase, samplePaste))).witness, samplePaste.witness);
+check("results card", K.receiptCard(cardBase, K.receiptOf(samplePaste, 7)),
+  "ff810f291f187b808a0183f83c0466874573ef5c4c6d7d9ed430c6f7d710f605\n" +
+  "https://kant.zk/p#6b7a726573756c74:" +
+  "66663831306632393166313837623830386130313833663833633034363638373435373365663563" +
+  "346336643764396564343330633666376437313066363035:da5132a0b0f291f1:1a:07");
+check("bundle card prefix",
+  K.bundleCard(cardBase, [samplePaste, replyPaste]).slice(0, 90),
+  "2\nhttps://kant.zk/p#6b7a66656564:36623761373036313733373436353a373036313733373436353566333");
+check("a page pasted from a card is the same page",
+  K.toPastes(K.readCard(K.bundleCard(cardBase, [samplePaste, replyPaste]))).map((p) => p.witness),
+  [samplePaste.witness, replyPaste.witness]);
+
+// --- strips: one share over several pictures ----------------------------
+const stillCarrier = Array(1024).fill(128);
+const firstPart = K.frames(40, K.asciiBytes(K.envelopeEncode(K.ofPaste(samplePaste))))[0];
+check("part envelope text", K.envelopeEncode(K.ofFrame(firstPart)),
+  "6b7a70617274::08:" +
+  "36623761373036313733373436353a37303631373337343635356633323330333233363330333933");
+check("a post takes eight stills", K.stripOfPaste(stillCarrier, 40, samplePaste).length, 8);
+check("every still is the size of the template",
+  K.stripOfPaste(stillCarrier, 40, samplePaste).every((c) => c.length === 1024), true);
+check("first still samples", K.stripOfPaste(stillCarrier, 40, samplePaste)[0].slice(0, 16),
+  [128, 129, 128, 128, 129, 128, 129, 129, 128, 129, 128, 129, 129, 128, 129, 128]);
+check("a strip reads back as the post",
+  K.stripToPaste(K.stripOfPaste(stillCarrier, 40, samplePaste)).witness, samplePaste.witness);
+check("the stills may arrive in any order",
+  K.stripToPaste([...K.stripOfPaste(stillCarrier, 40, samplePaste)].reverse()).witness,
+  samplePaste.witness);
+check("a quote takes thirty-nine stills",
+  K.stripOfQuote(stillCarrier, 40, sampleQuote).length, 39);
+check("a quote survives the strip",
+  K.stripToQuote(K.stripOfQuote(stillCarrier, 40, sampleQuote)).original.witness,
+  samplePaste.witness);
+check("a page survives the strip",
+  K.stripToPastes(K.stripOfPastes(stillCarrier, 40, [samplePaste, replyPaste]))
+    .map((p) => p.witness),
+  [samplePaste.witness, replyPaste.witness]);
+
 console.log(failures === 0 ? "\nAll conformance checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

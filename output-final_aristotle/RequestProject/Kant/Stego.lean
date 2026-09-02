@@ -178,6 +178,69 @@ theorem extractBlob_embedBlob {cs : Carrier} {payload : List Nat}
   unfold extractBlob embedBlob
   rw [← hlen, extract_embed (by omega), fromBits_toBits hp]
 
+/-! ## Reading a carrier without knowing the payload length
+
+A meme is decoded by whoever finds it, who does not know in advance how
+many bytes were hidden in it.  They therefore read the carrier to its
+capacity; these lemmas say that whatever was embedded still comes back
+first, followed by whatever the untouched samples happen to say. -/
+
+/-- Reading more bits than were written still returns them, in order. -/
+theorem extractBits_embedBits_prefix {cs : Carrier} {bs : List Bool} {n : Nat}
+    (h : bs.length ≤ cs.length) (hn : bs.length ≤ n) :
+    ∃ rest, extractBits n (embedBits cs bs) = bs ++ rest := by
+  induction bs generalizing cs n with
+  | nil => exact ⟨extractBits n cs, by simp [embedBits]⟩
+  | cons b bs ih =>
+      cases cs with
+      | nil => simp at h
+      | cons c cs =>
+          cases n with
+          | zero => simp at hn
+          | succ m =>
+              have h' : bs.length ≤ cs.length := by simpa using h
+              have hn' : bs.length ≤ m := by simpa using hn
+              obtain ⟨rest, hrest⟩ := ih h' hn'
+              refine ⟨rest, ?_⟩
+              have hbit : ((2 * (c / 2) + if b = true then 1 else 0) % 2 == 1) = b := by
+                cases b <;> simp
+              unfold extractBits at hrest ⊢
+              simp only [embedBits, List.take_succ_cons, List.map_cons, hbit, hrest,
+                List.cons_append]
+
+/-- Byte reassembly reads an embedded payload off the front of a longer
+bit stream. -/
+theorem fromBits_toBits_append {p : List Nat} (h : ∀ v ∈ p, v < 256) (rest : List Bool) :
+    fromBits (toBits p ++ rest) = p ++ fromBits rest := by
+  induction p with
+  | nil => simp [toBits]
+  | cons b p ih =>
+      have hb : b < 256 := h b (by simp)
+      have hrest : ∀ v ∈ p, v < 256 := fun v hv => h v (by simp [hv])
+      have hbits : byteBits b = [b / 2 ^ 7 % 2 == 1, b / 2 ^ 6 % 2 == 1, b / 2 ^ 5 % 2 == 1,
+          b / 2 ^ 4 % 2 == 1, b / 2 ^ 3 % 2 == 1, b / 2 ^ 2 % 2 == 1, b / 2 ^ 1 % 2 == 1,
+          b / 2 ^ 0 % 2 == 1] := by
+        simp [byteBits, List.range_succ]
+      rw [toBits, List.flatMap_cons, hbits]
+      show bitsByte _ :: fromBits (toBits p ++ rest) = _
+      rw [ih hrest, ← hbits, bitsByte_byteBits hb]
+      simp
+
+/-- **A meme can be decoded by a stranger.**  Reading a carrier to its
+capacity returns the hidden payload first, whatever follows. -/
+theorem extractBlob_embedBlob_prefix {cs : Carrier} {payload : List Nat} {n : Nat}
+    (hp : ∀ v ∈ payload, v < 256) (hfit : 8 * payload.length ≤ cs.length)
+    (hn : payload.length ≤ n) :
+    ∃ rest, extractBlob n (embedBlob cs payload) = payload ++ rest := by
+  have hlen : (toBits payload).length = 8 * payload.length := by
+    simp [toBits, List.length_flatMap, Nat.mul_comm]
+  obtain ⟨bits, hbits⟩ :=
+    extractBits_embedBits_prefix (cs := cs) (bs := toBits payload) (n := 8 * n)
+      (by omega) (by omega)
+  exact ⟨fromBits bits, by
+    unfold extractBlob embedBlob
+    rw [hbits, fromBits_toBits_append hp]⟩
+
 /-- A status update fits iff it is within the carrier's capacity. -/
 theorem fits_iff_capacity (cs : Carrier) (payload : List Nat) :
     8 * payload.length ≤ cs.length ↔ payload.length ≤ cs.length / 8 := by

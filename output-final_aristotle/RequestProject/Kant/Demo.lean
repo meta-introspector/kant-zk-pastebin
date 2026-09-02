@@ -24,6 +24,14 @@ import RequestProject.Kant.Credits
 import RequestProject.Kant.CodeMovie
 import RequestProject.Kant.Sheaf
 import RequestProject.Kant.Pipeline
+import RequestProject.Kant.Text
+import RequestProject.Kant.Clipboard
+import RequestProject.Kant.Feed
+import RequestProject.Kant.Meme
+import RequestProject.Kant.Repost
+import RequestProject.Kant.Strip
+import RequestProject.Kant.Rendezvous
+import RequestProject.Kant.Relay
 
 set_option autoImplicit false
 set_option relaxedAutoImplicit false
@@ -100,6 +108,166 @@ def ledger : Ledger := (Ledger.empty.serve "peer-a".toList (4 * 1024)).serve "pe
 #guard (ledger.spend "peer-a".toList 5).isNone
 #guard ((ledger.spend "peer-a".toList 3).map (fun L => L.balance "peer-a".toList)) = some 1
 
+/-! ## The feed -/
+
+/-- A reply to the sample paste, so the thread view has something to
+show. -/
+def replyPaste : Paste :=
+  { id := "paste_20260902_000100".toList
+    title := "Re: Kant <ZK> Pastebin".toList
+    content := "Antinomies of pure pasting".toUTF8.toList
+    timestamp := "20260902_000100".toList
+    replyTo := some samplePaste.witness }
+
+def feedStore : Store := (Store.empty.put samplePaste).put replyPaste
+
+#guard (Kant.Feed.view feedStore).length = 2
+#guard ((Kant.Feed.view feedStore).map Kant.Feed.Row.witness).contains samplePaste.witness
+-- The newest post is shown first.
+#guard ((Kant.Feed.newest (Kant.Feed.feed feedStore)).headD samplePaste).id = replyPaste.id
+-- Search finds the phrase in the body, and only where it occurs.
+#guard (Kant.Feed.search "pure".toList (Kant.Feed.feed feedStore)).length = 1
+#guard (Kant.Feed.search "Critique".toList (Kant.Feed.feed feedStore)).length = 1
+#guard (Kant.Feed.search "Hegel".toList (Kant.Feed.feed feedStore)).length = 0
+-- The thread of the sample paste contains it and its one reply.
+#guard (Kant.Feed.thread samplePaste (Kant.Feed.feed feedStore)).length = 2
+-- Paging the feed two at a time shows every post exactly once.
+#guard (Kant.Feed.paginate 1 (Kant.Feed.feed feedStore)).length = 2
+#guard (Kant.Feed.paginate 1 (Kant.Feed.feed feedStore)).flatten = Kant.Feed.feed feedStore
+-- The rendered row escapes the title but keeps it readable.
+#guard Kant.Erdfa.unescape (Kant.Feed.row samplePaste).title = samplePaste.title
+
+/-! ## Copy and paste -/
+
+#guard Kant.Clipboard.pasteText (Kant.Clipboard.copyText samplePaste) = some samplePaste
+#guard Kant.Clipboard.pasteText (Kant.Clipboard.copyText replyPaste) = some replyPaste
+-- The clipboard text of a row is the clipboard text of its post.
+#guard (Kant.Feed.row samplePaste).copy = Kant.Clipboard.copyText samplePaste
+-- The numeric results copy and paste back unchanged.
+#guard Kant.Clipboard.pasteReceipt
+         (Kant.Clipboard.copyReceipt (Kant.Clipboard.receiptOf samplePaste 7))
+       = some (Kant.Clipboard.receiptOf samplePaste 7)
+/-- The clipboard text of the sample paste, with one byte prepended to
+the content field but the original witness left in place. -/
+def tamperedEnvelope : Kant.Clipboard.Envelope :=
+  ⟨Kant.Clipboard.tagPaste,
+    [Kant.Text.asciiBytes samplePaste.id, Kant.Text.asciiBytes samplePaste.title,
+     0 :: samplePaste.content, Kant.Text.asciiBytes samplePaste.timestamp,
+     Kant.Clipboard.optField none, Kant.Text.asciiBytes samplePaste.witness]⟩
+
+-- Content that does not match the witness travelling with it is refused.
+#guard (Kant.Clipboard.toPaste tamperedEnvelope).isNone
+#guard (Kant.Clipboard.pasteText tamperedEnvelope.encode).isNone
+-- Everything on screen copies and pastes back post for post.
+#guard Kant.Clipboard.pasteAll (Kant.Clipboard.copyAll (Kant.Feed.feed feedStore))
+       = some (Kant.Feed.feed feedStore)
+-- A shared link carries the whole post.
+#guard ((Kant.Clipboard.parseShareUrl
+           (Kant.Clipboard.shareUrl "https://kant.zk/p".toList
+             (Kant.Clipboard.ofPaste samplePaste))).bind Kant.Clipboard.toPaste)
+       = some samplePaste
+
+/-! ## Memes with embedded data -/
+
+/-- A flat grey meme template, big enough to carry a whole post. -/
+def memeTemplate : Kant.Meme.Template :=
+  { topText := "WHEN THE CATEGORICAL IMPERATIVE".toList
+    bottomText := "IS ALSO A CONTENT ADDRESS".toList
+    carrier := List.replicate 8192 128 }
+
+#guard 8 * (Kant.Meme.payload (Kant.Clipboard.ofPaste samplePaste)).length ≤ 8192
+#guard (Kant.Meme.ofPaste memeTemplate samplePaste).length = 8192
+#guard Kant.Meme.toPaste (Kant.Meme.ofPaste memeTemplate samplePaste) = some samplePaste
+#guard Kant.Meme.toReceipt
+         (Kant.Meme.ofReceipt memeTemplate (Kant.Clipboard.receiptOf samplePaste 7))
+       = some (Kant.Clipboard.receiptOf samplePaste 7)
+-- The picture is disturbed by at most one unit per sample.
+#guard ((Kant.Meme.ofPaste memeTemplate samplePaste).zip memeTemplate.carrier).all
+         (fun p => p.1 / 2 == p.2 / 2)
+-- A page of the feed travels in one meme too, when the template has room.
+#guard Kant.Meme.toPastes (Kant.Meme.ofPastes memeTemplate [samplePaste]) = some [samplePaste]
+-- A meme carrying a tampered envelope is refused just as pasted text is.
+#guard (Kant.Meme.toPaste (Kant.Meme.render memeTemplate tamperedEnvelope)).isNone
+-- The address is visible on the meme, not only hidden in it.
+#guard (Kant.Text.containsSub samplePaste.witness
+         (Kant.Erdfa.unescape (Kant.Meme.caption memeTemplate samplePaste)))
+
+/-! ## Quote reposts and share cards -/
+
+/-- Quoting the sample post with a remark of one's own. -/
+def sampleQuote : Kant.Repost.Quote :=
+  Kant.Repost.quoteWith replyPaste samplePaste
+
+-- A quote copies out and pastes back, commentary and original alike.
+#guard Kant.Repost.pasteQuote (Kant.Repost.copyQuote sampleQuote) = some sampleQuote
+#guard ((Kant.Repost.pasteQuote (Kant.Repost.copyQuote sampleQuote)).map
+          Kant.Repost.Quote.original) = some samplePaste
+-- A quote whose original has been doctored is refused outright.
+#guard (Kant.Repost.pasteQuote
+         (Kant.Clipboard.Envelope.encode
+           ⟨Kant.Repost.tagQuote,
+            [Kant.Text.asciiBytes (Kant.Clipboard.copyText replyPaste),
+             Kant.Text.asciiBytes tamperedEnvelope.encode]⟩)).isNone
+-- A quote also travels as one picture.  A quote carries two whole posts,
+-- so the demo uses two short ones to stay inside the small template.
+/-- A short post, for the picture-sized demo. -/
+def briefPost : Paste :=
+  { id := "a1".toList
+    title := "hi".toList
+    content := "yes".toUTF8.toList
+    timestamp := "20260902".toList }
+
+/-- A short remark quoting it. -/
+def briefRemark : Paste :=
+  { id := "a2".toList
+    title := "re".toList
+    content := "no".toUTF8.toList
+    timestamp := "20260903".toList }
+
+def briefQuote : Kant.Repost.Quote := Kant.Repost.quoteWith briefRemark briefPost
+
+#guard 8 * (Kant.Meme.payload (Kant.Repost.ofQuote briefQuote)).length ≤ 8192
+#guard Kant.Repost.memeToQuote (Kant.Repost.memeOfQuote memeTemplate briefQuote)
+       = some briefQuote
+
+/-- Where the cards point. -/
+def cardBase : List Char := "https://kant.zk/p".toList
+
+-- The card's visible headline and its embedded data travel together.
+#guard ((Kant.Repost.readCard (Kant.Repost.postCard cardBase samplePaste)).bind
+          Kant.Clipboard.toPaste) = some samplePaste
+#guard ((Kant.Repost.readCard (Kant.Repost.receiptCard cardBase
+           (Kant.Clipboard.receiptOf samplePaste 7))).bind Kant.Clipboard.toReceipt)
+       = some (Kant.Clipboard.receiptOf samplePaste 7)
+#guard ((Kant.Repost.readCard (Kant.Repost.bundleCard cardBase (Kant.Feed.feed feedStore))).bind
+          Kant.Clipboard.toPastes) = some (Kant.Feed.feed feedStore)
+-- The headline is readable, markup-free, and shows the address.
+#guard Kant.Text.containsSub samplePaste.witness
+         (Kant.Erdfa.unescape (Kant.Repost.headline samplePaste))
+#guard !(Kant.Repost.headline samplePaste).contains '<'
+#guard Kant.Text.containsSub (Kant.Repost.headline samplePaste)
+         (Kant.Repost.postCard cardBase samplePaste)
+
+/-! ## Strips: one share spread over several pictures -/
+
+/-- Small stills, to show a share too big for one picture. -/
+def stripTemplate : Kant.Meme.Template :=
+  { memeTemplate with carrier := List.replicate 1024 128 }
+
+-- A post goes out as eight stills of forty payload bytes each…
+#guard (Kant.Strip.ofPaste stripTemplate 40 samplePaste).length = 8
+#guard (Kant.Strip.ofPaste stripTemplate 40 samplePaste).all (fun c => c.length == 1024)
+-- … and comes back whole.
+#guard Kant.Strip.toPaste (Kant.Strip.ofPaste stripTemplate 40 samplePaste) = some samplePaste
+-- The stills may be collected in any order.
+#guard Kant.Strip.toPaste (Kant.Strip.ofPaste stripTemplate 40 samplePaste).reverse
+       = some samplePaste
+-- A quote — two whole posts — fits no single small picture, but fits a strip.
+#guard Kant.Strip.toQuote (Kant.Strip.ofQuote stripTemplate 40 sampleQuote) = some sampleQuote
+-- So does a whole page of the feed.
+#guard Kant.Strip.toPastes (Kant.Strip.ofPastes stripTemplate 40 (Kant.Feed.feed feedStore))
+       = some (Kant.Feed.feed feedStore)
+
 /-! ## Code movies, Gödel numbers and circuits -/
 
 open Kant.CodeMovie in
@@ -123,5 +291,110 @@ open Kant.CodeMovie.Circuit in
 #guard eval (fun i => i == 0) demoCircuit = true
 open Kant.CodeMovie.Circuit in
 #guard eval (fun _ => true) demoCircuit = false
+
+/-! ## Finding other clients: invitations, rosters, relay and chat -/
+
+open Kant.Rendezvous Kant.Relay in
+/-- The secret behind the demo chat code. -/
+def demoSecret : Blob := "kant-zk demo secret".toUTF8.toList
+
+open Kant.Rendezvous in
+/-- Two ways of reaching the demo peer. -/
+def demoAddrs : List Address :=
+  [⟨.libp2p, "/dns4/relay.example.org/tcp/443/wss".toList⟩, ⟨.iroh, "irohticket1".toList⟩]
+
+open Kant.Rendezvous in
+/-- The invitation a chat QR code carries. -/
+def demoInvite : Invite :=
+  ⟨"https://relay.example.org".toList, demoSecret, "alice".toList, demoAddrs⟩
+
+open Kant.Rendezvous in
+/-- Alice's peer announcement. -/
+def demoAnnounce : Announce := ⟨"alice".toList, 7, demoAddrs⟩
+
+open Kant.Rendezvous in
+/-- Bob's peer announcement. -/
+def demoAnnounceBob : Announce := ⟨"bob".toList, 2, [⟨.libp2p, "/dns4/b.example/tcp/443/wss".toList⟩]⟩
+
+open Kant.Rendezvous Kant.Relay in
+/-- A line of chat in the demo room. -/
+def demoMsg : Msg := ⟨demoInvite.room, "alice".toList, 1, "hello".toUTF8.toList⟩
+
+open Kant.Rendezvous Kant.Relay in
+/-- A second line, from Bob. -/
+def demoMsgBob : Msg := ⟨demoInvite.room, "bob".toList, 2, "hi there".toUTF8.toList⟩
+
+open Kant.Rendezvous in
+#guard (roomOf demoSecret).length = 64
+open Kant.Rendezvous in
+#guard String.ofList (roomOf demoSecret) =
+  "bd71dd50a1ee00eaa91ea3fb701d151f8bc3059f81b1766c51ea8736f88acec1"
+open Kant.Rendezvous in
+#guard pasteInvite (copyInvite demoInvite) == some demoInvite
+open Kant.Rendezvous in
+#guard String.ofList (copyInvite demoInvite) =
+  "6b7a696e76697465:68747470733a2f2f72656c61792e6578616d706c652e6f7267:6b616e742d7a6b2064656d6f20736563726574:616c696365:032f646e73342f72656c61792e6578616d706c652e6f72672f7463702f3434332f777373:0269726f687469636b657431"
+open Kant.Rendezvous Kant.Sneakernet in
+#guard (copyInvite demoInvite).length ≤ Channel.qr.capacity
+open Kant.Rendezvous in
+#guard parseInviteUrl (inviteUrl "https://kant.example/#".toList.dropLast demoInvite) == some demoInvite
+open Kant.Rendezvous in
+#guard parseAnnounce (printAnnounce demoAnnounce) == some demoAnnounce
+open Kant.Rendezvous in
+#guard String.ofList (printAnnounce demoAnnounce) =
+  "6b7a70656572:616c696365:07:032f646e73342f72656c61792e6578616d706c652e6f72672f7463702f3434332f777373:0269726f687469636b657431"
+open Kant.Relay in
+#guard String.ofList demoMsg.witness =
+  "2493daf48dda511be13a96a953fd10a49a744fc1cff4e209d1435304d28b6602"
+open Kant.Relay in
+#guard parseMsg (printMsg demoMsg) == some demoMsg
+open Kant.Relay in
+#guard String.ofList (printMsg demoMsg) =
+  "6b7a63686174:62643731646435306131656530306561613931656133666237303164313531663862633330353966383162313736366335316561383733366638386163656331:616c696365:01:68656c6c6f:32343933646166343864646135313162653133613936613935336664313061343961373434666331636666346532303964313433353330346432386236363032"
+
+open Kant.Bytes Kant.Text Kant.Clipboard Kant.Relay in
+/-- The same line with the body swapped but the old witness left in place:
+what a dishonest relay would hand out. -/
+def demoTamperedLine : List Char :=
+  (Envelope.mk tagChat
+    [asciiBytes demoMsg.room, asciiBytes demoMsg.sender, natToBytesBE demoMsg.seq,
+      "goodbye".toUTF8.toList, asciiBytes demoMsg.witness]).encode
+
+open Kant.Relay in
+#guard parseMsg demoTamperedLine == none
+open Kant.Relay in
+#guard accept [] demoTamperedLine == []
+
+open Kant.Rendezvous Kant.Relay in
+/-- The relay after Alice and Bob have both announced themselves. -/
+def demoServer : Server :=
+  ((Server.empty.post demoInvite.room (printAnnounce demoAnnounce)).post
+    demoInvite.room (printAnnounce demoAnnounceBob))
+
+open Kant.Rendezvous Kant.Relay in
+#guard (demoServer.fetch demoInvite.room 0).2 = 2
+open Kant.Rendezvous Kant.Relay in
+#guard (demoServer.fetch demoInvite.room 1).1.length = 1
+open Kant.Rendezvous Kant.Relay in
+#guard Roster.knows (acceptPeers [] (demoServer.fetch demoInvite.room 0).1) "bob".toList
+open Kant.Rendezvous Kant.Relay in
+#guard Roster.knows (acceptPeers [] (demoServer.fetch demoInvite.room 0).1) "alice".toList
+open Kant.Rendezvous Kant.Relay in
+#guard (Roster.best (acceptPeers [] (demoServer.fetch demoInvite.room 0).1) "alice".toList)
+    == some demoAnnounce
+
+open Kant.Relay in
+/-- Two chat lines, as they leave the relay. -/
+def demoChatLines : List (List Char) := [printMsg demoMsg, printMsg demoMsgBob]
+
+open Kant.Relay in
+#guard (receive [] demoChatLines).length = 2
+open Kant.Relay in
+#guard transcript (receive [] demoChatLines) == transcript (receive [] demoChatLines.reverse)
+open Kant.Relay in
+#guard (transcript (receive [] demoChatLines)).map (fun m => m.seq) = [1, 2]
+open Kant.Relay in
+#guard transcript (receive [] (demoChatLines ++ [demoTamperedLine]))
+    == transcript (receive [] demoChatLines)
 
 end Kant.Demo

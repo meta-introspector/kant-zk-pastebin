@@ -10,10 +10,11 @@
 // credits itself — the ledger (Kant/Credits.lean) is authoritative and lives in
 // the page.
 
-const SHELL_CACHE = "kantzk-shell-v2";
+const SHELL_CACHE = "kantzk-shell-v3";
 const PIN_CACHE = "kantzk-pins-v1";
 
-const SHELL = ["./", "./index.html", "./kantzk.mjs", "./kant-wasm.mjs"];
+const SHELL = ["./", "./index.html", "./kantzk.mjs", "./kant-wasm.mjs",
+               "./kant-net.mjs", "./kant-qr.mjs"];
 
 // The Lean-extracted kernel, cached best-effort: a deployment that does not
 // ship dist/ must still get a working offline shell.

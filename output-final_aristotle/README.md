@@ -26,6 +26,9 @@ lake build                # builds every Lean module; 0 sorries, 0 warnings
 lake exe emitwasm dist    # extracts dist/kant_kernel.wasm from Lean (no C toolchain needed)
 node web/test.mjs         # 29 conformance checks of the JS layer against Lean golden vectors
 node web/wasm-test.mjs    # validates and runs the extracted .wasm, and cross-checks it
+node web/net-test.mjs     # 32 checks of discovery, chat and the relay (incl. a real relay end-to-end)
+node web/qr-test.mjs      # 15 checks of the QR encoder used for the chat code
+node server/relay.mjs --port 8787 --static web    # the relay + the client, on your own machine
 python3 -m http.server -d web 8080   # then open http://localhost:8080/
 ```
 
@@ -43,6 +46,14 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 | `IPFS.md` | `RequestProject/Kant/Sync.lean` | IPFS / iroh / libp2p / torrent / archive.org / UUCP / QR-burst sync |
 | new (credits) | `RequestProject/Kant/Credits.lean` | serve-to-earn credit ledger |
 | new (code movies) | `RequestProject/Kant/CodeMovie.lean` | RLE snippets, Gödel numbering, circuits |
+| new (feed) | `RequestProject/Kant/Feed.lean` | the reader's view: rows, search, paging, threads, newest-first ordering |
+| new (clipboard) | `RequestProject/Kant/Clipboard.lean` | copy/paste envelope for posts, results and whole pages, plus share links |
+| new (memes) | `RequestProject/Kant/Meme.lean` | memes with the post embedded in the picture |
+| new (reposts) | `RequestProject/Kant/Repost.lean` | quote reposts that carry the original whole, and share cards |
+| new (strips) | `RequestProject/Kant/Strip.lean` | one share spread over several pictures, collected in any order |
+| new (discovery) | `RequestProject/Kant/Rendezvous.lean` | how two clients find each other: peer announcements, rosters, and the chat code (QR invite) that names a room |
+| new (relay/chat) | `RequestProject/Kant/Relay.lean` | the append-only room log a relay serves, self-certifying chat messages, and the client's view of a room |
+| new (text) | `RequestProject/Kant/Text.lean` | ASCII transcoding, field framing, substring search, numeric byte encoding |
 | — | `RequestProject/Kant/Pipeline.lean` | end-to-end paste → address → frame → stego → recover theorem |
 | — | `RequestProject/Kant/Demo.lean` | `#guard`-checked worked examples of every layer |
 | — | `RequestProject/Kant.lean` | aggregator |
@@ -93,11 +104,73 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 - `Kant.CodeMovie.frameAt_periodic` — playback loops.
 - `Kant.CodeMovie.Circuit.decodeCircuit_encodeCircuit`, `encode_injective` — circuits survive the same numeric encoding.
 
+**The feed**
+
+- `Kant.Feed.view_resolves` — every row on screen is a post the store really holds, at the address the row shows.
+- `Kant.Feed.row_title_recoverable`, `row_body_recoverable`, `row_no_markup` — rows are lossless and cannot inject markup.
+- `Kant.Feed.mem_search_iff` — search returns exactly the posts containing the phrase.
+- `Kant.Feed.paginate_flatten`, `paginate_length_le`, `paginate_length_pos` — paging shows each post exactly once, no page over the page size, no empty pages.
+- `Kant.Feed.thread_sound`, `mem_replies_iff`, `root_mem_thread` — a thread is its root plus precisely its replies.
+- `Kant.Feed.newest_perm`, `newest_sorted` — ordering neither adds nor drops a post and really is ordered.
+
+**Copy and paste**
+
+- `Kant.Clipboard.Envelope.decode_encode` — copy then paste is the identity.
+- `Kant.Clipboard.pasteText_copyText`, `Kant.Feed.row_copy_roundTrip` — a copied post pastes back as that post.
+- `Kant.Clipboard.toPaste_eq_none_of_mismatch`, `pasteText_eq_none_of_mismatch` — content that disagrees with its witness is refused.
+- `Kant.Clipboard.pasteReceipt_copyReceipt_of_paste` — the results (address, size, credits) copy and paste back exactly.
+- `Kant.Clipboard.pasteAll_copyAll` — a whole page copies as one bundle and pastes back post for post.
+- `Kant.Clipboard.parseShareUrl_shareUrl`, `shareUrl_paste_roundTrip` — a share link carries the whole result.
+
+**Memes with embedded data**
+
+- `Kant.Meme.decode_render` — what is embedded comes back out, without the finder knowing the payload length.
+- `Kant.Meme.roundTrip_paste`, `roundTrip_receipt`, `roundTrip_pastes` — a post, its results, or a whole page shared as a meme are recovered exactly.
+- `Kant.Meme.render_length`, `render_valid`, `render_preserves_high_bits`, `fits_social` — the meme is the same size and the same picture, and stays within the 5 MB cap.
+- `Kant.Meme.caption_no_markup`, `caption_recoverable`, `witness_infix_caption` — the visible caption is safe in a page, readable back, and shows the address.
+
+**Quote reposts and share cards**
+
+- `Kant.Repost.pasteQuote_copyQuote`, `quoted_original` — a quote copies out and pastes back as the same remark on the same original.
+- `Kant.Repost.pasteQuote_eq_none_of_bad_original` — a doctored quotation is refused outright, so no one can be quoted saying something they did not post.
+- `Kant.Repost.roundTrip_quote` — a quote shared as one picture comes back as the same quote.
+- `Kant.Repost.readCard_card`, `pasteCard_postCard`, `pasteCard_receiptCard`, `pasteCard_bundleCard` — a card's visible headline and its embedded data travel together; the post, the results or the whole page come back from the card alone.
+- `Kant.Repost.postCard_headline_no_markup`, `headline_recoverable`, `card_shows_address` — the headline is safe in a page, readable back, and always shows the address.
+
+**Strips of pictures**
+
+- `Kant.Strip.readStrip_strip` — a share cut across several stills reads back as the envelope it was made from.
+- `Kant.Strip.readStrip_perm` — the stills may be posted, downloaded and collected in any order.
+- `Kant.Strip.roundTrip_post`, `roundTrip_pastes`, `roundTrip_quote_strip` — a post, a whole page or a quote shipped as a strip comes back exactly.
+- `Kant.Strip.strip_length`, `strip_still_length`, `strip_fits_social`, `strip_valid` — each still is the size of the template, a valid picture, and within the 5 MB cap.
+
+**Finding other clients**
+
+- `Kant.Rendezvous.roomOf` / `Kant.Rendezvous.scan_same_room` — everyone who scans the same chat code computes the same room name, and the room name is a digest, so the code never travels with the room secret in the clear.
+- `Kant.Rendezvous.pasteInvite_copyInvite`, `parseInviteUrl_inviteUrl` — a chat code, as text or as a link, reads back as the invitation it was made from.
+- `Kant.Rendezvous.invite_fits_qr` — an invitation fits in a QR code.
+- `Kant.Rendezvous.parseAnnounce_printAnnounce` — a peer announcement round-trips over the wire.
+- `Kant.Rendezvous.Roster.mem_merge_iff`, `merge_perm`, `merge_idem` — you learn exactly the peers you were told about, in any order, and hearing the same gossip twice changes nothing.
+- `Kant.Rendezvous.discovery_transitive`, `meet_knows` — if A knows B and B knows C then after one exchange A knows C; two strangers that scan the same code end up knowing each other.
+- `Kant.Rendezvous.best_spec`, `best_congr` — clients that heard the same announcements dial the same address for a peer.
+
+**The relay and chat**
+
+- `Kant.Relay.Server.lines_post`, `post_prefix`, `fetch_since`, `poll_lossless` — the relay is an append-only log per room: posting adds one line to one room, and polling from the cursor you were last given returns exactly what was posted since, with nothing lost.
+- `Kant.Relay.parseMsg_printMsg` — a chat message round-trips through the relay.
+- `Kant.Relay.parseMsg_eq_none_of_mismatch`, `relay_cannot_forge` — a line whose witness does not match its content is refused, so a relay can drop messages but cannot edit or invent them.
+- `Kant.Relay.mem_receive_iff`, `receive_perm`, `transcript_perm`, `clients_agree` — two clients handed the same messages by any route, in any order, show the same transcript.
+- `Kant.Relay.discover_via_relay` — a client that announces itself into a room is found by everyone who polls that room afterwards.
+
 **End to end**
 
 - `Kant.Pipeline.pipeline_roundTrip` — paste → witness → frames → LSB-stego carrier → recovered paste is the identity.
 - `Kant.Pipeline.pipeline_witness` — the recovered paste has the witness it was addressed by.
 - `Kant.Pipeline.publish_social_fits`, `carrier_capacity_needed` — published carriers respect the 5 MB limit and the stated capacity bound.
+
+The feed, the copy/paste envelope, the meme container, quote reposts, share
+cards and picture strips are specified in
+[`docs/FEED-CLIPBOARD-MEMES.md`](docs/FEED-CLIPBOARD-MEMES.md).
 
 ## Browser client (`web/`)
 
@@ -113,10 +186,22 @@ run it with `node web/test.mjs`.
 - hide a paste in a PNG via canvas LSB stego, or export SVG / animated-GIF-style frames;
 - record a ≤ 5 MB WebM social export with `MediaRecorder`;
 - read a paste aloud with `speechSynthesis` (TTS);
-- play a code movie back through WebGL.
+- play a code movie back through WebGL;
+- **see the posts**: a feed of every post held, newest first, with live search, paging, threads and per-post credits;
+- **copy and paste the results**: one-click copy of a post, of its results (address, size, credits), of a share link, or of the whole page as one bundle — and a box to paste any of those back in, which refuses anything whose content does not match the witness travelling with it;
+- **share as a meme with the data inside**: draw a meme from a built-in or uploaded template, hide the post (or its results, or the whole page) in the picture's least significant bits, and export a PNG within the 5 MB social cap — then read any such meme back and have its posts appear in the feed;
+- **quote and repost**: quote any post with a remark of your own, as text or as one picture — the quote carries the original whole, and a doctored quotation is refused when it is pasted back;
+- **share cards**: copy a readable headline plus a link whose fragment carries the post, the results or the whole page, ready to drop into any chat window or social feed;
+- **strips of stills**: when a share is too big for one picture, export it as a numbered set of PNGs — drop any collection of them back in, in any order, and the share is reassembled;
+- **find other clients and chat**: open or join a room, show the room's **chat QR code** (drawn by `web/kant-qr.mjs`, no dependencies) or copy it as text or a link, scan someone else's code with the camera, watch the peer list fill in, and talk — over a relay, over WebRTC once the relay has introduced you, or over `BroadcastChannel` between tabs of the same browser.
 
-Everything in `web/` is *unverified*: it is checked only by `web/test.mjs`, not
-by proof.
+`web/kant-net.mjs` is the transcription of `Kant.Rendezvous` and `Kant.Relay`
+plus the transports; `web/kant-qr.mjs` is a self-contained QR encoder for the
+chat code. See [`docs/DISCOVERY-AND-CHAT.md`](docs/DISCOVERY-AND-CHAT.md).
+
+Everything in `web/` and `server/` is *unverified*: it is checked only by the
+test scripts (`web/test.mjs`, `web/wasm-test.mjs`, `web/net-test.mjs`,
+`web/qr-test.mjs`), not by proof.
 
 ## WASM
 
@@ -149,9 +234,32 @@ WebAssembly, falling back to the JavaScript core if the binary is not served.
 
 ## Networking
 
+### Clients finding each other, and chat
+
+There is a running peer service in this repository: `server/`. Two ways to run
+it, one protocol:
+
+```
+node server/relay.mjs --port 8787 --static web   # your Linux box; zero dependencies
+cd server && npx wrangler deploy                 # Cloudflare Worker + one Durable Object per room
+```
+
+A **room** is named by the digest of a secret that never leaves the people who
+have the chat code, so the relay stores lines under an opaque name. The chat QR
+code carries the relay URL, that secret and the inviter's address; scanning it
+puts you in the same room, where you announce yourself, learn everyone else, and
+talk. Messages are self-certifying, so the relay cannot edit them — but the
+relay does see them, since line contents are not yet encrypted. The full
+walkthrough, protocol, systemd unit, nginx snippet and Cloudflare instructions
+are in [`docs/DISCOVERY-AND-CHAT.md`](docs/DISCOVERY-AND-CHAT.md) and
+[`server/README.md`](server/README.md).
+
+### The other transports
+
 See [`docs/WASM-AND-NETWORK.md`](docs/WASM-AND-NETWORK.md). Short version: the
 Lean → C → WebAssembly path (an alternative to the extraction above, which
 would cover the whole port) and the IPFS / iroh / libp2p / torrent /
-archive.org integration are specified and scripted there, but **no running peer
-service was produced in this repository**, and the emscripten toolchain that
-path needs is not present in the build environment used here.
+archive.org integration are specified and scripted there, but not implemented
+as running services here (the relay above is the only peer service in the
+repository), and the emscripten toolchain that path needs is not present in the
+build environment used here.

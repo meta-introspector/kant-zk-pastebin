@@ -12,8 +12,18 @@ The rest of this section, and section 1, describe the *other* route — Lean →
 → emscripten, which would cover the list- and string-processing definitions
 too. That route is still unbuilt here, and the caveats below still apply to it.
 
+**Second update.** A peer service *does* now exist in this repository: the
+rendezvous/chat relay in `server/` (a zero-dependency Node server and an
+equivalent Cloudflare Worker), with its client half in `web/kant-net.mjs` and
+the Lean specification in `RequestProject/Kant/Rendezvous.lean` and
+`RequestProject/Kant/Relay.lean`. It is what clients use to find each other and
+to chat; see `docs/DISCOVERY-AND-CHAT.md`. It was exercised end to end here by
+`node web/net-test.mjs` on the loopback interface, but it was not deployed to
+any public host from this environment. The IPFS / iroh / libp2p / torrent /
+archive.org services described below remain unimplemented.
+
 **No emscripten-built `.wasm` binary was produced in this repository, and no
-peer service was started or deployed.** The build environment used to produce
+IPFS/iroh/libp2p/torrent peer service was started or deployed.** The build environment used to produce
 this port has no emscripten (`emcc`), no WASI SDK, no `clang`/`wasm-ld`, and no
 outbound peer networking. What exists here is:
 
@@ -23,6 +33,8 @@ outbound peer networking. What exists here is:
   checked against Lean-computed golden vectors (`web/`, `node web/test.mjs`);
 - a verified Lean → wasm encoder and the binary it emits (`RequestProject/Wasm/`,
   `dist/kant_kernel.wasm`, `node web/wasm-test.mjs`);
+- a running rendezvous/chat relay and its browser client (`server/`,
+  `web/kant-net.mjs`, `node web/net-test.mjs`);
 - the build recipe and network design below, which is what you would run on a
   machine that does have the toolchain.
 
