@@ -70,14 +70,14 @@ theorem kernelBytes_validates (f : Func) (hf : f ∈ kernelModule.funcs) :
       = some [Decode.VType.i64] :=
   Decode.typecheck_compile (kernelModule_wf f hf) []
 
-/-- Build-time checks: the bytes actually written to disk parse, and they
-carry all twenty-one exports. -/
+-- Build-time checks on the bytes actually written to disk: they parse, they
+-- carry all twenty-one exports, and every signature has a body.
 #guard (Decode.decodeModule (Encode.module kernelModule)).isSome
 
 #guard ((Decode.decodeModule (Encode.module kernelModule)).map
   fun d => d.exports.length) = some 21
 
 #guard ((Decode.decodeModule (Encode.module kernelModule)).map
-  fun d => d.arities.length = d.codes.length) = some true
+  fun d => decide (d.arities.length = d.codes.length)) = some true
 
 end Kant.Wasm.Kernel
