@@ -147,6 +147,45 @@ route, in any order, display the same chat (<code>clients_agree</code>).</small>
 </div>
 <div class="meta" id="netchat"></div>
 
+<h2>8. Sneakernet: keep going with no relay at all</h2>
+<p><small>This section talks to nobody.  Your lines live in a <em>spool</em> in this browser; the
+whole spool copies out as one <em>mailbag</em> — a single line of ASCII you can send in a DM, tweet
+as a numbered thread, print as a QR code, or hang off a link.  Whoever pastes it is caught up to
+the moment it was made, and nothing else ever reaches them: you are exactly as up to date as the
+last code you pasted (<code>Kant.Uucp.Node.mem_sneakernet_iff</code>).  A doctored bag is refused
+whole (<code>bag_rejects_forgery</code>), the parts of a thread may arrive in any order
+(<code>readThread_perm</code>), and what you end up displaying is exactly what a relay would have
+shown you (<code>sneakernet_matches_relay</code>).</small></p>
+<div class="row">
+  <label>my name <input id="snname" placeholder="alice" style="width: 12em" /></label>
+  <label>room <input id="snroom" placeholder="a shared word, e.g. kant-zk demo secret" /></label>
+</div>
+<div class="row">
+  <input id="snsay" placeholder="write a line — offline is fine" />
+  <button id="snwrite">Write it</button>
+  <button id="sncopy">Copy my bag</button>
+  <button id="snlink">Copy my link</button>
+  <button id="snqr">Show my QR code</button>
+  <button id="sntweets">Cut into tweets</button>
+  <button id="snscan">Scan a code with the camera</button>
+</div>
+<textarea id="snpaste" rows="3" placeholder="paste a bag, a link, or a whole tweet thread (one part per line)"></textarea>
+<div class="row">
+  <button id="snpastebtn">Paste it in</button>
+  <button id="snforget">Forget everything</button>
+</div>
+<div class="row">
+  <div>
+    <div id="snqrbox"></div>
+    <div class="meta" id="snqrmeta"></div>
+  </div>
+  <div style="flex: 1; min-width: 18em">
+    <div class="meta" id="snstatus">empty spool</div>
+    <div class="meta" id="snview"></div>
+  </div>
+</div>
+<pre class="meta" id="snout" style="white-space: pre-wrap; word-break: break-all"></pre>
+
 <script type="module">
 import * as K from "./kantzk.mjs";
 import { loadKernel, KERNEL_EXPORTS } from "./kant-wasm.mjs";
@@ -1060,6 +1099,141 @@ $("netscan").onclick = async () => {
 })();
 
 render();
+</script>
+<script type="module">
+// --- the static sneakernet ------------------------------------------------
+// Pure layer: web/kant-uucp.mjs, a transcription of RequestProject/Kant/
+// Uucp.lean.  There is no transport here on purpose: state moves only when a
+// human moves a code.  The spool is kept in localStorage, so the page is as
+// up to date as the last code pasted into it, exactly as the Lean model says.
+import * as U from "./kant-uucp.mjs";
+import { roomOf, msgText } from "./kant-net.mjs";
+import { utf8 } from "./kantzk.mjs";
+import { qrEncode, qrSvg } from "./kant-qr.mjs";
+
+const $ = (id) => document.getElementById(id);
+let sn = U.loadNode("peer-" + Math.random().toString(36).slice(2, 7));
+let snCamera = null;
+
+$("snname").value = sn.name;
+$("snroom").value = localStorage.getItem("kant-sneakernet-room") || "kant-zk demo secret";
+
+const snRoom = () => roomOf(utf8($("snroom").value || "kant-zk demo secret"));
+
+function snRender() {
+  const bag = sn.bag();
+  const parts = U.bagForCarrier(bag, "tweet");
+  $("snstatus").textContent =
+    `${sn.spool.length} line(s) held as ${sn.name}\n` +
+    `bag ${bag.length} characters — ` +
+    `dm ${bag.length <= U.CARRIER_CAPACITY.dm ? "yes" : "no"}, ` +
+    `qr ${bag.length <= U.CARRIER_CAPACITY.qr ? "yes" : "no"}, ` +
+    `tweet ${parts.length === 1 ? "yes" : `${parts.length} parts`}`;
+  $("snview").textContent = sn.view().length
+    ? "spool:\n" + sn.view().map((m) => `  ${m.sender} #${m.seq}: ${msgText(m)}`).join("\n")
+    : "nothing here yet — write a line, or paste somebody's bag";
+  U.saveNode(sn);
+  localStorage.setItem("kant-sneakernet-room", $("snroom").value);
+}
+
+$("snwrite").onclick = () => {
+  const text = $("snsay").value.trim();
+  if (!text) return;
+  sn.name = $("snname").value.trim() || sn.name;
+  sn.write(snRoom(), text);
+  $("snsay").value = "";
+  $("snout").textContent = "";
+  snRender();
+};
+
+const copy = async (text, note) => {
+  try { await navigator.clipboard.writeText(text); $("snqrmeta").textContent = note; }
+  catch { $("snout").textContent = text; }
+};
+
+$("sncopy").onclick = () => copy(sn.bag(), `copied ${sn.bag().length} characters — paste it into a DM`);
+
+$("snlink").onclick = () => {
+  const base = location.href.split("#")[0];
+  const link = sn.bagLink(base);
+  copy(link, `copied a ${link.length}-character link`);
+};
+
+$("sntweets").onclick = () => {
+  const parts = U.bagForCarrier(sn.bag(), "tweet");
+  $("snout").textContent = parts
+    .map((p, i) => `--- ${i + 1}/${parts.length} (${p.length} chars)\n${p}`).join("\n\n");
+};
+
+$("snqr").onclick = () => {
+  const bag = sn.bag();
+  const codes = bag.length <= U.CARRIER_CAPACITY.qr ? [bag] : U.bagForCarrier(bag, "tweet");
+  try {
+    $("snqrbox").innerHTML = codes.slice(0, 4).map((c) => qrSvg(qrEncode(c), { scale: 3 })).join(" ");
+    $("snqrmeta").textContent = codes.length === 1
+      ? "one code holds the whole spool"
+      : `${codes.length} codes (showing the first ${Math.min(4, codes.length)})`;
+  } catch (e) { $("snqrmeta").textContent = `no code: ${e.message}`; }
+};
+
+$("snpastebtn").onclick = () => {
+  const text = $("snpaste").value.trim();
+  if (!text) return;
+  const r = sn.paste(text);
+  $("snqrmeta").textContent = r.accepted
+    ? `pasted: ${r.added} new line(s)`
+    : "refused: that is not a bag, or a line failed its own witness";
+  if (r.accepted) $("snpaste").value = "";
+  snRender();
+};
+
+$("snforget").onclick = () => {
+  sn = U.SneakerNode.blank($("snname").value.trim() || "anon");
+  $("snqrbox").innerHTML = "";
+  $("snout").textContent = "";
+  snRender();
+};
+
+$("snscan").onclick = async () => {
+  if (!("BarcodeDetector" in window)) {
+    $("snqrmeta").textContent = "this browser cannot scan codes; paste the text instead";
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    const video = document.createElement("video");
+    video.srcObject = stream; video.playsInline = true; await video.play();
+    $("snqrbox").innerHTML = ""; $("snqrbox").appendChild(video);
+    const det = new BarcodeDetector({ formats: ["qr_code"] });
+    const collected = [];
+    snCamera = setInterval(async () => {
+      const found = await det.detect(video).catch(() => []);
+      for (const b of found) {
+        if (!collected.includes(b.rawValue)) collected.push(b.rawValue);
+      }
+      const r = sn.paste(collected.length === 1 ? collected[0] : collected.join("\n"));
+      if (r.accepted && r.added >= 0) {
+        clearInterval(snCamera); snCamera = null;
+        stream.getTracks().forEach((t) => t.stop());
+        $("snqrbox").innerHTML = "";
+        $("snqrmeta").textContent = `scanned ${collected.length} code(s): ${r.added} new line(s)`;
+        snRender();
+      }
+    }, 400);
+  } catch (e) { $("snqrmeta").textContent = `camera unavailable (${e.message})`; }
+};
+
+// A link whose fragment carries a bag catches this browser up on arrival.
+(function snFromLink() {
+  const frag = location.hash.slice(1);
+  if (!frag) return;
+  const ms = U.openBag(frag);
+  if (!ms) return;
+  const r = sn.paste(U.packBag(ms));
+  if (r.accepted) $("snqrmeta").textContent = `this link carried ${r.added} new line(s)`;
+})();
+
+snRender();
 </script>
 </body>
 

@@ -21,6 +21,7 @@ This module re-exports the whole port.  The layers, bottom up:
 | `Kant.Sync` | IPFS/iroh/libp2p/torrent/archive.org replication | eventual consistency |
 | `Kant.Rendezvous` | peer discovery, rosters, the chat QR invite | order-free gossip, one code one room |
 | `Kant.Relay` | the room mailbox served by the relay | append-only log, unforgeable chat, identical transcripts |
+| `Kant.Uucp` | the relay-free static sneakernet: DMs, tweets, bang paths | mailbag round trips, no news without a paste, relay redundancy, snapshot staleness |
 | `Kant.Credits` | serving credits | no overdraft, credit conservation |
 | `Kant.CodeMovie` | snippet playback | RLE, Gödel numbers, circuits |
 | `Kant.Pipeline` | the whole flow | end-to-end self-certifying round trip |
@@ -42,6 +43,7 @@ import RequestProject.Kant.Stego
 import RequestProject.Kant.Sync
 import RequestProject.Kant.Rendezvous
 import RequestProject.Kant.Relay
+import RequestProject.Kant.Uucp
 import RequestProject.Kant.Credits
 import RequestProject.Kant.CodeMovie
 import RequestProject.Kant.Pipeline

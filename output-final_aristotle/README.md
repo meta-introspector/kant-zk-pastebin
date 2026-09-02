@@ -28,6 +28,8 @@ node web/test.mjs         # 29 conformance checks of the JS layer against Lean g
 node web/wasm-test.mjs    # validates and runs the extracted .wasm, and cross-checks it
 node web/net-test.mjs     # 32 checks of discovery, chat and the relay (incl. a real relay end-to-end)
 node web/qr-test.mjs      # 15 checks of the QR encoder used for the chat code
+node web/uucp-test.mjs    # 28 checks of the relay-free sneakernet (bags, tweets, bang paths, static pages)
+node scripts/sneakernet.mjs init site --name alice   # a static sneakernet site: no server to run
 node server/relay.mjs --port 8787 --static web    # the relay + the client, on your own machine
 python3 -m http.server -d web 8080   # then open http://localhost:8080/
 ```
@@ -53,6 +55,7 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 | new (strips) | `RequestProject/Kant/Strip.lean` | one share spread over several pictures, collected in any order |
 | new (discovery) | `RequestProject/Kant/Rendezvous.lean` | how two clients find each other: peer announcements, rosters, and the chat code (QR invite) that names a room |
 | new (relay/chat) | `RequestProject/Kant/Relay.lean` | the append-only room log a relay serves, self-certifying chat messages, and the client's view of a room |
+| new (sneakernet) | `RequestProject/Kant/Uucp.lean` | the relay-free static sneakernet: mailbags carried by DM, tweet thread, QR code or link; bang-path store and forward; the static site and its snapshot staleness |
 | new (text) | `RequestProject/Kant/Text.lean` | ASCII transcoding, field framing, substring search, numeric byte encoding |
 | — | `RequestProject/Kant/Pipeline.lean` | end-to-end paste → address → frame → stego → recover theorem |
 | — | `RequestProject/Kant/Demo.lean` | `#guard`-checked worked examples of every layer |
@@ -161,6 +164,16 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 - `Kant.Relay.parseMsg_eq_none_of_mismatch`, `relay_cannot_forge` — a line whose witness does not match its content is refused, so a relay can drop messages but cannot edit or invent them.
 - `Kant.Relay.mem_receive_iff`, `receive_perm`, `transcript_perm`, `clients_agree` — two clients handed the same messages by any route, in any order, show the same transcript.
 - `Kant.Relay.discover_via_relay` — a client that announces itself into a room is found by everyone who polls that room afterwards.
+- `Kant.Uucp.openBag_packBag` — a mailbag copied into a DM, a tweet, a QR code or a link pastes back as exactly the same messages.
+- `Kant.Uucp.Node.mem_sneakernet_iff`, `Node.paste_bad` — a node holds exactly what it held plus what the codes it pasted carried: **you are as up to date as the last code you pasted**, and an unreadable code changes nothing.
+- `Kant.Uucp.Node.paste_perm`, `paste_idem`, `paste_monotone` — pastes commute, repeat harmlessly and never lose anything, so bags may travel by any route in any order.
+- `Kant.Uucp.bag_rejects_forgery` — a bag with one doctored line does not open at all: a courier can drop mail but never invent it.
+- `Kant.Uucp.bag_canonical` — two nodes that know the same lines hand out byte-identical codes.
+- `Kant.Uucp.handoff`, `exchange_agree`, `uucp_path`, `uucp_route` — one bag catches you up with the sender; two bags, one each way, leave both sides displaying the same transcript; and a bag carried a!c!b along a bang path delivers just the same.
+- `Kant.Uucp.sneakernet_matches_relay` — what a node displays after pasting a bag is exactly what a relay client displays after being handed the same messages: the relay is redundant, not merely optional.
+- `Kant.Uucp.thread_fits_tweet`, `readThread_thread`, `readThread_perm` — a bag too big for one tweet goes out as numbered parts, each inside the 280-character limit, collected in any order.
+- `Kant.Uucp.relay_keeps_current`, `stale_without_paste` — the one exception: connected to a relay you are current without pasting anything; disconnected and pasting nothing, your view does not change at all.
+- `Kant.Uucp.Site.serve_static`, `visitor_catches_up`, `snapshot_is_stale` — the static server has no state to lose, a visitor who pastes the page catches up with the publisher, and a line written after publication stays invisible until a fresher code is pasted.
 
 **End to end**
 
@@ -193,15 +206,19 @@ run it with `node web/test.mjs`.
 - **quote and repost**: quote any post with a remark of your own, as text or as one picture — the quote carries the original whole, and a doctored quotation is refused when it is pasted back;
 - **share cards**: copy a readable headline plus a link whose fragment carries the post, the results or the whole page, ready to drop into any chat window or social feed;
 - **strips of stills**: when a share is too big for one picture, export it as a numbered set of PNGs — drop any collection of them back in, in any order, and the share is reassembled;
+- **keep going with no relay at all**: write lines offline, copy your whole spool as one mailbag for a DM, as a link, as a QR code or as a numbered tweet thread; paste anybody's bag, link or thread back in (a doctored one is refused whole); the spool survives reloads, and the page is exactly as fresh as the last code pasted into it;
 - **find other clients and chat**: open or join a room, show the room's **chat QR code** (drawn by `web/kant-qr.mjs`, no dependencies) or copy it as text or a link, scan someone else's code with the camera, watch the peer list fill in, and talk — over a relay, over WebRTC once the relay has introduced you, or over `BroadcastChannel` between tabs of the same browser.
 
 `web/kant-net.mjs` is the transcription of `Kant.Rendezvous` and `Kant.Relay`
-plus the transports; `web/kant-qr.mjs` is a self-contained QR encoder for the
-chat code. See [`docs/DISCOVERY-AND-CHAT.md`](docs/DISCOVERY-AND-CHAT.md).
+plus the transports; `web/kant-uucp.mjs` is the transcription of `Kant.Uucp`,
+the relay-free sneakernet; `web/kant-qr.mjs` is a self-contained QR encoder for
+the chat code and the mailbag. See
+[`docs/DISCOVERY-AND-CHAT.md`](docs/DISCOVERY-AND-CHAT.md) and
+[`docs/STATIC-SNEAKERNET.md`](docs/STATIC-SNEAKERNET.md).
 
 Everything in `web/` and `server/` is *unverified*: it is checked only by the
 test scripts (`web/test.mjs`, `web/wasm-test.mjs`, `web/net-test.mjs`,
-`web/qr-test.mjs`), not by proof.
+`web/qr-test.mjs`, `web/uucp-test.mjs`), not by proof.
 
 ## WASM
 
@@ -253,6 +270,31 @@ relay does see them, since line contents are not yet encrypted. The full
 walkthrough, protocol, systemd unit, nginx snippet and Cloudflare instructions
 are in [`docs/DISCOVERY-AND-CHAT.md`](docs/DISCOVERY-AND-CHAT.md) and
 [`server/README.md`](server/README.md).
+
+### No relay: the static sneakernet
+
+The relay is now optional. In sneakernet mode nothing runs: your lines live in
+a spool in the browser (or in a directory on disk), and the whole spool copies
+out as one **mailbag** — a single line of ASCII that fits in a direct message,
+a QR code or a link, and that is cut into a numbered tweet thread when it does
+not. Whoever pastes it is caught up to the moment it was made, and nothing
+else ever reaches them. A courier can drop your mail but cannot forge it, and
+store-and-forward along a UUCP bang path `a!c!b` works exactly as it used to.
+
+```
+node scripts/sneakernet.mjs init    site --name alice
+node scripts/sneakernet.mjs write   site "something to say"
+node scripts/sneakernet.mjs publish site --base https://alice.example/s/
+# copy site/ to any static host, object store, pinned directory or USB stick
+node scripts/sneakernet.mjs paste   site bag.txt     # what somebody DM'd you
+```
+
+`publish` emits `bag.txt`, `thread.txt`, `link.txt`, `qr/*.svg` and an
+`index.html` that shows all of them: static files only, no API and nothing to
+keep running. The Lean model — including the proof that this displays exactly
+what a relay would have shown you, and the proof that a published page is a
+snapshot that goes stale until you paste a fresher code — is in
+[`docs/STATIC-SNEAKERNET.md`](docs/STATIC-SNEAKERNET.md).
 
 ### The other transports
 

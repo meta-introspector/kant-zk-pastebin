@@ -1,3 +1,25 @@
+# Summary of changes for run 3de8ea40-2885-4dda-840f-c7b2ec0ae6f2
+Added a relay-free **static sneakernet** mode: the system now spreads state only by codes people move — DMs, tweets, QR codes, links, files — and a relay becomes an optional accelerator rather than a requirement.
+
+**The specification, proved in Lean (`RequestProject/Kant/Uucp.lean`, no `sorry`, standard axioms only)**
+- A *node* is a name, a spool of self-certifying chat lines, and a counter. Its whole spool copies out as one *mailbag* — a single line of ASCII — and comes back exactly (`openBag_packBag`, `readBagUrl_bagUrl`, `bag_fits_qr`).
+- **You are exactly as up to date as the last URL or QR code you pasted**: `Node.mem_sneakernet_iff` says a node holds what it already held plus what the pasted codes carried and nothing else, and `Node.paste_bad` says an unreadable code changes nothing. Pastes commute, repeat harmlessly and never lose anything (`paste_perm`, `paste_idem`, `paste_monotone`).
+- A courier can drop mail but cannot forge it: a bag with one doctored line does not open at all (`bag_rejects_forgery`).
+- Two nodes that know the same lines emit byte-identical codes (`bag_canonical`), so codes can be pinned, cached and deduplicated by their text.
+- Store and forward as UUCP did: `handoff`, `uucp_path` (A → C → B) and `uucp_route` (a whole bang path); `exchange_agree` — two bags, one each way, and both sides display the same transcript, with no server anywhere.
+- **The relay is redundant, not merely optional**: `sneakernet_matches_relay` proves a node that pastes a bag displays exactly what a relay client displays after being handed the same messages. The one exception is stated too: `relay_keeps_current` (connected, you are current with nothing pasted) and its mirror `stale_without_paste`.
+- Bags too big for one carrier travel as numbered parts: `thread_fits_tweet` (every part inside 280 characters), `readThread_thread` and `readThread_perm` (parts collected in any order).
+- The static server is `Site`: a read-only map from path to text. `serve_static` (serving changes nothing), `visitor_catches_up` (a visitor who pastes the page catches up with the publisher) and `snapshot_is_stale` (a line written after publication is provably invisible until a fresher code is pasted).
+- `RequestProject/Kant/Demo.lean` runs the whole story as build-time `#guard`s: two lines written offline, a bag pasted by a stranger, a doctored bag refused, a 12-part tweet thread reassembled in reverse, a bang path, and a published page that stays stale.
+
+**The tooling (unverified transcriptions, pinned to Lean-computed vectors)**
+- `web/kant-uucp.mjs` — the sneakernet client: mailbags, links, tweet threads, nodes, bang paths and the static site.
+- `scripts/sneakernet.mjs` — the static sneakernet "server", which is a directory rather than a service: `init` / `write` / `paste` / `publish` / `tweets` / `status`. `publish` emits `bag.txt`, `thread.txt`, `link.txt`, `qr/*.svg` and a readable `index.html`; copy that folder to any static host, object store, pinned directory or USB stick. Receiving accepts a bag, a link or a whole thread and refuses anything that fails its own witness.
+- `web/index.html` gained section 8, "Sneakernet: keep going with no relay at all": write offline, copy your bag or link, show the QR code, cut it into tweets, paste somebody else's code or scan it with the camera; the spool persists in the browser, and a link whose fragment carries a bag catches the page up on arrival.
+- `docs/STATIC-SNEAKERNET.md` documents the model, the carrier limits, the bang path, the trust story and the generator; the README module map, theorem index, browser feature list and networking section were updated.
+
+**Verification** — `lake build` succeeds; no `sorry`/`admit` anywhere in `RequestProject`; the new theorems depend only on `propext`, `Classical.choice`, `Quot.sound`. All test scripts pass: `node web/test.mjs`, `web/wasm-test.mjs`, `web/net-test.mjs` (32), `web/qr-test.mjs` (15) and the new `web/uucp-test.mjs` (28 checks, including the Lean golden vectors for the bag, its digest and the tweet-part sizes). The CLI was exercised end to end locally. Line contents are still unencrypted — the sneakernet changes who carries your words, not who can read them. Everything is committed.
+
 # Summary of changes for run cc283b34-9255-4b49-8cc1-4743628c6aed
 ## How clients find each other, and the servers you can run
 

@@ -11,7 +11,9 @@ them evaluated to `false` the build would fail.  They exercise
 * framing under a channel cap and reassembly from shuffled frames,
 * LSB steganography in a carrier image,
 * the credit ledger,
-* Gödel numbering of a code movie and of a circuit.
+* Gödel numbering of a code movie and of a circuit,
+* the relay-free sneakernet: mailbags, tweet threads, bang paths and a
+  static page that is only as fresh as the moment it was published.
 -/
 import RequestProject.Kant.Bytes
 import RequestProject.Kant.Dasl
@@ -32,6 +34,7 @@ import RequestProject.Kant.Repost
 import RequestProject.Kant.Strip
 import RequestProject.Kant.Rendezvous
 import RequestProject.Kant.Relay
+import RequestProject.Kant.Uucp
 
 set_option autoImplicit false
 set_option relaxedAutoImplicit false
@@ -396,5 +399,96 @@ open Kant.Relay in
 open Kant.Relay in
 #guard transcript (receive [] (demoChatLines ++ [demoTamperedLine]))
     == transcript (receive [] demoChatLines)
+
+/-! ## The static sneakernet: no relay at all
+
+Alice writes two lines while offline, copies her mailbag into a direct
+message, and Bob pastes it.  Nothing else happens: there is no server in
+any of what follows. -/
+
+open Kant.Rendezvous Kant.Relay Kant.Uucp in
+/-- Alice, after writing two lines with nobody connected. -/
+def demoAlice : Node :=
+  ((Node.blank "alice".toList).write demoInvite.room "hello".toUTF8.toList).write
+    demoInvite.room "second".toUTF8.toList
+
+open Kant.Uucp in
+/-- Bob, after pasting Alice's mailbag out of a DM. -/
+def demoBob : Node := (Node.blank "bob".toList).paste demoAlice.bag
+
+open Kant.Rendezvous Kant.Uucp in
+/-- Carol, who has a line of her own and has met nobody. -/
+def demoCarol : Node := (Node.blank "carol".toList).write demoInvite.room "ping".toUTF8.toList
+
+open Kant.Uucp in
+#guard demoAlice.spool.length = 2
+open Kant.Uucp in
+#guard demoBob.spool.length = 2
+open Kant.Uucp in
+#guard demoBob.view == demoAlice.view
+open Kant.Uucp in
+#guard demoAlice.bag.length = 1192
+open Kant.Bytes Kant.Text Kant.Uucp in
+#guard String.ofList (Kant.Bytes.witness (asciiBytes demoAlice.bag)) =
+  "1e3c0d3ce7a0b792ed7bcb7d2cf3ea1dc1f6c3bdb7b1ff28ff5bbc0c036b3073"
+open Kant.Uucp in
+#guard openBag demoAlice.bag == some demoAlice.view
+open Kant.Uucp in
+#guard readBagUrl (bagUrl "https://kant.example/".toList demoAlice.spool) == some demoAlice.spool
+
+-- Bob, who now knows exactly what Alice knows, hands out the same code.
+open Kant.Uucp in
+#guard demoBob.bag == demoAlice.bag
+
+-- Pasting the same code twice tells Bob nothing new.
+open Kant.Uucp in
+#guard (demoBob.paste demoAlice.bag).spool.length = 2
+
+open Kant.Bytes Kant.Text Kant.Clipboard Kant.Relay Kant.Uucp in
+/-- A mailbag with one doctored line in it. -/
+def demoTamperedBag : List Char :=
+  (Envelope.mk tagBag [asciiBytes demoTamperedLine, asciiBytes (printMsg demoMsg)]).encode
+
+open Kant.Uucp in
+#guard openBag demoTamperedBag == none
+open Kant.Uucp in
+#guard (demoBob.paste demoTamperedBag).spool.length = 2
+
+open Kant.Uucp in
+/-- A mailbag too big for one tweet, as a numbered thread. -/
+def demoThread : List (List Char) := thread 100 demoAlice.bag
+
+open Kant.Uucp in
+#guard demoThread.length = 12
+open Kant.Uucp in
+#guard demoThread.all (fun t => t.length ≤ Carrier.tweet.capacity)
+open Kant.Uucp in
+#guard readThread demoThread.reverse == some demoAlice.bag
+
+-- Alice and Carol swap bags and agree, with no relay between them.
+open Kant.Uucp in
+#guard (exchange demoAlice demoCarol).1.view == (exchange demoAlice demoCarol).2.view
+
+-- A bang path: Alice's bag is carried to Carol, Carol's to Dave.
+open Kant.Uucp in
+#guard (route demoAlice [demoCarol, Node.blank "dave".toList]).spool.length = 3
+
+open Kant.Uucp in
+/-- The static page Alice publishes, and the visitor who pastes it. -/
+def demoSite : Site := Site.empty.publish "/feed.txt".toList demoAlice
+
+open Kant.Uucp in
+#guard (demoSite.visit "/feed.txt".toList (Node.blank "vic".toList)).spool.length = 2
+open Kant.Uucp in
+#guard (demoSite.serve "/feed.txt".toList).1.files.length = 1
+-- A line Alice writes *after* publishing is not in the published page:
+-- the visitor stays stale until a fresher code is pasted.
+open Kant.Rendezvous Kant.Uucp in
+#guard (demoSite.visit "/feed.txt".toList (Node.blank "vic".toList)).spool.length
+    < (demoAlice.write demoInvite.room "third".toUTF8.toList).spool.length
+open Kant.Rendezvous Kant.Uucp in
+#guard ((Site.empty.publish "/feed.txt".toList
+      (demoAlice.write demoInvite.room "third".toUTF8.toList)).visit
+    "/feed.txt".toList (Node.blank "vic".toList)).spool.length = 3
 
 end Kant.Demo
