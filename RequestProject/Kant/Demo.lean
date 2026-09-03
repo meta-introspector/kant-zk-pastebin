@@ -13,7 +13,11 @@ them evaluated to `false` the build would fail.  They exercise
 * the credit ledger,
 * Gödel numbering of a code movie and of a circuit,
 * the relay-free sneakernet: mailbags, tweet threads, bang paths and a
-  static page that is only as fresh as the moment it was published.
+  static page that is only as fresh as the moment it was published,
+* the deployment configuration file, the full page URL every code
+  carries, and the share card (text plus picture) shared in chat,
+* the diagnostics: the net/error log, the verdict on why two clients on
+  one machine were not connecting, and the run as it is shared.
 -/
 import RequestProject.Kant.Bytes
 import RequestProject.Kant.Dasl
@@ -26,6 +30,7 @@ import RequestProject.Kant.Credits
 import RequestProject.Kant.CodeMovie
 import RequestProject.Kant.Sheaf
 import RequestProject.Kant.Pipeline
+import RequestProject.Kant.Diagnostics
 import RequestProject.Kant.Text
 import RequestProject.Kant.Clipboard
 import RequestProject.Kant.Feed
@@ -35,6 +40,7 @@ import RequestProject.Kant.Strip
 import RequestProject.Kant.Rendezvous
 import RequestProject.Kant.Relay
 import RequestProject.Kant.Uucp
+import RequestProject.Kant.SiteCard
 
 set_option autoImplicit false
 set_option relaxedAutoImplicit false
@@ -490,5 +496,186 @@ open Kant.Rendezvous Kant.Uucp in
 #guard ((Site.empty.publish "/feed.txt".toList
       (demoAlice.write demoInvite.room "third".toUTF8.toList)).visit
     "/feed.txt".toList (Node.blank "vic".toList)).spool.length = 3
+
+/-! ## The site configuration, the page URL, and the share card
+
+The configuration file names the deployment; every code and link then
+carries the whole URL of the page, `origin ++ "#" ++ address`. -/
+
+open Kant.SiteCard in
+/-- The deployment this checkout is configured for (`kant.config`). -/
+def demoConfig : Kant.SiteCard.Config :=
+  ⟨"https://kant.cicada71.net/".toList, "kant-zk-pastebin".toList, "./kant-logo.svg".toList,
+   "the Kant pastebin logo".toList⟩
+
+open Kant.SiteCard in
+-- The configuration file is written and read back unchanged.
+#guard String.ofList (renderConfig demoConfig) =
+  "origin = https://kant.cicada71.net/\ncaption = kant-zk-pastebin\n\
+   picture = ./kant-logo.svg\nalt = the Kant pastebin logo\n"
+open Kant.SiteCard in
+#guard parseConfig (renderConfig demoConfig) == some demoConfig
+open Kant.SiteCard in
+-- A comment line is ignored.
+#guard parseConfig ("# where this deployment lives".toList ++ '\n' :: renderConfig demoConfig)
+    == some demoConfig
+
+open Kant.SiteCard in
+-- The page URL of the sample post: the configured origin, a `'#'`, and
+-- the 64-hex address of the content.
+#guard String.ofList (pasteUrl demoConfig samplePaste) =
+  "https://kant.cicada71.net/#ff810f291f187b808a0183f83c0466874573ef5c4c6d7d9ed430c6f7d710f605"
+open Kant.SiteCard in
+#guard (pasteUrl demoConfig samplePaste).length = 91
+open Kant.SiteCard in
+#guard String.ofList (urlAddress (pasteUrl demoConfig samplePaste)) = String.ofList samplePaste.witness
+open Kant.SiteCard in
+-- The code carries the whole URL, and the client still reads the payload
+-- out of the fragment.
+#guard parseQrPayload (qrPayload demoConfig (Kant.Clipboard.ofPaste samplePaste))
+    == some (Kant.Clipboard.ofPaste samplePaste)
+
+open Kant.SiteCard in
+/-- The share card for the sample post: its URL, the configured caption
+and the configured picture. -/
+def demoCard : Kant.SiteCard.Card := cardOf demoConfig samplePaste
+
+open Kant.SiteCard in
+#guard (cardLine demoCard).length = 304
+open Kant.SiteCard in
+#guard String.ofList (Kant.Bytes.witness (Kant.Text.asciiBytes (cardLine demoCard))) =
+  "fe2f60c16f4c13313602b158fd9e158a01f33032d2041c97fa1d8f5f8e9bc970"
+open Kant.SiteCard in
+#guard readCardLine (cardLine demoCard) == some demoCard
+
+open Kant.SiteCard in
+/-- A tiny five-by-five stand-in for the code's modules. -/
+def demoModules : List (List Bool) :=
+  [[true, false, true, false, true], [false, true, false, true, false],
+   [true, true, false, false, true], [false, false, true, true, false],
+   [true, false, true, false, true]]
+
+open Kant.SiteCard in
+-- The exported picture still carries the card, caption, logo and all.
+#guard readCard (cardSvg demoCard demoModules 8 4) == some demoCard
+open Kant.SiteCard in
+#guard Kant.Text.containsSub (Kant.Erdfa.escape demoCard.caption) (cardSvg demoCard demoModules 8 4)
+open Kant.SiteCard in
+#guard Kant.Text.containsSub (Kant.Erdfa.escape demoCard.picture) (cardSvg demoCard demoModules 8 4)
+open Kant.SiteCard in
+#guard Kant.Text.containsSub (Kant.Erdfa.escape demoCard.url) (cardSvg demoCard demoModules 8 4)
+open Kant.SiteCard in
+-- A caption full of markup cannot break the document.
+#guard readCard (cardSvg ⟨demoCard.url, "</svg><script>alert(1)</script>".toList,
+    demoCard.picture, demoCard.alt⟩ demoModules 8 4)
+  == some ⟨demoCard.url, "</svg><script>alert(1)</script>".toList, demoCard.picture, demoCard.alt⟩
+open Kant.SiteCard in
+#guard ¬ Kant.Text.containsSub "<script>".toList
+  (Kant.Erdfa.escape "</svg><script>alert(1)</script>".toList)
+
+open Kant.SiteCard in
+-- Shared in a chat room, the card arrives as the same card.
+#guard readChatCard (Kant.Relay.printMsg (chatMsg "room7".toList "alice".toList 3 demoCard))
+    == some demoCard
+open Kant.SiteCard in
+-- Pasted as plain text into any chat window, it still comes back whole.
+#guard readChatText (chatText demoCard) == some demoCard
+open Kant.SiteCard in
+#guard (Kant.SiteCard.splitCh '\n' (chatText demoCard)).length = 3
+
+/-! ## The diagnostics: the run, the verdict, and what is shared
+
+These are the vectors `web/diag-test.mjs` pins the browser client to. -/
+
+open Kant.Diagnostics in
+/-- Two lines of a real run. -/
+def demoProbe : Event :=
+  ⟨0, 12, .info, .probe, "probing relay".toList, "http://localhost:8787/health".toList⟩
+
+open Kant.Diagnostics in
+def demoFailure : Event :=
+  ⟨1, 340, .error, .relay, "relay post failed".toList, "status=404".toList⟩
+
+open Kant.Diagnostics in
+#guard String.ofList (printEvent demoProbe) ==
+  "6b7a6c6f67::0c:01:02:70726f62696e672072656c6179:687474703a2f2f6c6f63616c686f73743a383738372f6865616c7468"
+open Kant.Diagnostics in
+#guard String.ofList (printEvent demoFailure) ==
+  "6b7a6c6f67:01:0154:03:03:72656c617920706f7374206661696c6564:7374617475733d343034"
+open Kant.Diagnostics in
+-- A written line reads back as the same event.
+#guard parseEvent (printEvent demoFailure) == some demoFailure
+
+open Kant.Diagnostics in
+/-- A short log: four lines kept out of six recorded. -/
+def demoLog : Log :=
+  (((((Log.empty 4).record 1 .info .app "page opened".toList "".toList).record 12 .info .probe
+      "probing relay".toList "http://localhost:8787/health".toList).record 40 .warn .config
+      "no relay configured".toList "".toList).record 90 .error .relay
+      "the line did not reach the relay".toList "status=404".toList).record 95 .info .bus
+      "a line arrived from another tab".toList "room=deadbeef".toList
+
+open Kant.Diagnostics in
+#guard demoLog.events.length == 4
+open Kant.Diagnostics in
+#guard demoLog.dropped == 1
+open Kant.Diagnostics in
+#guard demoLog.total == 5
+open Kant.Diagnostics in
+-- The newest line is never the one dropped.
+#guard (demoLog.events.getLast?.map (·.seq)) == some 4
+open Kant.Diagnostics in
+-- …and the numbers still increase, with none reused.
+#guard (demoLog.events.map (·.seq)) == [1, 2, 3, 4]
+open Kant.Diagnostics in
+-- The whole run reads back exactly.
+#guard parseLog (renderLog demoLog) == some demoLog.events
+open Kant.Diagnostics in
+-- A line quoting the room is withheld from a shared run; nothing else is.
+#guard ((demoLog.share ["deadbeef".toList]).events.length) == 3
+open Kant.Diagnostics in
+#guard (demoLog.share ["deadbeef".toList]).events.all
+  (fun e => ¬ Kant.Text.containsSub "deadbeef".toList e.detail)
+
+open Kant.Connectivity in
+/-- Two browsers on one machine, page served by a plain static host: the
+failure the user hit. -/
+def staticHost : Reachability := ⟨[], false, "https://static.example".toList, false⟩
+
+open Kant.Connectivity in
+/-- The same machine, page served by `node server/relay.mjs --static web`. -/
+def selfHosted : Reachability := ⟨[], false, "http://localhost:8787".toList, true⟩
+
+open Kant.Connectivity in
+#guard effectiveRelay staticHost == []
+open Kant.Connectivity in
+#guard String.ofList (effectiveRelay selfHosted) == "http://localhost:8787"
+open Kant.Connectivity in
+#guard decide (diagnose ⟨"room".toList, staticHost, true, 1⟩ ⟨"room".toList, staticHost, true, 2⟩
+  = Verdict.onlyThisBrowser)
+open Kant.Connectivity in
+#guard decide (diagnose ⟨"room".toList, selfHosted, true, 1⟩ ⟨"room".toList, selfHosted, true, 2⟩
+  = Verdict.ok)
+open Kant.Connectivity in
+#guard decide (diagnose ⟨"room".toList, selfHosted, true, 1⟩ ⟨"other".toList, selfHosted, true, 2⟩
+  = Verdict.roomMismatch)
+open Kant.Connectivity in
+#guard String.ofList (explain (diagnose ⟨"room".toList, staticHost, true, 1⟩
+    ⟨"room".toList, staticHost, true, 2⟩)) ==
+  "only-this-browser: two separate browsers with no relay between them; serve the page with `node server/relay.mjs --static web`, or set `relay =`"
+
+open Kant.Diagnostics in
+/-- The report the diagnostics page shares. -/
+def demoReport : Report :=
+  ⟨.onlyThisBrowser, ref "room".toList, "http://localhost:8787".toList,
+    [demoProbe, demoFailure]⟩
+
+open Kant.Diagnostics in
+#guard String.ofList (renderReport demoReport) ==
+  "6b7a64696167:05:3665373163653336:687474703a2f2f6c6f63616c686f73743a38373837\n6b7a6c6f67::0c:01:02:70726f62696e672072656c6179:687474703a2f2f6c6f63616c686f73743a383738372f6865616c7468\n6b7a6c6f67:01:0154:03:03:72656c617920706f7374206661696c6564:7374617475733d343034"
+open Kant.Diagnostics in
+#guard parseReport (renderReport demoReport) == some demoReport
+open Kant.Diagnostics in
+#guard String.ofList (ref "kzinvite-secret".toList) == "5f40d0e7"
 
 end Kant.Demo

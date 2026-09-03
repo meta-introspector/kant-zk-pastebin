@@ -20,6 +20,12 @@
 //     still held.
 //
 // Usage:  node server/relay.mjs [--port 8787] [--static web] [--origin '*']
+//                                [--log relay.log] [--quiet]
+//
+// Every request is written to the log: the time, the method, the path with
+// the room reduced to an eight-character handle, the status, the number of
+// lines and how long it took.  Rooms are never printed in full, so a relay
+// log can be shared the way `web/diag.html` shares a client run.
 
 import http from "node:http";
 import fs from "node:fs";
@@ -27,9 +33,18 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 const args = new Map();
-for (let i = 2; i < process.argv.length; i += 2) {
-  args.set(process.argv[i].replace(/^--/, ""), process.argv[i + 1]);
+for (let i = 2; i < process.argv.length; i += 1) {
+  const tok = process.argv[i];
+  if (!tok.startsWith("--")) continue;
+  const next = process.argv[i + 1];
+  // `--flag` on its own is a flag; `--key value` is a setting.
+  if (next === undefined || next.startsWith("--")) args.set(tok.slice(2), "1");
+  else { args.set(tok.slice(2), next); i += 1; }
 }
+
+/** Are we the program being run, or a library inside somebody else's?
+ *  A library keeps quiet unless it is given a log file. */
+const isMain = process.argv[1] && import.meta.url === `file://${path.resolve(process.argv[1])}`;
 
 export const CONFIG = {
   port: Number(args.get("port") ?? process.env.PORT ?? 8787),
@@ -40,8 +55,35 @@ export const CONFIG = {
   maxLines: Number(args.get("max-lines") ?? 4096),
   maxBody: Number(args.get("max-body") ?? 1048576),
   roomTtlMs: Number(args.get("room-ttl") ?? 6 * 60 * 60 * 1000),
+  logFile: args.get("log") ?? process.env.KANT_LOG ?? "",
+  quiet: args.get("quiet") === "1" || process.env.KANT_QUIET === "1" || !isMain,
   version: "1.0.0",
 };
+
+// ------------------------------------------------------------- the log
+
+/** An eight-character one-way handle, as `Kant.Diagnostics.ref`. */
+export const roomRef = (room) =>
+  crypto.createHash("sha256").update(String(room)).digest("hex").slice(0, 8);
+
+/** One line per request: `time level area text | detail`.  Writes to the
+ *  file named by `--log` (appending) and, unless `--quiet`, to stdout. */
+export function makeLogger(cfg = CONFIG) {
+  const stream = cfg.logFile ? fs.createWriteStream(cfg.logFile, { flags: "a" }) : null;
+  const write = (level, area, text, detail = "") => {
+    const line = `${new Date().toISOString()} ${level.padEnd(5)} ${area.padEnd(6)} ${text}` +
+      `${detail ? `  |  ${detail}` : ""}`;
+    if (stream) stream.write(`${line}\n`);
+    if (!cfg.quiet) console.log(line);
+    return line;
+  };
+  return {
+    info: (a, t, d) => write("info", a, t, d),
+    warn: (a, t, d) => write("warn", a, t, d),
+    error: (a, t, d) => write("error", a, t, d),
+    close: () => stream?.end(),
+  };
+}
 
 // ------------------------------------------------------------- the rooms
 
@@ -154,24 +196,55 @@ function readBody(req, limit) {
   });
 }
 
-function serveStatic(cfg, res, urlPath) {
+// Serving `web/` as the document root leaves the Lean-extracted kernel, which
+// lives in the sibling `dist/`, outside the tree: `/dist/kant_kernel.wasm` used
+// to 404, and the page reported that as a kernel validation failure. Requests
+// under /dist/ therefore also look in the directory next to the static root.
+function staticCandidates(cfg, rel) {
   const root = path.resolve(cfg.staticDir);
-  const rel = urlPath === "/" ? "/index.html" : urlPath;
-  const file = path.join(root, path.normalize(rel).replace(/^(\.\.[/\\])+/, ""));
-  if (!file.startsWith(root)) { res.writeHead(403); res.end(); return; }
-  fs.readFile(file, (err, data) => {
-    if (err) { res.writeHead(404, { "content-type": "text/plain" }); res.end("not found"); return; }
-    res.writeHead(200, {
-      "content-type": MIME[path.extname(file)] ?? "application/octet-stream",
-      "cache-control": "no-cache",
-    });
-    res.end(data);
-  });
+  const safe = path.normalize(rel).replace(/^(\.\.[/\\])+/, "");
+  const inRoot = path.join(root, safe);
+  const files = inRoot.startsWith(root) ? [inRoot] : [];
+  const distRoot = path.resolve(root, "..", "dist");
+  const under = /^[/\\]dist[/\\](.+)$/.exec(safe);
+  if (under) {
+    const sibling = path.join(distRoot, under[1]);
+    if (sibling.startsWith(distRoot)) files.push(sibling);
+  }
+  return files;
 }
 
-export function createServer(cfg = CONFIG, rooms = new Rooms(cfg)) {
+function serveStatic(cfg, res, urlPath) {
+  const rel = urlPath === "/" ? "/index.html" : urlPath;
+  const files = staticCandidates(cfg, rel);
+  const attempt = (i) => {
+    if (i >= files.length) {
+      res.writeHead(404, { "content-type": "text/plain" });
+      res.end("not found");
+      return;
+    }
+    fs.readFile(files[i], (err, data) => {
+      if (err) { attempt(i + 1); return; }
+      res.writeHead(200, {
+        "content-type": MIME[path.extname(files[i])] ?? "application/octet-stream",
+        "cache-control": "no-cache",
+      });
+      res.end(data);
+    });
+  };
+  attempt(0);
+}
+
+export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLogger(cfg)) {
   const server = http.createServer(async (req, res) => {
+    const started = Date.now();
     const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+    const shown = url.pathname.replace(/^\/(room|ws)\/([^/]+)/,
+      (_, kind, room) => `/${kind}/${roomRef(decodeURIComponent(room))}`);
+    res.on("finish", () => log.info("relay",
+      `${req.method} ${shown} ${res.statusCode}`,
+      `${Date.now() - started}ms from ${req.socket.remoteAddress ?? "?"}`));
+    req.on("error", (e) => log.error("relay", `${req.method} ${shown} failed`, e.message));
 
     if (req.method === "OPTIONS") { res.writeHead(204, cors(cfg)); res.end(); return; }
 
@@ -188,9 +261,14 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg)) {
       if (req.method === "POST") {
         let body;
         try { body = await readBody(req, cfg.maxBody); }
-        catch { sendJson(res, cfg, 413, { ok: false, error: "body too large" }); return; }
+        catch (e) {
+          log.warn("relay", "a body was refused", `${roomRef(room)}: ${e.message}`);
+          sendJson(res, cfg, 413, { ok: false, error: "body too large" });
+          return;
+        }
         const lines = body.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
         if (lines.some((l) => l.length > cfg.maxLine)) {
+          log.warn("relay", "a line was too long", roomRef(room));
           sendJson(res, cfg, 413, { ok: false, error: "line too long" });
           return;
         }
@@ -217,10 +295,15 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg)) {
     sendJson(res, cfg, 404, { ok: false, error: "not found" });
   });
 
-  server.on("upgrade", (req, socket) => handleUpgrade(cfg, rooms, req, socket));
+  server.on("upgrade", (req, socket) => handleUpgrade(cfg, rooms, req, socket, log));
+  server.on("clientError", (e, socket) => {
+    log.error("relay", "a connection failed before any request", e.message);
+    socket.destroy();
+  });
   const sweeper = setInterval(() => rooms.sweep(), 60_000);
   sweeper.unref?.();
   server.rooms = rooms;
+  server.log = log;
   return server;
 }
 
@@ -278,7 +361,7 @@ function wsFrames(buf) {
   return { frames: out, used: off };
 }
 
-function handleUpgrade(cfg, rooms, req, socket) {
+function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, error() {} }) {
   const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
   const m = url.pathname.match(/^\/ws\/([^/]+)$/);
   const key = req.headers["sec-websocket-key"];
@@ -321,13 +404,13 @@ function handleUpgrade(cfg, rooms, req, socket) {
   });
 
   const drop = () => { r.sockets.delete(state); };
-  socket.on("close", drop);
-  socket.on("error", drop);
+  socket.on("close", () => { log.info("socket", `a stream closed`, roomRef(room)); drop(); });
+  socket.on("error", (e) => { log.error("socket", "a stream failed", e.message); drop(); });
+  log.info("socket", "a stream opened", roomRef(room));
 }
 
 // ------------------------------------------------------------------- main
 
-const isMain = process.argv[1] && import.meta.url === `file://${path.resolve(process.argv[1])}`;
 if (isMain) {
   const server = createServer(CONFIG);
   server.listen(CONFIG.port, CONFIG.host, () => {
@@ -336,5 +419,6 @@ if (isMain) {
     console.log("  GET  /room/{room}?cursor=N[&wait=S]  poll (long poll with wait)");
     console.log("  WS   /ws/{room}?cursor=N             stream");
     if (CONFIG.staticDir) console.log(`  serving ${path.resolve(CONFIG.staticDir)} at /`);
+    if (CONFIG.logFile) console.log(`  writing the log to ${path.resolve(CONFIG.logFile)}`);
   });
 }

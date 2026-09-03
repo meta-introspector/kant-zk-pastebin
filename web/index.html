@@ -3,1238 +3,776 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>kant-zk-pastebin — verified core</title>
+<title>Kant — a private room you share with one link</title>
 <style>
-  body { font-family: monospace; max-width: 1000px; margin: 20px auto; padding: 0 16px;
-         background: #0a0a0a; color: #0f0; }
-  h1, h2 { color: #0ff; }
-  textarea, input { width: 100%; background: #111; color: #0f0; border: 1px solid #0f0;
-                    padding: 8px; font-family: monospace; }
-  button { background: #0f0; color: #000; border: none; padding: 8px 14px; margin: 4px 4px 4px 0;
-           cursor: pointer; font-family: monospace; }
-  .meta { color: #8f8; white-space: pre-wrap; }
-  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
-  canvas { border: 1px solid #0f0; image-rendering: pixelated; }
-  small { color: #7a7; }
+  :root { --ink: #0f0; --dim: #7a7; --hi: #0ff; --bg: #0a0a0a; --panel: #111; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 640px; margin: 0 auto; padding: 0 14px 80px;
+         background: var(--bg); color: var(--ink); }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 0 6px;
+           position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  header h1 { font-size: 1.1rem; margin: 0; flex: 1; color: var(--hi); }
+  button { background: var(--ink); color: #000; border: none; border-radius: 8px;
+           padding: 10px 14px; margin: 4px 6px 4px 0; cursor: pointer;
+           font-family: inherit; font-size: 1rem; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  button.big { display: block; width: 100%; padding: 18px; font-size: 1.15rem; margin: 10px 0; }
+  button.stop { background: #f33; color: #fff; width: 100%; padding: 18px; font-size: 1.15rem; }
+  button.icon { background: transparent; color: var(--hi); border: 1px solid #333;
+                padding: 6px 10px; font-size: 1rem; }
+  input, textarea { width: 100%; background: var(--panel); color: var(--ink);
+                    border: 1px solid #2a2; border-radius: 8px; padding: 10px;
+                    font-family: ui-monospace, monospace; font-size: .95rem; }
+  section { display: none; }
+  section.on { display: block; }
+  .guide { background: #06210b; border: 1px solid #1a5; border-radius: 10px;
+           padding: 12px 14px; margin: 6px 0 12px; }
+  .guide p { margin: 0 0 6px; }
+  .steps { color: var(--dim); font-size: .85rem; letter-spacing: .3em; }
+  .meta { color: var(--dim); white-space: pre-wrap; font-size: .85rem;
+          font-family: ui-monospace, monospace; margin: 8px 0; }
+  .warn { color: #fb0; }
+  .bad { color: #f66; }
+  .card { background: var(--panel); border: 1px solid #222; border-radius: 10px;
+          padding: 12px; margin: 10px 0; }
+  #qr svg { width: 100%; height: auto; max-width: 380px; background: #000; border-radius: 8px; }
+  #chat { background: var(--panel); border: 1px solid #222; border-radius: 10px;
+          padding: 10px; min-height: 180px; max-height: 46vh; overflow-y: auto;
+          font-family: ui-monospace, monospace; font-size: .9rem; }
+  #chat .me { color: var(--hi); }
+  #cam { width: 100%; max-width: 420px; border-radius: 10px; background: #000; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { flex: 1; }
+  a { color: var(--hi); }
+  footer { color: var(--dim); font-size: .8rem; margin-top: 30px; }
 </style>
 </head>
 <body>
-<h1>kant-zk-pastebin</h1>
-<p><small>Browser front end over <code>web/kantzk.mjs</code>, the JavaScript transcription of the
-Lean 4 core in <code>RequestProject/Kant/</code>.  The Lean development is the proved artefact:
-content addressing, framing under a 5 MB cap, out-of-order reassembly, LSB steganography,
-replica convergence, the credit ledger and Gödel numbering all have machine-checked proofs there.
-This page is unverified glue.</small></p>
-<div class="meta" id="wasm">wasm kernel: loading…</div>
 
-<h2>1. Paste or load</h2>
-<textarea id="content" rows="8">The Critique of Pure Paste</textarea>
-<div class="row">
-  <input id="url" placeholder="https://… or ipfs://CID or an archive.org item URL" />
-</div>
-<button id="load">Load URL into paste</button>
-<button id="hash">Address it</button>
-<div class="meta" id="addr"></div>
+<header>
+  <button class="icon" id="back" title="back">←</button>
+  <h1 id="title">Kant</h1>
+  <button class="icon" id="hush" title="turn the voice off">🔊</button>
+</header>
 
-<h2>2. Export under a channel cap</h2>
-<div class="row">
-  <label>channel
-    <select id="channel"></select>
-  </label>
-  <button id="frame">Frame it</button>
-  <button id="stego">Stego PNG</button>
-  <button id="svg">SVG</button>
-  <button id="video">≤5 MB WebM</button>
-  <button id="speak">Speak the witness</button>
-</div>
-<div class="meta" id="frames"></div>
-<div class="row">
-  <canvas id="carrier" width="256" height="256"></canvas>
-  <canvas id="gl" width="256" height="256"></canvas>
+<div class="guide">
+  <p id="prompt">…</p>
+  <div class="steps" id="steps"></div>
+  <button class="ghost" id="again">Say that again</button>
 </div>
 
-<h2>3. Pin, serve, earn</h2>
-<div class="row">
-  <button id="pin">Pin locally</button>
-  <button id="serve">Record a serve (simulated peer fetch)</button>
-  <button id="list">List pinned</button>
-</div>
-<div class="meta" id="ledger"></div>
+<!-- ------------------------------------------------------------ welcome -->
+<section id="s-welcome">
+  <p>A Kant room is a private conversation. You make one, you send one link,
+     and whoever opens that link is in the room with you. The link holds the
+     key, so nothing in the middle can read what you say.</p>
+  <button class="big" id="btn-open">Start a room</button>
+  <button class="big ghost" id="btn-join">Join with a link</button>
+  <button class="ghost" id="btn-scan">Scan a code</button>
+  <button class="ghost" id="btn-more">More</button>
+  <div class="meta" id="transport">checking how this copy can reach other devices…</div>
+</section>
 
-<h2>4. The posts</h2>
-<div class="row">
-  <input id="q" placeholder="search titles and bodies" />
-  <label>per page <input id="pagesize" type="number" min="1" value="5" style="width: 5em" /></label>
-</div>
-<div class="row">
-  <button id="post">Post the paste above</button>
-  <button id="refresh">Show the posts</button>
-  <button id="reply">Reply to the selected post</button>
-</div>
-<div class="meta" id="feedmeta"></div>
-<div id="posts"></div>
-
-<h2>5. Copy and paste the results</h2>
-<textarea id="clip" rows="4" placeholder="paste a copied post, a quote, a bundle, a result line, a share card or a share link here"></textarea>
-<div class="row">
-  <button id="import">Paste it in</button>
-  <button id="copyall">Copy every post</button>
-  <button id="cardpage">Copy a share card for this page</button>
-</div>
-<div class="meta" id="clipmsg"></div>
-
-<h2>6. Share it as a meme with the data inside</h2>
-<div class="row">
-  <input id="memetop" value="WHEN THE CATEGORICAL IMPERATIVE" />
-  <input id="memebottom" value="IS ALSO A CONTENT ADDRESS" />
-</div>
-<div class="row">
-  <label>template <input id="memeimg" type="file" accept="image/*" /></label>
-  <button id="mememake">Make a meme of the selected post</button>
-  <button id="memeresult">Make a meme of its results</button>
-  <button id="memepage">Make a meme of the whole page</button>
-  <button id="memequote">Make a meme of the quote</button>
-</div>
-<div class="row">
-  <button id="stripmake">Make a strip of stills (for a share too big for one picture)</button>
-</div>
-<div class="row">
-  <label>read a meme <input id="memein" type="file" accept="image/png" /></label>
-  <label>read a strip <input id="stripin" type="file" accept="image/png" multiple /></label>
-</div>
-<div class="row">
-  <canvas id="meme" width="512" height="512"></canvas>
-</div>
-<div class="meta" id="mememsg"></div>
-
-<h2>7. Find other clients, and chat</h2>
-<p><small>Two browsers meet in a <em>room</em>.  The room name is the digest of a secret that
-travels only inside the chat code, so a relay learns the room but never the secret
-(<code>Kant.Rendezvous.roomOf</code>, <code>scan_same_room</code>).  Everything either side sends is a
-self-certifying line: a doctored line is refused rather than displayed
-(<code>Kant.Relay.parseMsg_eq_none_of_mismatch</code>), and two clients handed the same lines by any
-route, in any order, display the same chat (<code>clients_agree</code>).</small></p>
-<div class="row">
-  <label>my name <input id="netpeer" placeholder="alice" style="width: 12em" /></label>
-  <label>relay <input id="netrelay" placeholder="https://relay.example.org" /></label>
-</div>
-<div class="row">
-  <button id="netopen">Open a room and show its code</button>
-  <button id="netcode">Show the code again</button>
-  <button id="netscan">Scan a code with the camera</button>
-  <button id="netleave">Leave</button>
-</div>
-<div class="row">
-  <div>
-    <div id="netqr"></div>
-    <div class="meta" id="netqrmeta"></div>
+<!-- -------------------------------------------------------------- share -->
+<section id="s-share">
+  <p>One link. Send it in any chat, or let the other person point a camera at
+     the code.</p>
+  <div class="row">
+    <input id="link" readonly />
   </div>
-  <div style="flex: 1; min-width: 18em">
-    <div class="meta" id="netstatus">not in a room</div>
-    <div class="meta" id="netpeers"></div>
-  </div>
-</div>
-<textarea id="netjoin" rows="3" placeholder="paste a chat code or an invite link here to join the room"></textarea>
-<div class="row">
-  <button id="netjoinbtn">Join from that code</button>
-  <button id="netcopy">Copy my code</button>
-  <button id="netlink">Copy my invite link</button>
-</div>
-<div class="row">
-  <input id="netsay" placeholder="say something to the room" />
-  <button id="netsend">Send</button>
-  <button id="netsharepost">Send the selected post to the room</button>
-</div>
-<div class="meta" id="netchat"></div>
+  <button id="btn-copy">Copy the link</button>
+  <button class="ghost" id="btn-sharesys">Share…</button>
+  <button class="ghost" id="btn-openroom">Open the room →</button>
 
-<h2>8. Sneakernet: keep going with no relay at all</h2>
-<p><small>This section talks to nobody.  Your lines live in a <em>spool</em> in this browser; the
-whole spool copies out as one <em>mailbag</em> — a single line of ASCII you can send in a DM, tweet
-as a numbered thread, print as a QR code, or hang off a link.  Whoever pastes it is caught up to
-the moment it was made, and nothing else ever reaches them: you are exactly as up to date as the
-last code you pasted (<code>Kant.Uucp.Node.mem_sneakernet_iff</code>).  A doctored bag is refused
-whole (<code>bag_rejects_forgery</code>), the parts of a thread may arrive in any order
-(<code>readThread_perm</code>), and what you end up displaying is exactly what a relay would have
-shown you (<code>sneakernet_matches_relay</code>).</small></p>
-<div class="row">
-  <label>my name <input id="snname" placeholder="alice" style="width: 12em" /></label>
-  <label>room <input id="snroom" placeholder="a shared word, e.g. kant-zk demo secret" /></label>
-</div>
-<div class="row">
-  <input id="snsay" placeholder="write a line — offline is fine" />
-  <button id="snwrite">Write it</button>
-  <button id="sncopy">Copy my bag</button>
-  <button id="snlink">Copy my link</button>
-  <button id="snqr">Show my QR code</button>
-  <button id="sntweets">Cut into tweets</button>
-  <button id="snscan">Scan a code with the camera</button>
-</div>
-<textarea id="snpaste" rows="3" placeholder="paste a bag, a link, or a whole tweet thread (one part per line)"></textarea>
-<div class="row">
-  <button id="snpastebtn">Paste it in</button>
-  <button id="snforget">Forget everything</button>
-</div>
-<div class="row">
-  <div>
-    <div id="snqrbox"></div>
-    <div class="meta" id="snqrmeta"></div>
+  <div class="card">
+    <label class="meta" for="caption">The words printed under the code</label>
+    <input id="caption" />
+    <div class="row" style="margin-top:8px">
+      <label class="meta" for="icon">The picture in the middle of it</label>
+    </div>
+    <input id="icon" />
+    <div id="qr"></div>
+    <div class="meta" id="qrmeta"></div>
+    <button class="ghost" id="btn-savecode">Save the code as a picture</button>
+    <button class="ghost" id="btn-copycard">Copy the code as text</button>
   </div>
-  <div style="flex: 1; min-width: 18em">
-    <div class="meta" id="snstatus">empty spool</div>
-    <div class="meta" id="snview"></div>
+  <div class="meta" id="sharestatus"></div>
+</section>
+
+<!-- --------------------------------------------------------------- join -->
+<section id="s-join">
+  <p>Paste the link somebody sent you. It does not have to be tidy — leave the
+     rest of their message around it if you like.</p>
+  <textarea id="joinbox" rows="4" placeholder="https://…/#kzinvite… — or just paste the whole message"></textarea>
+  <button id="btn-dojoin">Join the room</button>
+  <button class="ghost" id="btn-scan2">Scan the code instead</button>
+  <div class="meta" id="joinmsg"></div>
+</section>
+
+<!-- --------------------------------------------------------------- scan -->
+<section id="s-scan">
+  <p>Point the camera at the other screen.</p>
+  <video id="cam" playsinline muted></video>
+  <button class="stop" id="btn-stop">Stop the camera</button>
+  <div class="meta" id="scanmsg"></div>
+</section>
+
+<!-- --------------------------------------------------------------- chat -->
+<section id="s-chat">
+  <div id="chat">(nothing said yet)</div>
+  <div class="row" style="margin-top:10px">
+    <input id="say" placeholder="say something" />
+    <button id="btn-send">Send</button>
   </div>
-</div>
-<pre class="meta" id="snout" style="white-space: pre-wrap; word-break: break-all"></pre>
+  <button class="ghost" id="btn-shareroom">Show the link and code</button>
+  <button class="ghost" id="btn-leave">Leave the room</button>
+  <div class="meta" id="chatstatus"></div>
+</section>
+
+<!-- --------------------------------------------------------------- more -->
+<section id="s-more">
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Copy a note as readable text</h2>
+    <p class="meta">Copying used to hand over the machine-readable envelope.
+       These give you the words, with the details optional.</p>
+    <input id="notetitle" placeholder="a title" value="a note" />
+    <textarea id="note" rows="4">The Critique of Pure Paste</textarea>
+    <button id="btn-copytext">Copy the text</button>
+    <button class="ghost" id="btn-copytextmeta">Copy the text + details</button>
+    <button class="ghost" id="btn-copynotelink">Copy a link to it</button>
+    <div class="meta" id="notemsg"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Reaching other devices</h2>
+    <p class="meta">Two tabs of one browser find each other with no server.
+       Two <em>devices</em> need a relay they can both reach.</p>
+    <input id="relay" placeholder="https://relay.example.org" />
+    <button class="ghost" id="btn-testrelay">Test this relay</button>
+    <div class="meta" id="relaymsg"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Diagnostics</h2>
+    <p class="meta">Everything the network does is written down: every probe, every
+       request, every refusal, every error. Nothing is swallowed.</p>
+    <p class="meta">Holding two codes that will not connect? The diagnostics page has
+       <em>What is this code?</em>: paste both and it says what each one is. A share card
+       or a page link names a page, never a room — only a <code>kzinvite</code> code can
+       join two clients.</p>
+    <div class="meta" id="verdict">…</div>
+    <pre class="meta" id="diagtail" style="max-height:34vh;overflow:auto;margin:8px 0"></pre>
+    <button id="btn-diagshare">Share the log</button>
+    <button class="ghost" id="btn-diagpost">Post the log to the store</button>
+    <button class="ghost" id="btn-diagcopy">Copy the whole run</button>
+    <button class="ghost" id="btn-diagsave">Save the run as a file</button>
+    <button class="ghost" id="btn-diagpage">Open the diagnostics page</button>
+    <div class="meta" id="diagmsg"></div>
+    <div class="meta" id="diagshare"></div>
+    <textarea id="diagparts" rows="4" readonly
+      placeholder="the run, cut into chat-sized messages"></textarea>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">No server at all</h2>
+    <p class="meta">Nothing to run, nothing to deploy: two people with any chat window
+       between them copy one code each way and end up holding the same conversation.
+       The steps, and the proof that they need no server, are in
+       <code>RequestProject/Kant/Handoff.lean</code>.</p>
+    <p><a href="./hand.html">Carry it by hand →</a></p>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Everything else</h2>
+    <p><a href="./lab.html">Open the workbench</a> — the pastebin, stego pictures,
+       the sneakernet, credits, code movies, the wasm kernel.</p>
+    <p><a href="../docs/UX-FLOW.md">How this flow is put together</a></p>
+  </div>
+</section>
+
+<footer>
+  The behaviour of this page is specified and proved in Lean 4 under
+  <code>RequestProject/Kant/</code>: the invite code carries the whole link
+  (<code>InviteCard</code>), a pasted link is found however it arrives
+  (<code>Join</code>), the camera can always be switched off
+  (<code>Onboarding</code>), and copying gives the text
+  (<code>PlainText</code>).
+</footer>
 
 <script type="module">
 import * as K from "./kantzk.mjs";
-import { loadKernel, KERNEL_EXPORTS } from "./kant-wasm.mjs";
-
-const $ = (id) => document.getElementById(id);
-const store = new K.Store();
-const ledger = new K.Ledger();
-const me = "this-browser";
-let current = null;
-let kernel = null;
-
-// --- the Lean-extracted WebAssembly kernel ------------------------------
-// dist/kant_kernel.wasm is emitted by `lake exe emitwasm dist`; every export
-// is proved in RequestProject/Wasm/KernelSpec.lean to compute the matching
-// Kant definition. The page degrades to the JS core if it cannot be fetched.
-(async () => {
-  try {
-    kernel = await loadKernel();
-    $("wasm").textContent =
-      `wasm kernel: ${kernel.bytes.length} bytes, ${KERNEL_EXPORTS.length} proved exports — ` +
-      `witnesses on this page are computed inside WebAssembly`;
-    if (current) address();
-  } catch (e) {
-    kernel = null;
-    $("wasm").textContent =
-      `wasm kernel: unavailable (${e.message}) — falling back to the JS core`;
-  }
-})();
-
-// --- channels -----------------------------------------------------------
-for (const [name, cap] of Object.entries(K.CHANNEL_CAPACITY)) {
-  const o = document.createElement("option");
-  o.value = name;
-  o.textContent = `${name} (${cap} B)`;
-  $("channel").appendChild(o);
-}
-$("channel").value = "qr";
-
-// --- addressing ---------------------------------------------------------
-function address() {
-  current = K.makePaste({
-    id: "paste_" + Date.now(),
-    title: "browser paste",
-    content: $("content").value,
-    timestamp: new Date().toISOString(),
-  });
-  const o = current.coords;
-  $("addr").textContent =
-    `witness : ${current.witness}\n` +
-    `dasl    : ${K.daslHex(current.cid)}  (type ${K.cidType(current.cid)})\n` +
-    `orbifold: (${o.l}, ${o.m}, ${o.n})  in Z/71 x Z/59 x Z/47\n` +
-    `bytes   : ${current.content.length}\n` +
-    `permalink: #${current.witness}` +
-    (kernel
-      ? "\nwasm    : witness " +
-        (kernel.witness(current.content) === current.witness
-          ? "recomputed in WebAssembly, agrees"
-          : "MISMATCH")
-      : "");
-  location.hash = current.witness;
-  return current;
-}
-$("hash").onclick = address;
-
-// --- loading a URL (http, ipfs://, archive.org item) --------------------
-$("load").onclick = async () => {
-  const raw = $("url").value.trim();
-  if (!raw) return;
-  const url = raw.startsWith("ipfs://")
-    ? "https://ipfs.io/ipfs/" + raw.slice("ipfs://".length)
-    : raw;
-  try {
-    const r = await fetch(url);
-    $("content").value = await r.text();
-    address();
-  } catch (e) {
-    $("addr").textContent = "fetch failed (CORS or offline): " + e;
-  }
-};
-
-// --- framing ------------------------------------------------------------
-function currentFrames() {
-  const p = current ?? address();
-  const cap = K.CHANNEL_CAPACITY[$("channel").value];
-  return K.frames(cap, p.content);
-}
-
-$("frame").onclick = () => {
-  const fs = currentFrames();
-  const back = K.reassemble([...fs].sort(() => Math.random() - 0.5));
-  $("frames").textContent =
-    `${fs.length} frame(s), max ${Math.max(0, ...fs.map((f) => f.payload.length))} B\n` +
-    `shuffled reassembly matches: ${K.fromUtf8(back) === $("content").value}`;
-};
-
-// --- stego PNG ----------------------------------------------------------
-function carrierImage() {
-  const c = $("carrier");
-  const ctx = c.getContext("2d");
-  const img = ctx.createImageData(c.width, c.height);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const v = 100 + ((i / 4) % 57);
-    img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
-  }
-  return { c, ctx, img };
-}
-
-$("stego").onclick = () => {
-  const p = current ?? address();
-  const { c, ctx, img } = carrierImage();
-  // one payload bit per colour sample, skipping alpha
-  const samples = [];
-  for (let i = 0; i < img.data.length; i += 4) samples.push(img.data[i], img.data[i + 1], img.data[i + 2]);
-  if (K.capacityBytes(samples) < p.content.length) {
-    $("frames").textContent = "carrier too small for this paste";
-    return;
-  }
-  const hidden = K.embedBlob(samples, Array.from(p.content));
-  let j = 0;
-  for (let i = 0; i < img.data.length; i += 4) {
-    img.data[i] = hidden[j++]; img.data[i + 1] = hidden[j++]; img.data[i + 2] = hidden[j++];
-  }
-  ctx.putImageData(img, 0, 0);
-  const recovered = K.extractBlob(p.content.length, hidden);
-  $("frames").textContent =
-    `hidden ${p.content.length} B in ${samples.length} samples; recovered exactly: ` +
-    `${K.fromUtf8(recovered) === $("content").value}`;
-  c.toBlob((b) => download(b, "stego.png"));
-};
-
-// --- SVG ----------------------------------------------------------------
-$("svg").onclick = () => {
-  const p = current ?? address();
-  const rows = K.frames(64, p.content).map((f, i) =>
-    `<text x="4" y="${16 + 14 * i}" font-family="monospace" font-size="11" fill="#0f0">` +
-    `${f.seq}: ${K.hexEncode(f.payload).slice(0, 96)}</text>`).join("\n  ");
-  const svg =
-`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="${24 + 14 * K.frames(64, p.content).length}">
-  <rect width="100%" height="100%" fill="#000"/>
-  <text x="4" y="12" font-family="monospace" font-size="11" fill="#0ff">${K.escapeHtml(K.daslHex(p.cid))} ${p.witness.slice(0, 16)}…</text>
-  ${rows}
-</svg>`;
-  download(new Blob([svg], { type: "image/svg+xml" }), "paste.svg");
-};
-
-// --- ≤5 MB WebM export --------------------------------------------------
-$("video").onclick = async () => {
-  const p = current ?? address();
-  const fs = K.frames(1024, p.content);
-  const c = $("carrier");
-  const ctx = c.getContext("2d");
-  const stream = c.captureStream(8);
-  const rec = new MediaRecorder(stream, { mimeType: "video/webm" });
-  const parts = [];
-  rec.ondataavailable = (e) => parts.push(e.data);
-  rec.onstop = () => {
-    const blob = new Blob(parts, { type: "video/webm" });
-    if (blob.size > K.SOCIAL_LIMIT) {
-      $("frames").textContent = `export ${blob.size} B exceeds the 5 MB cap — use more frames`;
-    } else {
-      download(blob, "paste.webm");
-    }
-  };
-  rec.start();
-  for (const f of fs.length ? fs : [{ seq: 0, payload: [] }]) {
-    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, c.width, c.height);
-    ctx.fillStyle = "#0f0"; ctx.font = "12px monospace";
-    ctx.fillText(`frame ${f.seq + 1}/${fs.length}`, 8, 16);
-    ctx.fillText(K.hexEncode(f.payload).slice(0, 30), 8, 34);
-    await new Promise((r) => setTimeout(r, 125));
-  }
-  rec.stop();
-};
-
-// --- text to speech -----------------------------------------------------
-$("speak").onclick = () => {
-  const p = current ?? address();
-  const u = new SpeechSynthesisUtterance(
-    "Witness " + p.witness.slice(0, 8).split("").join(" ") +
-    ". Orbifold " + p.coords.l + ", " + p.coords.m + ", " + p.coords.n + ".");
-  speechSynthesis.speak(u);
-};
-
-// --- WebGL playback of a code movie -------------------------------------
-(function playMovie() {
-  const gl = $("gl").getContext("webgl");
-  if (!gl) return;
-  const vs = gl.createShader(gl.VERTEX_SHADER);
-  gl.shaderSource(vs, "attribute vec2 p; void main(){ gl_Position = vec4(p,0.0,1.0); }");
-  gl.compileShader(vs);
-  const fsSrc = `precision mediump float; uniform float t; uniform vec3 c;
-    void main(){ vec2 uv = gl_FragCoord.xy/256.0;
-      float v = sin(uv.x*c.x + t) * cos(uv.y*c.y - t) * 0.5 + 0.5;
-      gl_FragColor = vec4(v*0.2, v, v*0.4, 1.0); }`;
-  const fs = gl.createShader(gl.FRAGMENT_SHADER);
-  gl.shaderSource(fs, fsSrc); gl.compileShader(fs);
-  const prog = gl.createProgram();
-  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog); gl.useProgram(prog);
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
-  const loc = gl.getAttribLocation(prog, "p");
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  const tLoc = gl.getUniformLocation(prog, "t");
-  const cLoc = gl.getUniformLocation(prog, "c");
-  // the "code movie": orbifold coordinates drive the shader, looping with
-  // the movie's own period (see `Kant.CodeMovie.frameAt_periodic`)
-  const movie = [[71, 59, 47], [47, 71, 59], [59, 47, 71]];
-  let t = 0;
-  (function loop() {
-    const f = K.frameAt(movie, Math.floor(t) % movie.length);
-    gl.uniform1f(tLoc, t);
-    gl.uniform3f(cLoc, f[0] / 8, f[1] / 8, f[2] / 8);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    t += 0.05;
-    requestAnimationFrame(loop);
-  })();
-})();
-
-// --- pin / serve / earn -------------------------------------------------
-$("pin").onclick = () => {
-  const p = current ?? address();
-  store.put(p);
-  localStorage.setItem("kantzk:" + p.witness, JSON.stringify({
-    witness: p.witness, dasl: K.daslHex(p.cid), content: K.fromUtf8(p.content),
-  }));
-  navigator.serviceWorker?.ready.then((reg) =>
-    reg.active?.postMessage({
-      kind: "pin",
-      witness: p.witness,
-      body: K.fromUtf8(p.content),
-      contentType: "text/plain; charset=utf-8",
-    })
-  );
-  $("ledger").textContent =
-    `pinned ${p.witness}\n${store.entries.length} block(s) held\n` +
-    `servable at ${location.origin}${location.pathname.replace(/[^/]*$/, "")}pin/${p.witness}`;
-};
-
-$("serve").onclick = () => {
-  const p = current ?? address();
-  ledger.serve(me, p.content.length);
-  $("ledger").textContent =
-    `served ${p.content.length} B → balance ${ledger.balance(me)} credit(s)\n` +
-    `total credit ever created here: ${ledger.totalEarned()}`;
-};
-
-$("list").onclick = () => {
-  const keys = Object.keys(localStorage).filter((k) => k.startsWith("kantzk:"));
-  $("ledger").textContent = keys.map((k) => k.slice(7)).join("\n") || "(nothing pinned)";
-};
-
-function download(blob, name) {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js").catch(() => {});
-  // A real serve out of the pin cache earns credit, exactly as
-  // `Kant.Credits.Ledger.serve` specifies.
-  navigator.serviceWorker.addEventListener("message", (ev) => {
-    if (ev.data?.kind !== "served") return;
-    const held = store.entries.find((p) => p.witness === ev.data.witness);
-    const bytes = held ? held.content.length : 0;
-    ledger.serve(me, bytes);
-    $("ledger").textContent =
-      `served ${ev.data.witness} (${bytes} B) → balance ${ledger.balance(me)} credit(s)`;
-  });
-}
-
-// --- the posts ----------------------------------------------------------
-// `Kant.Feed`: the feed is the store's posts, newest first, searched and
-// paginated.  Every row carries the exact text that pastes back into it
-// (`Kant.Feed.row_copy_roundTrip`).
-let selected = null;
-let pageIndex = 0;
-
-// The feed survives a reload: the posts are stored as one clipboard bundle
-// and read back with the same verified envelope (`Kant.Clipboard.pasteAll`),
-// so anything that has been tampered with in storage is dropped.
-const POSTS_KEY = "kantzk:posts";
-
-function keep(p) {
-  store.put(p);
-  try {
-    localStorage.setItem(POSTS_KEY, K.copyAll(K.feed(store)));
-  } catch (e) {
-    /* storage full or unavailable: the feed still works for this session */
-  }
-  return p;
-}
-
-function loadPosts() {
-  const saved = localStorage.getItem(POSTS_KEY);
-  if (!saved) return;
-  const ps = K.pasteAll(saved);
-  if (ps) for (const p of ps) store.put(p);
-}
-
-function creditsOf(p) {
-  return K.Ledger.creditsFor(p.content.length);
-}
-
-function esc(s) {
-  return K.escapeHtml(s);
-}
-
-async function copyToClipboard(text, msg) {
-  try {
-    await navigator.clipboard.writeText(text);
-    $("clipmsg").textContent = msg + " copied to the clipboard (" + text.length + " chars)";
-  } catch (e) {
-    $("clip").value = text;
-    $("clipmsg").textContent = msg + " placed in the box below — copy it from there";
-  }
-}
-
-function renderPosts() {
-  const q = $("q").value;
-  const size = Math.max(1, Number($("pagesize").value) || 5);
-  const matching = K.search(q, K.newest(K.feed(store)));
-  const pages = K.paginate(size, matching);
-  if (pageIndex >= pages.length) pageIndex = 0;
-  const shown = pages[pageIndex] ?? [];
-  $("feedmeta").textContent =
-    `${K.feed(store).length} post(s) held, ${matching.length} matching, ` +
-    `page ${pages.length ? pageIndex + 1 : 0}/${pages.length}`;
-  const host = $("posts");
-  host.textContent = "";
-  for (const p of shown) {
-    const r = K.row(p, creditsOf(p));
-    const el = document.createElement("div");
-    el.style.cssText = "border:1px solid #0f0;padding:8px;margin:8px 0";
-    el.innerHTML =
-      `<div style="color:#0ff">${r.title || "(untitled)"}</div>` +
-      `<pre style="white-space:pre-wrap;margin:6px 0">${r.body}</pre>` +
-      `<div class="meta">witness : ${r.witness}\n` +
-      `dasl    : ${esc(K.daslHex(r.cid))}\n` +
-      `posted  : ${esc(r.timestamp)}   bytes: ${r.bytes}   credits: ${creditsOf(p)}` +
-      (r.replyTo ? `\nin reply to: ${esc(r.replyTo)}` : "") +
-      `</div>`;
-    const buttons = document.createElement("div");
-    for (const [label, action] of [
-      ["Copy post", () => copyToClipboard(r.copy, "post")],
-      ["Copy results", () => copyToClipboard(r.receipt, "results")],
-      ["Copy link", () =>
-        copyToClipboard(K.shareUrl(location.origin + location.pathname, K.ofPaste(p)), "link")],
-      ["Quote it", () => copyToClipboard(K.copyQuote(quoteOf(p)),
-        "a quote of this post, with your text above as the commentary,")],
-      ["Copy card", () => copyToClipboard(K.postCard(location.origin + location.pathname, p),
-        "a share card (headline plus link)")],
-      ["Select", () => { selected = p; renderPosts(); }],
-      ["Thread", () => {
-        const t = K.thread(p, K.feed(store));
-        $("clipmsg").textContent =
-          `thread of ${p.witness.slice(0, 16)}…: ${t.length} post(s)\n` +
-          t.map((x) => `  ${x.witness.slice(0, 16)}… ${K.fromUtf8(x.content).slice(0, 40)}`).join("\n");
-      }],
-    ]) {
-      const b = document.createElement("button");
-      b.textContent = label;
-      b.onclick = action;
-      buttons.appendChild(b);
-    }
-    if (selected && selected.witness === p.witness) {
-      el.style.borderColor = "#0ff";
-      const tag = document.createElement("span");
-      tag.className = "meta";
-      tag.textContent = "  ← selected";
-      buttons.appendChild(tag);
-    }
-    el.appendChild(buttons);
-    host.appendChild(el);
-  }
-  const nav = document.createElement("div");
-  for (const [label, delta] of [["◀ previous page", -1], ["next page ▶", 1]]) {
-    const b = document.createElement("button");
-    b.textContent = label;
-    b.onclick = () => {
-      if (pages.length === 0) return;
-      pageIndex = (pageIndex + delta + pages.length) % pages.length;
-      renderPosts();
-    };
-    nav.appendChild(b);
-  }
-  host.appendChild(nav);
-}
-
-// `Kant.Repost`: a quote carries the original whole, so the reader of the
-// quote can check it themselves (`Kant.Repost.pasteQuote_copyQuote`, and
-// `Kant.Repost.pasteQuote_eq_none_of_bad_original` for doctored ones).
-function quoteOf(p) {
-  const comment = K.makePaste({
-    id: "quote_" + Date.now(),
-    title: $("content").value.split("\n")[0].slice(0, 60),
-    content: $("content").value,
-    timestamp: new Date().toISOString(),
-    replyTo: p.witness,
-  });
-  return K.quoteWith(comment, p);
-}
-
-function postCurrent(replyTo = null) {
-  const p = K.makePaste({
-    id: "paste_" + Date.now(),
-    title: $("content").value.split("\n")[0].slice(0, 60),
-    content: $("content").value,
-    timestamp: new Date().toISOString(),
-    replyTo,
-  });
-  keep(p);
-  current = p;
-  selected = p;
-  pageIndex = 0;
-  renderPosts();
-  return p;
-}
-
-$("post").onclick = () => postCurrent(null);
-$("reply").onclick = () => {
-  if (!selected) { $("feedmeta").textContent = "select a post to reply to first"; return; }
-  postCurrent(selected.witness);
-};
-$("refresh").onclick = () => { pageIndex = 0; renderPosts(); };
-$("q").oninput = () => { pageIndex = 0; renderPosts(); };
-$("pagesize").oninput = () => { pageIndex = 0; renderPosts(); };
-
-// --- copy and paste the results -----------------------------------------
-// `Kant.Clipboard`: pasted text is only accepted if the witness that
-// travels with it is the witness of the content that arrived
-// (`Kant.Clipboard.toPaste_eq_none_of_mismatch`).
-$("import").onclick = () => {
-  const raw = $("clip").value.trim();
-  if (!raw) return;
-  const text = raw.includes("#") ? K.fragment(raw) : raw;
-  const post = K.pasteText(text);
-  if (post) {
-    keep(post);
-    selected = post;
-    renderPosts();
-    $("clipmsg").textContent =
-      `pasted a post: ${post.witness}\ncontent and witness agree, so it was accepted`;
-    return;
-  }
-  const quote = K.pasteQuote(text);
-  if (quote) {
-    keep(quote.original);
-    keep(quote.comment);
-    selected = quote.comment;
-    renderPosts();
-    $("clipmsg").textContent =
-      `pasted a quote repost:\n  says     : ${K.fromUtf8(quote.comment.content).slice(0, 60)}\n` +
-      `  quoting  : ${quote.original.witness}\n` +
-      "both halves matched their own witnesses, so the quotation is genuine";
-    return;
-  }
-  const bundle = K.pasteAll(text);
-  if (bundle) {
-    for (const p of bundle) keep(p);
-    renderPosts();
-    $("clipmsg").textContent = `pasted a bundle of ${bundle.length} post(s) into the feed above`;
-    return;
-  }
-  const receipt = K.pasteReceipt(text);
-  if (receipt) {
-    $("clipmsg").textContent =
-      `pasted results:\n  witness : ${receipt.witness}\n  dasl    : ${K.daslHex(receipt.cid)}\n` +
-      `  bytes   : ${receipt.bytes}\n  credits : ${receipt.credits}`;
-    return;
-  }
-  $("clipmsg").textContent =
-    "that text is not a post, a result line or a share link — " +
-    "or its content does not match the witness travelling with it, so it was refused";
-};
-
-// A whole page copies as one bundle (`Kant.Clipboard.pasteAll_copyAll`).
-$("copyall").onclick = () => copyToClipboard(K.copyAll(K.feed(store)), "every post, as one bundle");
-
-// A card is a readable headline plus a link whose fragment carries the data
-// (`Kant.Repost.readCard_card`), so it can be dropped into any social feed.
-$("cardpage").onclick = () => {
-  const q = $("q").value;
-  const size = Math.max(1, Number($("pagesize").value) || 5);
-  const shown = K.paginate(size, K.search(q, K.newest(K.feed(store))))[pageIndex] ?? [];
-  if (shown.length === 0) { $("clipmsg").textContent = "nothing on this page to share"; return; }
-  copyToClipboard(K.bundleCard(location.origin + location.pathname, shown),
-    `a share card for ${shown.length} post(s)`);
-};
-
-// --- memes with embedded data -------------------------------------------
-// `Kant.Meme`: the payload is the clipboard envelope, prefixed with KZM1
-// and terminated by a zero byte, hidden in the least significant bits of
-// the colour samples.  The picture changes by at most one unit per sample
-// (`Kant.Meme.render_preserves_high_bits`).
-let memeTemplateImage = null;
-$("memeimg").onchange = (ev) => {
-  const file = ev.target.files?.[0];
-  if (!file) return;
-  const img = new Image();
-  img.onload = () => { memeTemplateImage = img; $("mememsg").textContent = "template loaded"; };
-  img.src = URL.createObjectURL(file);
-};
-
-function drawTemplate(ctx, c, witness) {
-  if (memeTemplateImage) {
-    ctx.drawImage(memeTemplateImage, 0, 0, c.width, c.height);
-  } else {
-    for (let y = 0; y < c.height; y += 1) {
-      ctx.fillStyle = `rgb(${20 + (y % 90)}, ${40 + ((y * 3) % 120)}, ${60 + ((y * 7) % 100)})`;
-      ctx.fillRect(0, y, c.width, 1);
-    }
-  }
-  ctx.textAlign = "center";
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = "#000";
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 22px monospace";
-  const draw = (text, y) => { ctx.strokeText(text, c.width / 2, y); ctx.fillText(text, c.width / 2, y); };
-  draw($("memetop").value, 32);
-  draw($("memebottom").value, c.height - 40);
-  ctx.font = "11px monospace";
-  draw(witness.slice(0, 32) + "…", c.height - 16);
-}
-
-function samplesOf(img) {
-  const out = [];
-  for (let i = 0; i < img.data.length; i += 4) out.push(img.data[i], img.data[i + 1], img.data[i + 2]);
-  return out;
-}
-
-function writeSamples(img, samples) {
-  let j = 0;
-  for (let i = 0; i < img.data.length; i += 4) {
-    img.data[i] = samples[j++]; img.data[i + 1] = samples[j++]; img.data[i + 2] = samples[j++];
-    img.data[i + 3] = 255;
-  }
-}
-
-function makeMeme(envelope, witness, what) {
-  const c = $("meme");
-  const ctx = c.getContext("2d", { willReadFrequently: true });
-  drawTemplate(ctx, c, witness);
-  const img = ctx.getImageData(0, 0, c.width, c.height);
-  const samples = samplesOf(img);
-  const need = K.memePayload(envelope).length;
-  if (8 * need > samples.length) {
-    $("mememsg").textContent =
-      `this template holds ${K.memeCapacityChars(samples)} characters; ` +
-      `the ${what} needs ${need - 5} — use a bigger picture`;
-    return;
-  }
-  const hidden = K.memeRender(samples, envelope);
-  writeSamples(img, hidden);
-  ctx.putImageData(img, 0, 0);
-  const back = K.memeDecode(hidden);
-  $("mememsg").textContent =
-    `${what} hidden in ${samples.length} colour samples (${need} bytes of payload)\n` +
-    `read back out of the picture: ${back ? "yes, identical" : "FAILED"}\n` +
-    `every sample changed by at most one unit: ` +
-    `${hidden.every((v, i) => (v >> 1) === (samples[i] >> 1))}\n` +
-    `caption drawn on it: ${K.unescapeHtml(K.memeCaption($("memetop").value, " " + witness.slice(0, 16) + "… ", $("memebottom").value))}`;
-  c.toBlob((b) => {
-    if (b.size > K.SOCIAL_LIMIT) {
-      $("mememsg").textContent += `\nexport is ${b.size} B, over the 5 MB social cap`;
-      return;
-    }
-    $("mememsg").textContent += `\nexported ${b.size} B PNG (within the 5 MB social cap)`;
-    download(b, "kant-meme.png");
-  }, "image/png");
-}
-
-$("mememake").onclick = () => {
-  const p = selected ?? current ?? address();
-  makeMeme(K.ofPaste(p), p.witness, "post");
-};
-
-$("memeresult").onclick = () => {
-  const p = selected ?? current ?? address();
-  makeMeme(K.ofReceipt(K.receiptOf(p, creditsOf(p))), p.witness, "results");
-};
-
-$("memepage").onclick = () => {
-  const q = $("q").value;
-  const size = Math.max(1, Number($("pagesize").value) || 5);
-  const shown = K.paginate(size, K.search(q, K.newest(K.feed(store))))[pageIndex] ?? [];
-  if (shown.length === 0) { $("mememsg").textContent = "nothing on this page to share"; return; }
-  makeMeme(K.ofPastes(shown), shown[0].witness, `page of ${shown.length} post(s)`);
-};
-
-$("memequote").onclick = () => {
-  const p = selected ?? current ?? address();
-  makeMeme(K.ofQuote(quoteOf(p)), p.witness, "quote of a post");
-};
-
-// --- strips: one share over several pictures ----------------------------
-// `Kant.Strip`: the envelope is cut into numbered parts, one per still, and
-// the stills may be collected in any order (`Kant.Strip.readStrip_perm`).
-async function samplesOfFile(file) {
-  const img = await new Promise((resolve, reject) => {
-    const i = new Image();
-    i.onload = () => resolve(i);
-    i.onerror = reject;
-    i.src = URL.createObjectURL(file);
-  });
-  const c = document.createElement("canvas");
-  c.width = img.width; c.height = img.height;
-  const ctx = c.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0);
-  return samplesOf(ctx.getImageData(0, 0, c.width, c.height));
-}
-
-$("stripmake").onclick = () => {
-  const p = selected ?? current ?? address();
-  const envelope = K.ofQuote(quoteOf(p));
-  const c = $("meme");
-  const ctx = c.getContext("2d", { willReadFrequently: true });
-  drawTemplate(ctx, c, p.witness);
-  const base = samplesOf(ctx.getImageData(0, 0, c.width, c.height));
-  const limit = K.stripLimitFor(base);
-  if (limit === 0) { $("mememsg").textContent = "this template is too small for even one part"; return; }
-  const stills = K.strip(base, limit, envelope);
-  const back = K.readStrip(stills);
-  $("mememsg").textContent =
-    `quote of ${p.witness.slice(0, 16)}… split over ${stills.length} still(s), ` +
-    `${limit} payload bytes each\n` +
-    `read back from the shuffled stills: ` +
-    `${K.readStrip([...stills].reverse()) && back ? "yes, identical" : "FAILED"}`;
-  stills.forEach((samples, i) => {
-    const img = ctx.createImageData(c.width, c.height);
-    writeSamples(img, samples);
-    ctx.putImageData(img, 0, 0);
-    c.toBlob((b) => download(b, `kant-strip-${String(i).padStart(3, "0")}.png`), "image/png");
-  });
-};
-
-$("stripin").onchange = async (ev) => {
-  const files = Array.from(ev.target.files ?? []);
-  if (files.length === 0) return;
-  const stills = [];
-  for (const f of files) stills.push(await samplesOfFile(f));
-  const envelope = K.readStrip(stills);
-  if (!envelope) {
-    $("mememsg").textContent =
-      `those ${stills.length} picture(s) do not make up a complete strip ` +
-      "(a part is missing, or one was re-encoded lossily)";
-    return;
-  }
-  const quote = K.toQuote(envelope);
-  const posts = K.toPastes(envelope) ?? (K.toPaste(envelope) ? [K.toPaste(envelope)] : null);
-  if (quote) {
-    keep(quote.original); keep(quote.comment);
-    selected = quote.comment;
-    renderPosts();
-    $("mememsg").textContent =
-      `that strip carried a quote of ${quote.original.witness}; both posts are in the feed above`;
-    return;
-  }
-  if (posts) {
-    for (const p of posts) keep(p);
-    renderPosts();
-    $("mememsg").textContent =
-      `that strip carried ${posts.length} post(s); they are in the feed above`;
-    return;
-  }
-  $("mememsg").textContent = "that strip carried something this client cannot display";
-};
-
-$("memein").onchange = (ev) => {
-  const file = ev.target.files?.[0];
-  if (!file) return;
-  const img = new Image();
-  img.onload = () => {
-    const c = $("meme");
-    c.width = img.width; c.height = img.height;
-    const ctx = c.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0);
-    const samples = samplesOf(ctx.getImageData(0, 0, c.width, c.height));
-    const bundle = K.memeToPastes(samples);
-    if (bundle) {
-      for (const p of bundle) keep(p);
-      selected = bundle[0];
-      renderPosts();
-      $("mememsg").textContent =
-        `this meme contained ${bundle.length} post(s); they have been added to the feed above`;
-      return;
-    }
-    const quote = K.memeToQuote(samples);
-    if (quote) {
-      keep(quote.original);
-      keep(quote.comment);
-      selected = quote.comment;
-      renderPosts();
-      $("mememsg").textContent =
-        `this meme contained a quote of ${quote.original.witness}\n` +
-        "both the remark and the post it quotes are now in the feed above";
-      return;
-    }
-    const post = K.memeToPaste(samples);
-    if (post) {
-      keep(post);
-      selected = post;
-      renderPosts();
-      $("mememsg").textContent =
-        `this meme contained a post: ${post.witness}\nit has been added to the feed above`;
-      return;
-    }
-    const receipt = K.memeToReceipt(samples);
-    if (receipt) {
-      $("mememsg").textContent =
-        `this meme contained results:\n  witness : ${receipt.witness}\n` +
-        `  bytes   : ${receipt.bytes}\n  credits : ${receipt.credits}`;
-      return;
-    }
-    $("mememsg").textContent =
-      "no KZM1 payload in that picture (or it was re-encoded lossily on the way here)";
-  };
-  img.src = URL.createObjectURL(file);
-};
-
-// A share link opened in the browser loads its post straight into the feed
-// (`Kant.Clipboard.parseShareUrl_shareUrl`).  This runs before `address()`,
-// which replaces the fragment with the current witness.
-(function loadSharedLink() {
-  const frag = K.fragment(location.href);
-  if (!frag.includes(":")) return;
-  const post = K.pasteText(frag);
-  if (!post) return;
-  keep(post);
-  selected = post;
-  $("clipmsg").textContent = `this link carried a post: ${post.witness}`;
-})();
-
-loadPosts();
-address();
-renderPosts();
-</script>
-
-<script type="module">
-// --- discovery, rendezvous and chat -------------------------------------
-// Pure layer: web/kant-net.mjs, a transcription of RequestProject/Kant/
-// Rendezvous.lean and Relay.lean.  Transports: a relay (HTTP long polling,
-// or a WebSocket), other tabs of this browser, and direct WebRTC data
-// channels introduced through the relay.  Whatever the route, every line is
-// re-checked against its own witness before it is shown.
 import * as N from "./kant-net.mjs";
-import { qrEncode, qrSvg } from "./kant-qr.mjs";
+import * as S from "./kant-site.mjs";
+import * as F from "./kant-flow.mjs";
+import * as D from "./kant-diag.mjs";
+import * as C from "./kant-carddebug.mjs";
+import * as SL from "./kant-sharelog.mjs";
 
 const $ = (id) => document.getElementById(id);
+
+// --------------------------------------------------------------- the log
+//
+// One log for the whole run (`RequestProject/Kant/Diagnostics.lean`): a
+// bounded ring that keeps its order, never drops the newest line, and can
+// be shared without carrying the room secret with it.
+
+let diagPending = false;
+function queueDiagRender() {
+  if (diagPending) return;
+  diagPending = true;
+  setTimeout(() => { diagPending = false; renderDiag(); }, 120);
+}
+
+const LOG = new D.DiagLog({ cap: 3000, onEvent: () => queueDiagRender() });
+// The run before this one is kept, because a crash is exactly when the log
+// matters; this one is written down as it happens, so a reload does not
+// lose it either.
+const PREVIOUS = D.rotateStoredRun(globalThis.localStorage);
+LOG.persist("kant-diag-run", globalThis.localStorage);
+LOG.info("app", "page opened", location.href.split("#")[0]);
+if (PREVIOUS.length) {
+  LOG.info("app", `the previous run had ${PREVIOUS.length} events`,
+    "open the diagnostics page to read it");
+}
+
+window.addEventListener("error", (ev) =>
+  LOG.error("app", "uncaught error", `${ev.message} (${ev.filename}:${ev.lineno})`));
+window.addEventListener("unhandledrejection", (ev) =>
+  LOG.error("app", "a promise was rejected", ev.reason?.message ?? String(ev.reason)));
+
+// ------------------------------------------------------------- the config
+
+let cfg = { ...S.DEFAULT_CONFIG };
+let relayBase = "";
+let reach = { configured: "", configuredUp: false, origin: "", originIsRelay: false };
+
+/** Where this copy actually lives, when the configuration says nothing
+ *  useful.  A code that points at a page nobody can open is worse than no
+ *  code at all. */
+const hereUrl = () => location.origin + location.pathname;
+
+function effectiveConfig() {
+  const origin = cfg.origin && !cfg.origin.includes("#") ? cfg.origin : hereUrl();
+  const reachable = location.protocol.startsWith("http");
+  return { ...cfg, origin: reachable ? hereUrl() : origin };
+}
+
+// -------------------------------------------------------------- the state
+
+let ui = F.start();
 let node = null;
 let camera = null;
+let spokenFor = "";
 
-const sameOriginRelay = location.protocol.startsWith("http") ? location.origin : "";
-$("netrelay").value = sameOriginRelay;
-$("netpeer").value = "peer-" + Math.random().toString(36).slice(2, 7);
+const SECTION = {
+  welcome: "s-welcome", share: "s-share", join: "s-join",
+  scan: "s-scan", chat: "s-chat", more: "s-more",
+};
+
+function dispatch(ev) {
+  const next = F.step(ui, ev);
+  // The camera follows the proved state exactly: `Kant.Onboarding` shows that
+  // in every reachable state a running camera means the scan screen is on
+  // show, so the stop button is always in front of the user.
+  if (ui.camera && !next.camera) stopCamera();
+  ui = next;
+  if (ui.camera && !camera) startCamera();
+  render();
+}
 
 function render() {
-  if (!node) { $("netstatus").textContent = "not in a room"; return; }
-  const direct = node.mesh ? node.mesh.connected.length : 0;
-  $("netstatus").textContent =
-    `room ${node.room.slice(0, 16)}…  as ${node.self}\n` +
-    `relay ${node.relayBase || "(none)"} — ${direct} direct peer connection(s), ` +
-    `${node.roster.length} announcement(s) heard`;
-  const peers = node.peers().filter((p) => p && p.peer !== node.self);
-  $("netpeers").textContent = peers.length
-    ? "peers:\n" + peers.map((p) =>
-        `  ${p.peer} @ rev ${p.seq}` +
-        (p.addrs.length ? `  [${p.addrs.map((a) => a.transport).join(", ")}]` : "")).join("\n")
-    : "peers: nobody else yet — show them the code";
-  const lines = node.view();
-  $("netchat").textContent = lines.length
-    ? lines.map((m) => `${m.sender}#${m.seq}: ${N.msgText(m)}`).join("\n")
-    : "(no messages yet)";
+  for (const [screen, id] of Object.entries(SECTION)) {
+    $(id).classList.toggle("on", ui.screen === screen);
+  }
+  $("title").textContent = F.screenTitle(ui.screen);
+  $("back").style.visibility = ui.screen === "welcome" ? "hidden" : "visible";
+  $("hush").textContent = ui.hushed ? "🔇" : "🔊";
+  $("hush").title = ui.hushed ? "turn the voice on" : "turn the voice off";
+
+  const task = F.nextTask(ui.progress);
+  $("prompt").textContent = F.promptFor(ui);
+  const done = [ui.progress.gotIn, ui.progress.sharedIt, ui.progress.saidHello];
+  $("steps").textContent = done.map((d) => (d ? "●" : "○")).join(" ");
+
+  if (node && node.secret) drawShare();
+  renderChat();
+  const key = `${ui.screen}|${task}`;
+  if (key !== spokenFor) { spokenFor = key; speak(F.promptFor(ui)); }
 }
 
-function showCode() {
-  if (!node || !node.secret) { $("netqrmeta").textContent = "no room yet"; return; }
-  const text = node.inviteText();
+// ------------------------------------------------------------------ voice
+
+function speak(text) {
+  if (ui.hushed || !text) return;
+  const synth = window.speechSynthesis;
+  if (!synth) return;
   try {
-    const qr = qrEncode(text);
-    $("netqr").innerHTML = qrSvg(qr, { scale: 4, border: 4, dark: "#0f0", light: "#000" });
-    $("netqrmeta").textContent =
-      `chat code: version ${qr.version}, ${text.length} characters — scan it, or copy it below`;
-  } catch (e) {
-    $("netqr").innerHTML = "";
-    $("netqrmeta").textContent = `the invitation is too long for one code (${e.message})`;
-  }
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1;
+    synth.speak(u);
+  } catch { /* a browser without a voice is still a usable browser */ }
 }
 
-function start(existing) {
+$("hush").onclick = () => {
+  if (!ui.hushed) window.speechSynthesis?.cancel();
+  dispatch({ type: ui.hushed ? "unhush" : "hush" });
+  if (!ui.hushed) speak(F.promptFor(ui));
+};
+$("again").onclick = () => { spokenFor = ""; speak(F.promptFor(ui)); };
+
+// ----------------------------------------------------------- the room
+
+function newNode() {
+  return new N.KantNode({
+    peer: "peer-" + Math.random().toString(36).slice(2, 7),
+    relay: D.effectiveRelay(reach),
+    log: LOG,
+    reach,
+    onChange: () => { renderChat(); },
+  });
+}
+
+function attach(fresh) {
   if (node) node.stop();
-  node = existing;
+  node = fresh;
   node.connect();
-  node.onChange = render;
-  node.announceSelf().then(() => node.dialKnownPeers()).catch(() => {});
-  node.startPolling({ wait: 25 }).catch(() => {});
-  render();
+  node.onChange = () => renderChat();
+  node.announceSelf()
+    .then(() => node.dialKnownPeers())
+    .catch((e) => LOG.error("app", "could not announce into the room", e));
+  node.startPolling({ wait: 25 })
+    .catch((e) => LOG.error("relay", "polling stopped", e));
+  renderDiag();
 }
 
-$("netopen").onclick = () => {
-  const fresh = new N.KantNode({ peer: $("netpeer").value.trim() || undefined,
-                                 relay: $("netrelay").value.trim() });
-  fresh.createRoom($("netrelay").value.trim());
-  start(fresh);
-  showCode();
-};
+const currentInvite = () =>
+  N.invite(node.relayBase, node.secret, node.self, node.addrs);
 
-$("netcode").onclick = showCode;
+function inviteLink() {
+  return F.inviteUrl(effectiveConfig(), currentInvite());
+}
 
-$("netjoinbtn").onclick = () => {
-  const text = $("netjoin").value.trim();
-  const fresh = new N.KantNode({ peer: $("netpeer").value.trim() || undefined,
-                                 relay: $("netrelay").value.trim() });
-  const inv = fresh.joinInvite(text);
-  if (!inv) { $("netstatus").textContent = "that is not a chat code or invite link"; return; }
-  start(fresh);
-  $("netrelay").value = fresh.relayBase;
-  showCode();
-};
+function dress() {
+  return {
+    caption: $("caption").value || cfg.caption,
+    icon: $("icon").value || cfg.picture,
+    alt: cfg.alt,
+  };
+}
 
-$("netcopy").onclick = async () => {
-  if (!node) return;
-  await navigator.clipboard.writeText(node.inviteText());
-  $("netqrmeta").textContent = "chat code copied — paste it to whoever should join";
-};
-
-$("netlink").onclick = async () => {
-  if (!node || !node.secret) return;
-  const base = location.href.split("#")[0];
-  const link = N.inviteUrl(base, N.invite(node.relayBase, node.secret, node.self, node.addrs));
-  await navigator.clipboard.writeText(link);
-  $("netqrmeta").textContent = "invite link copied";
-};
-
-$("netsend").onclick = async () => {
-  if (!node) { $("netstatus").textContent = "open or join a room first"; return; }
-  const text = $("netsay").value;
-  if (!text) return;
-  $("netsay").value = "";
-  await node.say(text);
-  render();
-};
-
-$("netsharepost").onclick = async () => {
-  if (!node) { $("netstatus").textContent = "open or join a room first"; return; }
-  const line = $("clip").value.trim();
-  if (!line) {
-    $("netstatus").textContent =
-      "copy a post first (the buttons in section 5 put its clipboard line in the box)";
-    return;
+/** The one link and the one code — the code being the link, dressed with the
+ *  chosen picture and the chosen words (`Kant.InviteCard`). */
+function drawShare() {
+  const link = inviteLink();
+  $("link").value = link;
+  try {
+    const svg = F.inviteCardSvg(effectiveConfig(), dress(), currentInvite(),
+      { scale: 6, border: 4, dark: "#0f0", light: "#000" });
+    $("qr").innerHTML = svg;
+    $("qrmeta").textContent =
+      `the code carries the whole link (${link.length} characters), ` +
+      `so any camera app can open it — not just this one`;
+  } catch (e) {
+    $("qr").innerHTML = "";
+    $("qrmeta").textContent =
+      `the link is too long for one code (${e.message}) — send it as text instead`;
   }
-  await node.publish(line);
-  $("netstatus").textContent = "sent that clipboard line to the room";
+  $("sharestatus").textContent = transportLine();
+}
+
+function transportLine() {
+  if (!node) return "";
+  const direct = node.mesh ? node.mesh.connected.length : 0;
+  const others = node.peers().filter((p) => p && p.peer !== node.self).length;
+  const relay = node.relayBase
+    ? `relay ${node.relayBase}`
+    : "no relay: only other tabs of THIS browser can find you";
+  return `${relay}\n${others} other person(s) heard from, ${direct} direct connection(s)`;
+}
+
+function renderChat() {
+  if (!node) { $("chat").textContent = "(not in a room)"; $("chatstatus").textContent = ""; return; }
+  const lines = node.view();
+  $("chat").innerHTML = lines.length
+    ? lines.map((m) => {
+        const who = m.sender === node.self ? "you" : m.sender;
+        const cls = m.sender === node.self ? "me" : "";
+        return `<div class="${cls}">${K.escapeHtml(who)}: ${K.escapeHtml(N.msgText(m))}</div>`;
+      }).join("")
+    : "(nothing said yet)";
+  $("chat").scrollTop = $("chat").scrollHeight;
+  $("chatstatus").textContent = transportLine();
+}
+
+// -------------------------------------------------------------- the taps
+
+$("back").onclick = () => dispatch({ type: "back" });
+$("btn-more").onclick = () => dispatch({ type: "goto", screen: "more" });
+$("btn-join").onclick = () => dispatch({ type: "goto", screen: "join" });
+$("btn-openroom").onclick = () => dispatch({ type: "goto", screen: "chat" });
+$("btn-shareroom").onclick = () => dispatch({ type: "goto", screen: "share" });
+
+$("btn-open").onclick = () => {
+  const fresh = newNode();
+  fresh.createRoom(D.effectiveRelay(reach));
+  attach(fresh);
+  $("caption").value = $("caption").value || cfg.caption;
+  $("icon").value = $("icon").value || cfg.picture;
+  dispatch({ type: "createRoom" });
 };
 
-$("netleave").onclick = () => {
+$("btn-copy").onclick = async () => {
+  if (!node) return;
+  await copy(inviteLink());
+  $("sharestatus").textContent = "link copied — paste it into any chat";
+  dispatch({ type: "copyLink" });
+};
+
+$("btn-sharesys").onclick = async () => {
+  if (!node) return;
+  const link = inviteLink();
+  const bundle = { title: dress().caption, text: `${dress().caption}\n${link}`, url: link };
+  try {
+    if (navigator.share) await navigator.share(bundle);
+    else await copy(link);
+  } catch { /* the user changed their mind */ }
+  dispatch({ type: "copyLink" });
+};
+
+$("btn-copycard").onclick = async () => {
+  if (!node) return;
+  await copy(F.inviteChatText(effectiveConfig(), dress(), currentInvite()));
+  $("sharestatus").textContent = "the code copied as text — it reads back as the same card";
+  dispatch({ type: "copyLink" });
+};
+
+$("btn-savecode").onclick = () => {
+  if (!node) return;
+  const svg = F.inviteCardSvg(effectiveConfig(), dress(), currentInvite(),
+    { scale: 8, border: 4, dark: "#000", light: "#fff" });
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "kant-invite.svg";
+  a.click();
+  URL.revokeObjectURL(url);
+  $("sharestatus").textContent = "saved — the picture carries the link, the words and the icon";
+};
+
+for (const id of ["caption", "icon"]) $(id).oninput = () => { if (node) drawShare(); };
+
+$("btn-dojoin").onclick = () => joinFrom($("joinbox").value, "joinmsg");
+$("btn-scan").onclick = () => dispatch({ type: "startCamera" });
+$("btn-scan2").onclick = () => dispatch({ type: "startCamera" });
+$("btn-stop").onclick = () => dispatch({ type: "stopCamera" });
+
+$("btn-send").onclick = async () => {
+  if (!node) return;
+  const text = $("say").value;
+  if (!text) return;
+  $("say").value = "";
+  await node.say(text);
+  dispatch({ type: "say" });
+};
+$("say").onkeydown = (e) => { if (e.key === "Enter") $("btn-send").click(); };
+
+$("btn-leave").onclick = () => {
   if (node) node.stop();
   node = null;
-  $("netqr").innerHTML = "";
-  $("netqrmeta").textContent = "";
-  render();
+  $("qr").innerHTML = "";
+  $("link").value = "";
+  dispatch({ type: "leave" });
 };
 
-// Camera scanning, where the browser offers a barcode detector.  Everywhere
-// else, the code can still be pasted into the box above.
-$("netscan").onclick = async () => {
+/**
+ * Joining, as tolerantly as `Kant.Join.findInvite`: the link may arrive
+ * wrapped in a sentence, in brackets, with a full stop after it, or with a
+ * trailing newline.
+ */
+function joinFrom(text, msgId) {
+  const inv = F.findInvite(text);
+  if (!inv) {
+    // Say what it *is*, not only what it is not (`Kant.CardDebug.classify`).
+    const what = C.classify(text);
+    const named = what.kind === "card"
+      ? "That is a <b>share card</b>: a page, a caption and a picture. It names no room, " +
+        "so there is nothing in it to join."
+      : what.kind === "page"
+        ? "That is a <b>page link</b>: the address of a paste. It names no room, so there " +
+          "is nothing in it to join."
+        : "";
+    $(msgId).innerHTML =
+      '<span class="bad">no invite link in that text.</span> ' + named +
+      " An invitation looks like <code>https://…/#kzinvite…</code>, and comes from " +
+      "<b>Share \u2192 Invite someone to chat</b> on the other device. " +
+      "Copy the whole message if you are not sure which part is the link.";
+    LOG.warn("ingest", "the text pasted is not an invitation", what.kind);
+    return false;
+  }
+  const fresh = newNode();
+  fresh.joinInvite(N.copyInvite(inv));
+  attach(fresh);
+  $(msgId).textContent = `joined room ${fresh.room.slice(0, 12)}…`;
+  dispatch({ type: "joinText", text });
+  return true;
+}
+
+// -------------------------------------------------------------- the camera
+
+async function startCamera() {
+  $("scanmsg").textContent = "asking for the camera…";
   if (!("BarcodeDetector" in window)) {
-    $("netqrmeta").textContent =
-      "this browser has no barcode detector — paste the code into the box instead";
+    $("scanmsg").innerHTML =
+      '<span class="warn">this browser cannot read codes.</span> ' +
+      "Go back and paste the link instead.";
     return;
   }
   try {
     const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-    const video = document.createElement("video");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+    });
+    camera = stream;
+    const video = $("cam");
     video.srcObject = stream;
     await video.play();
-    camera = stream;
+    $("scanmsg").textContent = "point the camera at the other screen — Stop turns it off";
     const tick = async () => {
       if (!camera) return;
       const found = await detector.detect(video).catch(() => []);
       if (found.length) {
-        $("netjoin").value = found[0].rawValue;
-        camera.getTracks().forEach((t) => t.stop());
-        camera = null;
-        $("netjoinbtn").click();
+        const text = found[0].rawValue;
+        joinFrom(text, "scanmsg");
         return;
       }
       requestAnimationFrame(tick);
     };
     tick();
-    $("netqrmeta").textContent = "point the camera at the other screen…";
   } catch (e) {
-    $("netqrmeta").textContent = `camera unavailable (${e.message})`;
+    $("scanmsg").innerHTML =
+      `<span class="warn">the camera is not available (${K.escapeHtml(e.message)}).</span> ` +
+      "Go back and paste the link instead.";
+    camera = null;
+    ui = { ...ui, camera: false };
+    render();
   }
-};
-
-// An invite link opened in the browser joins its room straight away.
-(function joinFromLink() {
-  const frag = location.hash.slice(1);
-  if (!frag) return;
-  const fresh = new N.KantNode({ peer: $("netpeer").value.trim() || undefined });
-  if (!fresh.joinInvite(frag)) return;
-  start(fresh);
-  $("netrelay").value = fresh.relayBase;
-  showCode();
-})();
-
-render();
-</script>
-<script type="module">
-// --- the static sneakernet ------------------------------------------------
-// Pure layer: web/kant-uucp.mjs, a transcription of RequestProject/Kant/
-// Uucp.lean.  There is no transport here on purpose: state moves only when a
-// human moves a code.  The spool is kept in localStorage, so the page is as
-// up to date as the last code pasted into it, exactly as the Lean model says.
-import * as U from "./kant-uucp.mjs";
-import { roomOf, msgText } from "./kant-net.mjs";
-import { utf8 } from "./kantzk.mjs";
-import { qrEncode, qrSvg } from "./kant-qr.mjs";
-
-const $ = (id) => document.getElementById(id);
-let sn = U.loadNode("peer-" + Math.random().toString(36).slice(2, 7));
-let snCamera = null;
-
-$("snname").value = sn.name;
-$("snroom").value = localStorage.getItem("kant-sneakernet-room") || "kant-zk demo secret";
-
-const snRoom = () => roomOf(utf8($("snroom").value || "kant-zk demo secret"));
-
-function snRender() {
-  const bag = sn.bag();
-  const parts = U.bagForCarrier(bag, "tweet");
-  $("snstatus").textContent =
-    `${sn.spool.length} line(s) held as ${sn.name}\n` +
-    `bag ${bag.length} characters — ` +
-    `dm ${bag.length <= U.CARRIER_CAPACITY.dm ? "yes" : "no"}, ` +
-    `qr ${bag.length <= U.CARRIER_CAPACITY.qr ? "yes" : "no"}, ` +
-    `tweet ${parts.length === 1 ? "yes" : `${parts.length} parts`}`;
-  $("snview").textContent = sn.view().length
-    ? "spool:\n" + sn.view().map((m) => `  ${m.sender} #${m.seq}: ${msgText(m)}`).join("\n")
-    : "nothing here yet — write a line, or paste somebody's bag";
-  U.saveNode(sn);
-  localStorage.setItem("kant-sneakernet-room", $("snroom").value);
 }
 
-$("snwrite").onclick = () => {
-  const text = $("snsay").value.trim();
-  if (!text) return;
-  sn.name = $("snname").value.trim() || sn.name;
-  sn.write(snRoom(), text);
-  $("snsay").value = "";
-  $("snout").textContent = "";
-  snRender();
+function stopCamera() {
+  if (camera) { camera.getTracks().forEach((t) => t.stop()); camera = null; }
+  const v = $("cam");
+  if (v) v.srcObject = null;
+  $("scanmsg").textContent = "the camera is off";
+}
+
+// ------------------------------------------------------- copying a note
+
+const noteOf = () => K.makePaste({
+  id: "note",
+  title: $("notetitle").value || "a note",
+  content: K.utf8($("note").value),
+  timestamp: new Date().toISOString().replace(/\D/g, "").slice(0, 14),
+});
+
+$("btn-copytext").onclick = async () => {
+  await copy(F.copyPlain(noteOf()));
+  $("notemsg").textContent = "copied the words themselves, nothing else";
+};
+$("btn-copytextmeta").onclick = async () => {
+  await copy(F.copyPlainWithMeta(effectiveConfig(), noteOf()));
+  $("notemsg").textContent =
+    "copied the words, then a `-- ` line, then the title, link, address and time";
+};
+$("btn-copynotelink").onclick = async () => {
+  await copy(S.pasteUrl(effectiveConfig(), noteOf()));
+  $("notemsg").textContent = "copied a link whose address is the content itself";
 };
 
-const copy = async (text, note) => {
-  try { await navigator.clipboard.writeText(text); $("snqrmeta").textContent = note; }
-  catch { $("snout").textContent = text; }
-};
-
-$("sncopy").onclick = () => copy(sn.bag(), `copied ${sn.bag().length} characters — paste it into a DM`);
-
-$("snlink").onclick = () => {
-  const base = location.href.split("#")[0];
-  const link = sn.bagLink(base);
-  copy(link, `copied a ${link.length}-character link`);
-};
-
-$("sntweets").onclick = () => {
-  const parts = U.bagForCarrier(sn.bag(), "tweet");
-  $("snout").textContent = parts
-    .map((p, i) => `--- ${i + 1}/${parts.length} (${p.length} chars)\n${p}`).join("\n\n");
-};
-
-$("snqr").onclick = () => {
-  const bag = sn.bag();
-  const codes = bag.length <= U.CARRIER_CAPACITY.qr ? [bag] : U.bagForCarrier(bag, "tweet");
-  try {
-    $("snqrbox").innerHTML = codes.slice(0, 4).map((c) => qrSvg(qrEncode(c), { scale: 3 })).join(" ");
-    $("snqrmeta").textContent = codes.length === 1
-      ? "one code holds the whole spool"
-      : `${codes.length} codes (showing the first ${Math.min(4, codes.length)})`;
-  } catch (e) { $("snqrmeta").textContent = `no code: ${e.message}`; }
-};
-
-$("snpastebtn").onclick = () => {
-  const text = $("snpaste").value.trim();
-  if (!text) return;
-  const r = sn.paste(text);
-  $("snqrmeta").textContent = r.accepted
-    ? `pasted: ${r.added} new line(s)`
-    : "refused: that is not a bag, or a line failed its own witness";
-  if (r.accepted) $("snpaste").value = "";
-  snRender();
-};
-
-$("snforget").onclick = () => {
-  sn = U.SneakerNode.blank($("snname").value.trim() || "anon");
-  $("snqrbox").innerHTML = "";
-  $("snout").textContent = "";
-  snRender();
-};
-
-$("snscan").onclick = async () => {
-  if (!("BarcodeDetector" in window)) {
-    $("snqrmeta").textContent = "this browser cannot scan codes; paste the text instead";
-    return;
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = document.createElement("textarea");
+    t.value = text;
+    document.body.appendChild(t);
+    t.select();
+    document.execCommand("copy");
+    t.remove();
   }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-    const video = document.createElement("video");
-    video.srcObject = stream; video.playsInline = true; await video.play();
-    $("snqrbox").innerHTML = ""; $("snqrbox").appendChild(video);
-    const det = new BarcodeDetector({ formats: ["qr_code"] });
-    const collected = [];
-    snCamera = setInterval(async () => {
-      const found = await det.detect(video).catch(() => []);
-      for (const b of found) {
-        if (!collected.includes(b.rawValue)) collected.push(b.rawValue);
-      }
-      const r = sn.paste(collected.length === 1 ? collected[0] : collected.join("\n"));
-      if (r.accepted && r.added >= 0) {
-        clearInterval(snCamera); snCamera = null;
-        stream.getTracks().forEach((t) => t.stop());
-        $("snqrbox").innerHTML = "";
-        $("snqrmeta").textContent = `scanned ${collected.length} code(s): ${r.added} new line(s)`;
-        snRender();
-      }
-    }, 400);
-  } catch (e) { $("snqrmeta").textContent = `camera unavailable (${e.message})`; }
+}
+
+// ------------------------------------------------------------ the relay
+
+/** Work out where this copy can meet other clients, and say so plainly.
+ *
+ *  A configured relay wins.  With nothing configured the page's *own*
+ *  origin is probed: when the site is served by `node server/relay.mjs
+ *  --static web` that origin is a relay, and using it is what lets two
+ *  different browsers on one machine find each other.  An origin that
+ *  does not answer as a relay is never used as one
+ *  (`Kant.Connectivity.effectiveRelay`). */
+async function refreshTransport() {
+  reach = await D.resolveReachability({
+    configured: relayBase,
+    origin: location.origin,
+    log: LOG,
+  });
+  const used = D.effectiveRelay(reach);
+  const text = used
+    ? (reach.configured
+        ? `Relay ${used} is up — other devices can join.`
+        : `This page is served by a relay (${used}) — other browsers on this machine, ` +
+          "and other devices that can reach it, can join.")
+    : (reach.configured
+        ? `The relay at ${reach.configured} did not answer (${reach.probe?.reason ?? "?"}). ` +
+          "Nobody outside this browser can join."
+        : "No relay: two tabs of THIS browser will find each other, but a second " +
+          "browser or a second device will not. Serve the page with " +
+          "`node server/relay.mjs --static web`, or set `relay =` in kant.config.");
+  $("transport").innerHTML = used ? K.escapeHtml(text) : `<span class="warn">${K.escapeHtml(text)}</span>`;
+  $("relaymsg").textContent = text;
+  if (node) {
+    node.reach = reach;
+    node.relayBase = used;
+    node.client = used ? new N.RelayClient(used, { log: LOG }) : null;
+  }
+  renderDiag();
+  return reach;
+}
+
+$("btn-testrelay").onclick = async () => {
+  relayBase = $("relay").value.trim();
+  await refreshTransport();
+  if (node) drawShare();
 };
 
-// A link whose fragment carries a bag catches this browser up on arrival.
-(function snFromLink() {
-  const frag = location.hash.slice(1);
-  if (!frag) return;
-  const ms = U.openBag(frag);
-  if (!ms) return;
-  const r = sn.paste(U.packBag(ms));
-  if (r.accepted) $("snqrmeta").textContent = `this link carried ${r.added} new line(s)`;
-})();
+// ------------------------------------------------------ the diagnostics
 
-snRender();
+/** The current run, with the room secret and the invite withheld
+ *  (`Kant.Diagnostics.Log.share`). */
+function currentReport() {
+  if (node) return node.report({ browser: 1 });
+  const self = D.clientOf({ room: "", reach, bus: typeof BroadcastChannel === "function" });
+  return {
+    verdict: D.diagnose(self, { ...self, browser: 2 }),
+    room: "",
+    relay: D.effectiveRelay(reach),
+    events: LOG.share([]),
+    dropped: LOG.dropped,
+  };
+}
+
+function renderDiag() {
+  if (!$("verdict")) return;
+  const r = currentReport();
+  const bad = r.verdict !== "ok";
+  $("verdict").innerHTML =
+    `${bad ? '<span class="warn">' : ""}${K.escapeHtml(D.explain(r.verdict))}${bad ? "</span>" : ""}` +
+    `\nroom ${K.escapeHtml(r.room || "(none)")} · relay ${K.escapeHtml(r.relay || "(none)")}` +
+    ` · ${LOG.total} events${LOG.dropped ? ` (${LOG.dropped} dropped)` : ""}`;
+  const tail = LOG.events.slice(-40).map((e) =>
+    `${String(e.ms).padStart(6)}ms ${e.level.padEnd(5)} ${e.area.padEnd(6)} ${e.text}` +
+    `${e.detail ? `  |  ${e.detail}` : ""}`).join("\n");
+  $("diagtail").textContent = tail;
+}
+
+$("btn-diagcopy").onclick = async () => {
+  await copy(D.reportText(currentReport()));
+  $("diagmsg").textContent =
+    "copied — paste it anywhere; the room secret and the invite are not in it";
+};
+
+$("btn-diagsave").onclick = () => {
+  const blob = new Blob([D.reportText(currentReport())], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "kant-diagnostics.txt";
+  a.click();
+  URL.revokeObjectURL(url);
+  $("diagmsg").textContent = "saved as kant-diagnostics.txt";
+};
+
+// Sharing the run: the system share sheet if this device has one, the
+// clipboard otherwise — and, either way, the run cut into chat-sized
+// messages, because a chat window is a transport that always exists
+// (`Kant.ShareLog.chatParts`, `Kant.Handoff.logScript`).
+$("btn-diagshare").onclick = async () => {
+  const r = currentReport();
+  const text = D.reportText(r);
+  const steps = SL.logScript(100, "you", r);
+  const parts = SL.codes(steps);
+  $("diagparts").value = parts
+    .map((c, i) => `--- ${i + 1}/${parts.length} ---\n${c}`).join("\n");
+  let how = "copied";
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "kant-zk diagnostics", text });
+      how = "shared";
+    } else {
+      await copy(text);
+    }
+  } catch { await copy(text); }
+  $("diagshare").textContent =
+    `${how} — the room secret and the invite are not in it. ` +
+    `No chat that takes a whole run? Send the ${parts.length} message(s) below instead, ` +
+    "in any order; the other side pastes them into the diagnostics page.";
+  LOG.info("app", "the run was shared", `${how}, ${parts.length} part(s)`);
+};
+
+// Posting the run to the store: it becomes an ordinary content-addressed
+// post, with a witness and a link, held by this device
+// (`Kant.ShareLog.postLog`).
+$("btn-diagpost").onclick = async () => {
+  const r = currentReport();
+  const store = SL.loadStore(globalThis.localStorage);
+  const stamp = new Date().toISOString();
+  const { paste, witness, already } =
+    SL.postLog(store, r, { id: `run_${Date.now()}`, timestamp: stamp });
+  SL.saveStore(store, globalThis.localStorage);
+  const link = SL.logLink(hereUrl(), paste);
+  $("diagshare").innerHTML =
+    `${already ? "already in the store" : "posted to the store"} as ` +
+    `<code>${K.escapeHtml(witness.slice(0, 16))}…</code>\n${K.escapeHtml(link)}\n` +
+    `${store.entries.length} block(s) held on this device.`;
+  $("diagparts").value = SL.carryText(paste);
+  $("diagmsg").textContent =
+    "the block itself is in the box below: paste it into somebody else's " +
+    "\u201ccarry a block by hand\u201d box and they hold the very same run.";
+  LOG.info("app", "the run was posted to the store", witness.slice(0, 16));
+};
+
+$("btn-diagpage").onclick = () => {
+  const r = currentReport();
+  sessionStorage.setItem("kant-diag", D.renderReport(r));
+  window.open("./diag.html", "_blank");
+};
+
+// --------------------------------------------------------------- startup
+
+(async () => {
+  const loaded = await S.loadConfig();
+  cfg = loaded.config;
+  LOG.info("config", loaded.ok === false ? "kant.config could not be read" : "kant.config read",
+    loaded.ok === false ? "using the defaults" : cfg.origin);
+  relayBase = await S.loadRelay();
+  await refreshTransport();
+  $("relay").value = relayBase;
+  $("caption").value = cfg.caption;
+  $("icon").value = cfg.picture;
+
+  // An invite link opened in the browser walks straight into the room.
+  const frag = location.hash.slice(1);
+  if (frag && F.findInvite(frag)) joinFrom(frag, "joinmsg");
+
+  render();
+  renderDiag();
+
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  }
+})();
 </script>
 </body>
-
 </html>

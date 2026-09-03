@@ -17,6 +17,16 @@ import {
   envelopeEncode, envelopeDecode, natToBytesBE, bytesBEToNat,
   shareUrl, parseShareUrl, CHANNEL_CAPACITY,
 } from "./kantzk.mjs";
+import { DiagLog, ref as diagRef, diagnose, effectiveRelay, clientOf } from "./kant-diag.mjs";
+
+/** A log that keeps nothing: used when a caller supplies none.  Every
+ *  transport below writes to `log` instead of swallowing its errors —
+ *  the silence was the whole reason a failure to connect was so hard to
+ *  explain (`RequestProject/Kant/Diagnostics.lean`). */
+const NULL_LOG = {
+  record() {}, info() {}, warn() {}, error() {},
+  events: [], dropped: 0, total: 0, share: () => [], render: () => "",
+};
 
 const eqBytes = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -308,10 +318,12 @@ export class Server {
  *    GET  {base}/room/{room}?cursor=N[&wait=S]-> { cursor, lines, truncated }
  */
 export class RelayClient {
-  constructor(base, { fetchImpl = globalThis.fetch?.bind(globalThis) } = {}) {
+  constructor(base, { fetchImpl = globalThis.fetch?.bind(globalThis), log = NULL_LOG } = {}) {
     this.base = base.replace(/\/+$/, "");
     this.fetchImpl = fetchImpl;
+    this.log = log ?? NULL_LOG;
     this.cursors = new Map();
+    if (!this.fetchImpl) this.log.error("relay", "this runtime has no fetch", this.base);
   }
 
   url(room, extra = "") { return `${this.base}/room/${encodeURIComponent(room)}${extra}`; }
@@ -321,16 +333,35 @@ export class RelayClient {
     return r.json();
   }
 
+  /** Every request goes through here, so every request is logged: the URL,
+   *  the status, and the error if it never got that far. */
+  async request(url, init, what) {
+    this.log.info("relay", `${what}…`, url);
+    let r;
+    try {
+      r = await this.fetchImpl(url, init);
+    } catch (e) {
+      this.log.error("relay", `${what} could not reach the relay`, `${url} — ${e.message ?? e}`);
+      throw e;
+    }
+    if (!r.ok) {
+      this.log.error("relay", `${what} was refused (${r.status})`, url);
+      throw new Error(`relay ${what} failed: ${r.status}`);
+    }
+    return r;
+  }
+
   /** Post one or more lines into a room. */
   async post(room, lines) {
     const body = (Array.isArray(lines) ? lines : [lines]).join("\n");
-    const r = await this.fetchImpl(this.url(room), {
+    const r = await this.request(this.url(room), {
       method: "POST",
       headers: { "content-type": "text/plain" },
       body,
-    });
-    if (!r.ok) throw new Error(`relay post failed: ${r.status}`);
-    return r.json();
+    }, `post ${body.split("\n").length} line(s)`);
+    const out = await r.json();
+    this.log.info("relay", "the relay took the line(s)", `cursor=${out.cursor ?? "?"}`);
+    return out;
   }
 
   /** Poll a room.  `wait` seconds asks the relay to hold the request open
@@ -338,10 +369,13 @@ export class RelayClient {
   async poll(room, { wait = 0 } = {}) {
     const cursor = this.cursors.get(room) ?? 0;
     const q = `?cursor=${cursor}${wait ? `&wait=${wait}` : ""}`;
-    const r = await this.fetchImpl(this.url(room, q));
-    if (!r.ok) throw new Error(`relay poll failed: ${r.status}`);
+    const r = await this.request(this.url(room, q), undefined, `poll from ${cursor}`);
     const out = await r.json();
     this.cursors.set(room, out.cursor);
+    if (out.lines?.length) {
+      this.log.info("relay", `the relay had ${out.lines.length} new line(s)`,
+        `cursor=${out.cursor}`);
+    }
     return out;
   }
 
@@ -353,7 +387,9 @@ export class RelayClient {
  *  Lines are sent as text frames; the relay pushes `{cursor, lines}`. */
 export class RelaySocket {
   constructor(base, room, { cursor = 0, onLines = () => {}, onOpen = () => {},
-                            onClose = () => {}, WebSocketImpl = globalThis.WebSocket } = {}) {
+                            onClose = () => {}, WebSocketImpl = globalThis.WebSocket,
+                            log = NULL_LOG } = {}) {
+    this.log = log ?? NULL_LOG;
     const wsBase = base.replace(/^http/, "ws").replace(/\/+$/, "");
     this.url = `${wsBase}/ws/${encodeURIComponent(room)}?cursor=${cursor}`;
     this.room = room;
@@ -366,18 +402,29 @@ export class RelaySocket {
   }
 
   open() {
+    if (typeof this.WebSocketImpl !== "function") {
+      this.log.warn("socket", "this runtime has no WebSocket", this.url);
+      return this;
+    }
+    this.log.info("socket", "opening the relay socket", this.url);
     const ws = new this.WebSocketImpl(this.url);
     this.ws = ws;
     ws.addEventListener("open", () => {
+      this.log.info("socket", "the relay socket is open", this.url);
       for (const l of this.queue.splice(0)) ws.send(l);
       this.onOpen();
     });
+    ws.addEventListener("error", (ev) =>
+      this.log.error("socket", "the relay socket failed", ev?.message ?? this.url));
     ws.addEventListener("message", (ev) => {
       let msg = null;
       try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : ""); } catch { return; }
       if (msg && Array.isArray(msg.lines)) this.onLines(msg.lines, msg.cursor);
     });
-    ws.addEventListener("close", () => this.onClose());
+    ws.addEventListener("close", (ev) => {
+      this.log.warn("socket", `the relay socket closed (${ev?.code ?? "?"})`, this.url);
+      this.onClose();
+    });
     return this;
   }
 
@@ -392,16 +439,34 @@ export class RelaySocket {
 /** Discovery with no server at all: other tabs of the same browser.
  *  Useful for testing, and genuinely useful for a user with two tabs. */
 export class LocalBus {
-  constructor(room, onLine, { Impl = globalThis.BroadcastChannel } = {}) {
+  constructor(room, onLine, { Impl = globalThis.BroadcastChannel, log = NULL_LOG } = {}) {
+    this.log = log ?? NULL_LOG;
     this.ok = typeof Impl === "function";
-    if (!this.ok) return;
-    this.ch = new Impl(`kantzk:${room}`);
-    this.ch.onmessage = (ev) => { if (typeof ev.data === "string") onLine(ev.data); };
+    this.name = `kantzk:${room}`;
+    if (!this.ok) {
+      this.log.warn("bus", "this browser has no BroadcastChannel: other tabs cannot be " +
+        "found without a relay", this.name);
+      return;
+    }
+    this.ch = new Impl(this.name);
+    this.ch.onmessage = (ev) => {
+      if (typeof ev.data === "string") {
+        this.log.info("bus", "a line arrived from another tab", `${ev.data.length} chars`);
+        onLine(ev.data);
+      }
+    };
+    this.log.info("bus", "listening for other tabs of this browser", this.name);
   }
 
-  send(line) { if (this.ok) this.ch.postMessage(line); }
+  send(line) {
+    if (!this.ok) return false;
+    this.ch.postMessage(line);
+    return true;
+  }
 
-  close() { if (this.ok) this.ch.close(); }
+  close() {
+    if (this.ok) { this.ch.close(); this.log.info("bus", "stopped listening", this.name); }
+  }
 }
 
 // --------------------------------------------------------- the WebRTC mesh
@@ -413,7 +478,8 @@ export class LocalBus {
  *  `accept` check applies to them.
  */
 export class PeerMesh {
-  constructor({ self, room, sendSignal, onLine, rtcConfig } = {}) {
+  constructor({ self, room, sendSignal, onLine, rtcConfig, log = NULL_LOG } = {}) {
+    this.log = log ?? NULL_LOG;
     this.self = self;
     this.room = room;
     this.sendSignal = sendSignal;
@@ -430,10 +496,17 @@ export class PeerMesh {
 
   newConnection(other) {
     const RTC = globalThis.RTCPeerConnection;
-    if (!RTC) return null;
+    if (!RTC) {
+      this.log.warn("mesh", "this runtime has no WebRTC: everything goes through the relay",
+        other);
+      return null;
+    }
     const pc = new RTC(this.rtcConfig);
     const entry = { pc, channel: null };
     this.peers.set(other, entry);
+    pc.oniceconnectionstatechange = () =>
+      this.log.record(pc.iceConnectionState === "failed" ? "error" : "info", "mesh",
+        `direct link to ${other}: ${pc.iceConnectionState}`, "");
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
         this.sendSignal({
@@ -448,11 +521,16 @@ export class PeerMesh {
 
   attach(entry, channel) {
     entry.channel = channel;
+    channel.onopen = () => this.log.info("mesh", "a direct channel is open", channel.label);
+    channel.onclose = () => this.log.warn("mesh", "a direct channel closed", channel.label);
+    channel.onerror = (ev) =>
+      this.log.error("mesh", "a direct channel failed", ev?.message ?? channel.label);
     channel.onmessage = (ev) => { if (typeof ev.data === "string") this.onLine(ev.data); };
   }
 
   /** Offer a direct channel to another peer (introduce ourselves). */
   async offer(other) {
+    this.log.info("mesh", `offering a direct link to ${other}`, "");
     const entry = this.newConnection(other);
     if (!entry) return false;
     this.attach(entry, entry.pc.createDataChannel("kantzk"));
@@ -483,7 +561,10 @@ export class PeerMesh {
       if (entry) await entry.pc.setRemoteDescription(JSON.parse(sig.payload));
     } else if (sig.kind === "ice") {
       const entry = this.peers.get(sig.from);
-      if (entry) { try { await entry.pc.addIceCandidate(JSON.parse(sig.payload)); } catch {} }
+      if (entry) {
+        try { await entry.pc.addIceCandidate(JSON.parse(sig.payload)); }
+        catch (e) { this.log.warn("mesh", "an ICE candidate was refused", e?.message ?? ""); }
+      }
     }
   }
 
@@ -497,7 +578,10 @@ export class PeerMesh {
   }
 
   close() {
-    for (const [, p] of this.peers) { try { p.pc.close(); } catch {} }
+    for (const [, p] of this.peers) {
+      try { p.pc.close(); }
+      catch (e) { this.log.warn("mesh", "closing a direct link failed", e?.message ?? ""); }
+    }
     this.peers.clear();
   }
 }
@@ -515,8 +599,9 @@ export class PeerMesh {
  */
 export class KantNode {
   constructor({ peer, relay = "", room = "", secret = null, addrs = [],
-                fetchImpl, onChange = () => {} } = {}) {
+                fetchImpl, onChange = () => {}, log = null, reach = null } = {}) {
     this.self = peer ?? peerIdOf(freshSecret(16));
+    this.log = log ?? new DiagLog({ cap: 2000 });
     this.relayBase = relay;
     this.secret = secret;
     this.room = room || (secret ? roomOf(secret) : "");
@@ -525,10 +610,28 @@ export class KantNode {
     this.roster = [];
     this.messages = [];
     this.onChange = onChange;
-    this.client = relay ? new RelayClient(relay, { fetchImpl }) : null;
+    this.fetchImpl = fetchImpl;
+    this.reach = reach;
+    this.busWanted = true;
+    this.client = relay ? new RelayClient(relay, { fetchImpl, log: this.log }) : null;
     this.bus = null;
     this.mesh = null;
     this.polling = false;
+    this.log.info("app", `client ${this.self} started`,
+      relay ? `relay=${relay}` : "no relay: only other tabs of this browser can find you");
+  }
+
+  /** The hex of the room secret, so the diagnostics can refuse to share
+   *  any line quoting it. */
+  get secretHex() { return this.secret ? hexEncode(Array.from(this.secret)) : ""; }
+
+  /** Everything a shared run must never quote. */
+  secrets() {
+    const out = [];
+    if (this.secretHex) out.push(this.secretHex);
+    if (this.secret) out.push(copyInvite(invite(this.relayBase, this.secret, this.self,
+      this.addrs)));
+    return out;
   }
 
   /** The invitation to show as a QR code or a link. */
@@ -543,8 +646,20 @@ export class KantNode {
     if (!i) return null;
     this.secret = i.secret;
     this.room = inviteRoom(i);
-    if (i.relay) { this.relayBase = i.relay; this.client = new RelayClient(i.relay); }
+    if (i.relay) {
+      this.relayBase = i.relay;
+      this.client = new RelayClient(i.relay, { fetchImpl: this.fetchImpl, log: this.log });
+      this.log.info("app", "the invitation names a relay", i.relay);
+    } else if (!this.relayBase) {
+      this.log.warn("app", "this invitation names no relay: unless you are in the same " +
+        "browser as whoever sent it, there is nothing to meet on", "");
+    }
     this.roster = rosterInsert(this.roster, announce(i.peer, 0, i.addrs));
+    this.log.info("app", `joined room ${diagRef(this.room)} (invited by ${i.peer})`, "");
+    // The bus and the mesh are named after the room, so a room change has
+    // to move them; leaving them behind was a silent way of never meeting
+    // anybody.
+    if (this.bus || this.mesh) this.connect({ bus: this.busWanted });
     this.onChange();
     return i;
   }
@@ -554,7 +669,15 @@ export class KantNode {
     this.secret = freshSecret();
     this.room = roomOf(this.secret);
     this.relayBase = relayBase;
-    if (relayBase) this.client = new RelayClient(relayBase);
+    if (relayBase) {
+      this.client = new RelayClient(relayBase, { fetchImpl: this.fetchImpl, log: this.log });
+    } else {
+      this.client = null;
+      this.log.warn("app", "opening a room with no relay: only other tabs of this browser " +
+        "will be able to join", "");
+    }
+    this.log.info("app", `opened room ${diagRef(this.room)}`, relayBase || "no relay");
+    if (this.bus || this.mesh) this.connect({ bus: this.busWanted });
     this.onChange();
     return this.inviteText();
   }
@@ -565,13 +688,28 @@ export class KantNode {
   /** Take a line from any transport. */
   ingest(line) {
     const before = this.messages.length + this.roster.length;
+    if (typeof line !== "string" || line === "") {
+      this.log.warn("ingest", "an empty line arrived", "");
+      return { message: null, announce: null, signal: null };
+    }
     const m = parseMsg(line);
     if (m && m.room === this.room) this.messages = accept(this.messages, line);
     const a = parseAnnounce(line);
     if (a) this.roster = rosterInsert(this.roster, a);
     const sig = parseSignal(line);
     if (sig && this.mesh && sig.room === this.room) this.mesh.onSignal(sig);
-    if (this.messages.length + this.roster.length !== before) this.onChange();
+    if (m && m.room !== this.room) {
+      this.log.warn("ingest", "a line for another room was ignored", diagRef(m.room));
+    }
+    if (!m && !a && !sig) {
+      this.log.warn("ingest", "a line was refused: it does not certify itself",
+        `${line.slice(0, 24)}…`);
+    }
+    if (this.messages.length + this.roster.length !== before) {
+      this.log.info("ingest", "a line was accepted",
+        m ? "chat" : a ? `peer ${a.peer}` : "signal");
+      this.onChange();
+    }
     return { message: m, announce: a, signal: sig };
   }
 
@@ -587,8 +725,23 @@ export class KantNode {
     this.ingest(line);
     let direct = 0;
     if (this.mesh) direct = this.mesh.broadcast(line);
-    if (this.bus) this.bus.send(line);
-    if (this.client && this.room) { try { await this.client.post(this.room, line); } catch {} }
+    const onBus = this.bus ? this.bus.send(line) : false;
+    let toRelay = false;
+    if (this.client && this.room) {
+      try {
+        await this.client.post(this.room, line);
+        toRelay = true;
+      } catch (e) {
+        this.log.error("relay", "the line did not reach the relay", e);
+      }
+    } else if (this.room) {
+      this.log.warn("relay", "no relay to publish to", "");
+    }
+    this.log.info("app", "published a line",
+      `direct=${direct} bus=${onBus} relay=${toRelay}`);
+    if (!direct && !onBus && !toRelay) {
+      this.log.error("app", "that line went nowhere: nobody can have received it", "");
+    }
     return direct;
   }
 
@@ -605,16 +758,29 @@ export class KantNode {
   }
 
   /** Attach the same-browser bus and the WebRTC mesh. */
-  connect({ rtcConfig } = {}) {
-    if (!this.room) return this;
-    this.bus = new LocalBus(this.room, (l) => this.ingest(l));
+  connect({ rtcConfig, bus = true } = {}) {
+    if (!this.room) {
+      this.log.warn("app", "connect() with no room: open a room or paste an invite first", "");
+      return this;
+    }
+    this.busWanted = bus;
+    if (this.bus) this.bus.close();
+    if (this.mesh) this.mesh.close();
+    this.bus = bus
+      ? new LocalBus(this.room, (l) => this.ingest(l), { log: this.log })
+      : null;
     this.mesh = new PeerMesh({
       self: this.self,
       room: this.room,
       rtcConfig,
+      log: this.log,
       sendSignal: (s) => this.publishSignal(s),
       onLine: (l) => this.ingest(l),
     });
+    if (!this.client) {
+      this.log.warn("app", "no relay in use: anybody outside this browser will not see you",
+        "");
+    }
     return this;
   }
 
@@ -623,7 +789,12 @@ export class KantNode {
   async publishSignal(s) {
     const line = printSignal(s);
     if (this.bus) this.bus.send(line);
-    if (this.client && this.room) { try { await this.client.post(this.room, line); } catch {} }
+    if (this.client && this.room) {
+      try { await this.client.post(this.room, line); }
+      catch (e) { this.log.error("signal", "a signalling line did not reach the relay", e); }
+    } else {
+      this.log.warn("signal", "no relay: direct links cannot be introduced", s.kind);
+    }
   }
 
   /** Try to open direct channels to everybody we know about. */
@@ -639,7 +810,10 @@ export class KantNode {
 
   /** One poll of the relay. */
   async pollOnce({ wait = 0 } = {}) {
-    if (!this.client || !this.room) return 0;
+    if (!this.client || !this.room) {
+      this.log.warn("relay", "nothing to poll: no relay in use", "");
+      return 0;
+    }
     const out = await this.client.poll(this.room, { wait });
     for (const l of out.lines) this.ingest(l);
     return out.lines.length;
@@ -650,9 +824,33 @@ export class KantNode {
   async startPolling({ wait = 25, interval = 1000 } = {}) {
     if (this.polling) return;
     this.polling = true;
+    let failures = 0;
+    // Said once, not once per turn round the loop: with no relay there is
+    // nothing to poll, and a client that says so a thousand times a second
+    // is a busy loop that starves every timer on the page.
+    let saidIdle = false;
     while (this.polling) {
-      try { await this.pollOnce({ wait }); } catch { await sleep(interval); }
-      if (!wait) await sleep(interval);
+      if (!this.client || !this.room) {
+        if (!saidIdle) {
+          saidIdle = true;
+          this.log.warn("relay", "nothing to poll: no relay in use",
+            "waiting in case one turns up");
+        }
+        await sleep(interval);
+        continue;
+      }
+      saidIdle = false;
+      try {
+        await this.pollOnce({ wait });
+        failures = 0;
+      } catch (e) {
+        failures += 1;
+        this.log.error("relay", `polling failed (${failures} in a row)`, e);
+        await sleep(Math.min(interval * failures, 15000));
+      }
+      // Always yield, even when the relay answers at once: a long poll that
+      // returns immediately must not turn into a spin.
+      await sleep(wait ? 25 : interval);
     }
   }
 
@@ -660,6 +858,36 @@ export class KantNode {
     this.polling = false;
     if (this.bus) this.bus.close();
     if (this.mesh) this.mesh.close();
+    this.log.info("app", "left the room", "");
+  }
+
+  /** This client as the diagnostics see it (`Kant.Connectivity.Client`). */
+  asClient({ browser = 1 } = {}) {
+    return clientOf({
+      room: this.room,
+      reach: this.reach ?? {
+        configured: this.relayBase, configuredUp: !!this.client,
+        origin: "", originIsRelay: false,
+      },
+      bus: !!(this.bus && this.bus.ok),
+      browser,
+    });
+  }
+
+  /** What the diagnostics page shows and shares: the verdict against a
+   *  second client (the other end, or this client seen from another
+   *  browser), the room's handle, the relay in use, and every event that
+   *  quotes no secret (`Kant.Diagnostics.Report`). */
+  report({ other = null, browser = 1 } = {}) {
+    const self = this.asClient({ browser });
+    const them = other ?? { ...self, browser: browser + 1, bus: false };
+    return {
+      verdict: diagnose(self, them),
+      room: this.room ? diagRef(this.room) : "",
+      relay: effectiveRelay(self.reach),
+      events: this.log.share(this.secrets()),
+      dropped: this.log.dropped,
+    };
   }
 }
 

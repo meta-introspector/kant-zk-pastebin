@@ -35,14 +35,40 @@ the original, each layer comes with proofs.
 | `RequestProject/Wasm/Syntax.lean` | the instruction fragment, an expression language, and a decidable well-formedness check | `Expr.wf_of_wfb` |
 | `RequestProject/Wasm/Semantics.lean` | the wasm stack machine over `UInt64` (`i64`), with traps as `Option` | `Expr.exec_compile` (compiler correctness), `Expr.eval_isSome_of_wf` (well-formed code cannot trap) |
 | `RequestProject/Wasm/Encode.lean` | the `.wasm` binary format: magic, version, type/function/export/code sections | `module_prefix`, `module_sections` |
+| `RequestProject/Wasm/Decode.lean` | a reader for that format, and a type checker for the decoded code | `decodeModule_module` (reading undoes writing), `typecheck_compile`, `module_validates` |
 | `RequestProject/Wasm/Kernel.lean` | the Kant kernel as a wasm module | `kernelModule_wf` |
 | `RequestProject/Wasm/KernelSpec.lean` | each exported function computes the corresponding `Kant.*` definition | `eval_hexDigitE`, `eval_mkCidE`, `eval_mergeCidsE`, `eval_creditsForE`, `eval_socialChunksE`, `eval_lsbEmbedE`, … |
-| `RequestProject/Wasm/Extraction.lean` | the three layers combined | `kernel_exec_total`, `kernelBytes_sections` |
+| `RequestProject/Wasm/Extraction.lean` | the layers combined | `kernel_exec_total`, `kernelBytes_sections`, `kernelBytes_decodes`, `kernelBytes_validates` |
 
 Read together they say: for every exported function, the bytes in the code
 section are the compilation of an `Expr`; running those bytes on the stack
 machine terminates without trapping and yields the value of that `Expr`; and
 that value is the value of the Lean definition the pastebin is specified by.
+
+## Why "invalid module" cannot be the binary's fault
+
+A WebAssembly engine does two things to a module before it will run: it
+*decodes* the byte string, and it *validates* the code it decoded. Both phases
+have a counterpart proved here for the file `lake exe emitwasm` writes.
+
+* **Decoding.** `Kant.Wasm.Decode.decodeModule` is a reader written against the
+  binary format alone: it checks the magic number and version, each section id
+  and declared size, every LEB128 field, every vector length, every opcode, and
+  that nothing is left over. `decodeModule_module` proves that reading undoes
+  writing — for any module, the reader recovers the arity of every signature,
+  the identity function-to-type map, the export names in order with their
+  indices, and the compiled body of every function. `kernelBytes_decodes` is
+  that statement for the kernel, and three `#guard`s run the decoder on the
+  actual bytes at build time.
+* **Validation.** `typecheck` is the stack type checker of the specification's
+  validation rules, restricted to this fragment. `typecheck_compile` proves
+  that a well-formed expression compiles to a sequence that leaves exactly one
+  `i64` on the stack — the result type the emitted signature declares — and
+  `kernelBytes_validates` applies it to all twenty-one kernel functions.
+
+So if a page reports the kernel as invalid, the bytes it received are not the
+bytes in `dist/kant_kernel.wasm`. In practice that meant a 404 page: see
+"Delivery" below.
 
 `UInt64` is used for `i64` because Lean's `UInt64` arithmetic already *is*
 wasm's `i64` arithmetic: wrapping add/sub/mul, unsigned div/rem (which trap on
@@ -95,17 +121,52 @@ a real engine, and the browser client.
 
 ```js
 import { loadKernel } from "./kant-wasm.mjs";
-const k = await loadKernel();            // fetches ../dist/kant_kernel.wasm
+const k = await loadKernel();            // see "Delivery" for where it looks
 k.mergeCids(0xda51n << 48n, 12345n);     // BigInt in, unsigned BigInt out
 k.witness(bytes);                        // hex digest, folded from the exports
+k.source;                                // which copy was loaded
 ```
 
-`web/index.html` does this on load: it reports the module size and export count
-in a status line and, whenever a paste is addressed, recomputes the witness with
-the kernel and shows whether it agrees with the JavaScript core. If
-`dist/kant_kernel.wasm` is not being served, the page says so and falls back to
-the JavaScript core, and the service worker (`web/sw.js`) caches the kernel
-best-effort alongside the application shell.
+`web/index.html` does this on load: it reports the module size, the export count
+and where the bytes came from in a status line and, whenever a paste is
+addressed, recomputes the witness with the kernel and shows whether it agrees
+with the JavaScript core.
+
+## Delivery
+
+The binary lives in `dist/`, one level above the document root of a deployment
+that serves `web/`. A page served that way asks for `/dist/kant_kernel.wasm`,
+gets the host's 404 body, and — in an earlier version of the loader, which
+checked neither the HTTP status nor the wasm magic number — handed those bytes
+straight to `WebAssembly.validate`, producing the thoroughly misleading
+
+```
+wasm kernel: unavailable (kant_kernel.wasm failed validation) — falling back to the JS core
+```
+
+Nothing was wrong with the module. Three changes make the report honest and the
+kernel available anyway:
+
+1. `web/kant-wasm.mjs` tries several locations (`../dist/kant_kernel.wasm`,
+   `./kant_kernel.wasm`, `./dist/kant_kernel.wasm`), rejects a response that is
+   not OK, is empty, or does not start with `\0asm`, and names the actual
+   failure — `HTTP 404`, `not a wasm module (…)` — for every location it tried.
+2. `web/kant-kernel-embedded.mjs` is a base64 copy of the same 799 bytes,
+   generated by `node scripts/embed-kernel.mjs` after `lake exe emitwasm dist`
+   and cached by the service worker as part of the application shell. The
+   loader falls back to it, so the proved kernel also works from `file://`,
+   offline, and on a host that ships only `web/`. `node web/wasm-test.mjs`
+   fails if the embedded copy ever drifts from `dist/kant_kernel.wasm`.
+3. `server/relay.mjs` serves `/dist/…` from the directory beside its static
+   root, with `content-type: application/wasm`, so `--static web` publishes the
+   real binary rather than the fallback.
+
+Regenerating the kernel is therefore two commands:
+
+```
+lake exe emitwasm dist
+node scripts/embed-kernel.mjs
+```
 
 ## Scope, stated plainly
 

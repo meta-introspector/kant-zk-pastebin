@@ -10,15 +10,23 @@
 // credits itself — the ledger (Kant/Credits.lean) is authoritative and lives in
 // the page.
 
-const SHELL_CACHE = "kantzk-shell-v4";
+const SHELL_CACHE = "kantzk-shell-v9";
 const PIN_CACHE = "kantzk-pins-v1";
 
-const SHELL = ["./", "./index.html", "./kantzk.mjs", "./kant-wasm.mjs",
-               "./kant-net.mjs", "./kant-qr.mjs", "./kant-uucp.mjs"];
+// kant-kernel-embedded.mjs is part of the shell, not an optional extra: it is
+// the base64 copy of the Lean-extracted kernel that the loader falls back to,
+// so caching it is what keeps the proved kernel available offline and on hosts
+// that ship only web/.
+const SHELL = ["./", "./index.html", "./lab.html", "./diag.html", "./hand.html",
+               "./kantzk.mjs", "./kant-wasm.mjs",
+               "./kant-kernel-embedded.mjs",
+               "./kant-net.mjs", "./kant-qr.mjs", "./kant-uucp.mjs",
+               "./kant-site.mjs", "./kant-flow.mjs", "./kant-diag.mjs", "./kant-carddebug.mjs",
+               "./kant-sharelog.mjs",
+               "./kant.config", "./kant-logo.svg"];
 
-// The Lean-extracted kernel, cached best-effort: a deployment that does not
-// ship dist/ must still get a working offline shell.
-const OPTIONAL = ["../dist/kant_kernel.wasm"];
+// The standalone kernel binary, cached best-effort from wherever it is served.
+const OPTIONAL = ["../dist/kant_kernel.wasm", "./kant_kernel.wasm"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

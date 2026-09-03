@@ -3,8 +3,7 @@ defaultTargets = ["RequestProject"]
 
 [[require]]
 name = "mathlib"
-git = "https://github.com/leanprover-community/mathlib4.git"
-rev = "v4.28.0"
+path = "/mnt/data1/lean/mathlib"
 
 [[lean_lib]]
 name = "RequestProject"
