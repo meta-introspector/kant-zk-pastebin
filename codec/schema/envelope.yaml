@@ -1,0 +1,69 @@
+# proof-schema/1.0 — the exchange envelope
+#
+# Systems exchange envelopes containing canonical objects rather than
+# pairwise translations.  The authoritative definition is
+# `Kant.Codec.Envelope` in RequestProject/Kant/Codec/Exchange.lean, with
+# `sealEnvelope` and `openEnvelope` proved to be inverse.
+
+schema: proof-schema/1.0
+kind: object
+name: ProofEnvelope
+
+fields:
+  schema_version:  { type: string, const: proof-schema/1.0 }
+  codec_version:   { type: string, const: codec/1.0 }
+
+  source:          { type: string }
+  destination:     { type: string }
+
+  timestamp:       { type: integer }
+  object_id:       { type: string }
+
+  payload:         { type: string, doc: the canonical object, encoded }
+  payload_format:  { type: enum, values: [CANONICAL, IPDL, XML, CSV, YAML, TEXT, UNKNOWN] }
+
+  inputs:          { type: list, of: input.yaml }
+  outputs:         { type: list, of: output.yaml }
+
+  claims:          { type: list, of: value }
+  certificates:    { type: list, of: value }
+
+  diagnostics:     { type: list, of: error.yaml }
+
+  transformations: { type: list, of: transformation }
+
+  integrity:       { type: string, doc: the content hash of the object inside }
+
+transformation:
+  doc: one entry of the ledger
+  fields:
+    id:            { type: string }
+    operation:     { type: string }
+    source:        { type: enum, values: [CANONICAL, IPDL, XML, CSV, YAML, TEXT, UNKNOWN] }
+    destination:   { type: enum, values: [CANONICAL, IPDL, XML, CSV, YAML, TEXT, UNKNOWN] }
+    input_hash:    { type: string }
+    output_hash:   { type: string }
+    codec:         { type: string }
+    codec_version: { type: string }
+    lossiness:     { type: enum, values: [LOSSLESS, LOSSY, PARTIAL, FAILED] }
+    errors:        { type: list, of: error.yaml }
+    warnings:      { type: list, of: error.yaml }
+
+provenance:
+  doc: where an object came from, and what has been done to it
+  fields:
+    source_system:  { type: string }
+    source_file:    { type: string }
+    source_format:  { type: enum, values: [CANONICAL, IPDL, XML, CSV, YAML, TEXT, UNKNOWN] }
+    imported_at:    { type: integer }
+    transformed_at: { type: integer }
+    transformations: { type: list, of: transformation }
+    parent_object:  { type: string }
+
+compatibility:
+  patch: bug fix or clarification
+  minor: backward-compatible fields added
+  major: incompatible semantic change
+  rule: >
+    A reader that does not recognise the schema version refuses the
+    envelope rather than misreading it (majorMismatch_fails_safely).

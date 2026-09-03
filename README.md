@@ -35,6 +35,10 @@ node web/join-test.mjs    # 14 checks of the cross-device join: two clients, one
 node web/page-test.mjs    # 75 checks driving web/index.html itself in a minimal DOM
 node web/sharelog-test.mjs   # 64 checks of sharing the log, posting it to the store, carrying blocks by hand
 node web/handpage-test.mjs   # 32 checks driving web/hand.html — the no-server, chat-only mode
+node web/cli-test.mjs        # 77 checks of the command-line client: two agents, a real relay, real curl
+node web/cli-page-test.mjs   # 10 checks: web/index.html opened at the link a terminal agent printed
+node scripts/kant-cli.mjs --help          # the client for a terminal, and for agents
+sh scripts/two-agents.sh                  # two agents find each other, every step in curl
 node scripts/invite-card.mjs '<code or link>'        # a scannable invite card: link + icon + caption, as SVG
 node scripts/sneakernet.mjs init site --name alice   # a static sneakernet site: no server to run
 node server/relay.mjs --port 8787 --static web    # the relay + the client, on your own machine
@@ -73,6 +77,7 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 | new (diagnostics) | `RequestProject/Kant/Diagnostics.lean` | the net/error log: bounded, ordered, readable back, and shareable with no secret in it |
 | new (sharing the log) | `RequestProject/Kant/ShareLog.lean` | the run handed over as text, as a post in the store, or as numbered chat messages — with no secret in any of them |
 | new (no server) | `RequestProject/Kant/Handoff.lean` | the numbered steps two people follow in a chat, the proof that none of them needs a server, and carrying a block by hand |
+| new (command line) | `RequestProject/Kant/Cli.lean` | the terminal client: the request as a `curl` command, the relay's router, the CLI equalling the browser, and two agents meeting through a link |
 | new (text) | `RequestProject/Kant/Text.lean` | ASCII transcoding, field framing, substring search, numeric byte encoding |
 | — | `RequestProject/Kant/Pipeline.lean` | end-to-end paste → address → frame → stego → recover theorem |
 | — | `RequestProject/Kant/Demo.lean` | `#guard`-checked worked examples of every layer |
@@ -331,7 +336,8 @@ test scripts (`web/test.mjs`, `web/wasm-test.mjs`, `web/net-test.mjs`,
 `web/qr-test.mjs`, `web/uucp-test.mjs`, `web/site-test.mjs`,
 `web/flow-test.mjs`, `web/join-test.mjs`, `web/page-test.mjs`,
 `web/diag-test.mjs`, `web/diagpage-test.mjs`, `web/carddebug-test.mjs`,
-`web/sharelog-test.mjs`, `web/handpage-test.mjs`), not by proof.
+`web/sharelog-test.mjs`, `web/handpage-test.mjs`, `web/cli-test.mjs`,
+`web/cli-page-test.mjs`), not by proof.
 
 ### Sharing the log, and running with no server at all
 
@@ -347,6 +353,26 @@ steps, the guarantee that none of them needs a server, and the rules for
 carrying a block or a run by hand are proved in
 `RequestProject/Kant/ShareLog.lean` and `RequestProject/Kant/Handoff.lean`, and
 written up in [`docs/SHARE-LOG-AND-MANUAL-CHAT.md`](docs/SHARE-LOG-AND-MANUAL-CHAT.md).
+
+### The command line, for people and for agents
+
+`scripts/kant-cli.mjs` is the whole client in a terminal: `open`, `link`,
+`join`, `say`, `read`, `bag`, `load`, with `--json` for agents and a state file
+per client. It makes exactly the requests the browser makes, so every step can
+be printed as the `curl` command that performs it (`curl read`, `curl say …`)
+or performed by `curl` itself (`--transport curl`). `sh scripts/two-agents.sh`
+runs the whole thing: A opens a room, the link travels through a chat window, B
+joins from the pasted message, and the two talk with curl commands typed out in
+full.
+
+What makes the terminal and the browser the same session is proved in
+`RequestProject/Kant/Cli.lean`: the printed command is the request
+(`parseCurlLine_curlLine`), the relay's router reads the URLs the client builds
+(`route_roomPath`, `route_pollPath`), going over HTTP leaves both sides in the
+state the browser client reaches (`say_eq_browserSay`, `poll_eq_browserPoll`),
+the host is only ever asked for the static page (`link_page_static`), and two
+agents given nothing but the link end up displaying the same conversation
+(`cliSession_agree`). The write-up is [`docs/CLI.md`](docs/CLI.md).
 
 ## WASM
 
@@ -489,3 +515,33 @@ archive.org integration are specified and scripted there, but not implemented
 as running services here (the relay above is the only peer service in the
 repository), and the emscripten toolchain that path needs is not present in the
 build environment used here.
+
+## The domain data codec and proof emission skill
+
+Two layers, both proved in Lean and both written up in `docs/`.
+
+**The proof interchange codec** — one canonical proof object and adapters to
+and from IPDL, XML, CSV, YAML and raw text, each of which round-trips.
+[`docs/CODEC.md`](docs/CODEC.md).
+
+**The domain data package** — a whole domain rather than one object: its data
+objects, the claims made about them, the proofs that establish them, the
+inputs and outputs of those proofs, and the relations between all of it, emitted
+into every representation with each emitted object still pointing at the proof
+behind it. [`docs/DOMAIN.md`](docs/DOMAIN.md).
+
+```
+lake exe emitdomain domain/corpus-scan.kant RequestProject   # discover
+lake exe packdomain domain/corpus-scan.kant domain           # link, emit, re-import, compare
+```
+
+The first program loads the compiled corpus and asks the *kernel* which axioms
+each declaration used — so in the emitted package `PROVEN` means the Lean
+kernel checked it against the standard axioms, and a `sorry` makes the object
+`UNRESOLVED` and its proof record `PARTIAL`. The second builds the canonical
+graph, writes the package, reads every file back and fails if the graph that
+comes out is not the graph that went in.
+
+The checked-in [`domain/`](domain/) directory is the package for this
+project's own proof corpus, and [`domain/README.md`](domain/README.md) says
+what each file is.

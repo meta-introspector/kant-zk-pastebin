@@ -1,0 +1,73 @@
+# proof-schema/1.0 — the canonical proof object
+#
+# The authoritative definition is `Kant.Codec.Obj` in
+# RequestProject/Kant/Codec/Model.lean, together with `Obj.toVal` and
+# `Obj.ofVal`, which are proved to be inverse.  This file is the readable
+# statement of the same shape.
+
+schema: proof-schema/1.0
+kind: object
+name: ProofObject
+
+required:
+  - id
+  - kind
+  - inputs
+  - outputs
+  - status
+
+fields:
+  id:            { type: string,  doc: stable identity of this proof object }
+  version:       { type: string,  doc: version of the proof, not of the schema }
+  kind:          { type: string,  doc: what sort of proof this is }
+
+  inputs:        { type: list, of: input.yaml }
+  assumptions:   { type: list, of: value }
+  parameters:    { type: map,  of: value }
+
+  procedure:     { type: string,  doc: how the result was obtained }
+  intermediate:  { type: list, of: value }
+
+  outputs:       { type: list, of: output.yaml }
+
+  claims:        { type: list, of: value }
+  certificates:  { type: list, of: value }
+
+  errors:        { type: list, of: error.yaml }
+  warnings:      { type: list, of: error.yaml }
+
+  provenance:    { type: optional, of: provenance }
+  metadata:      { type: map,  of: value }
+
+  source_format: { type: enum,   values: [CANONICAL, IPDL, XML, CSV, YAML, TEXT, UNKNOWN] }
+  source_data:   { type: string, doc: the original bytes, kept }
+
+  status:
+    type: enum
+    values: [UNKNOWN, PENDING, VALID, INVALID, PARTIAL, ERROR, CONFLICT, UNSUPPORTED]
+    doc: >
+      A system must not silently convert one status into another.
+      ERROR   — the system could not complete or interpret the operation.
+      INVALID — the operation completed and the result failed validation.
+
+  extensions:
+    type: map
+    of: value
+    doc: >
+      Unknown data survives here.  Use a vendor namespace, for example
+      "vendor.system_x" or "experimental.foo".
+
+value:
+  doc: the canonical value tree (Kant.Codec.Val)
+  one_of:
+    - null
+    - bool
+    - integer            # arbitrary precision
+    - string             # arbitrary Unicode, length-prefixed on the wire
+    - list of value
+    - map from string to value, order preserved, duplicate keys preserved
+
+minimal_profile:
+  doc: the fields a system must support to participate at all
+  fields: [id, kind, inputs, outputs, status]
+  lossiness: PARTIAL
