@@ -30,6 +30,7 @@ This module re-exports the whole port.  The layers, bottom up:
 | `Kant.Connectivity` | where clients meet, and why they did not | the relay decision, linked-or-not, a verdict per failure |
 | `Kant.CardDebug` | what a pasted code is, and why two cards never connect | a card names no room, the report's own text classified, what does connect |
 | `Kant.Diagnostics` | the net/error log and the shareable run | bounded ordered log, exact round trip, no secrets shared |
+| `Kant.Cli` | the command-line client and the same session in `curl` | printed command is the request, CLI equals browser, two agents meet through a link |
 | `Kant.Credits` | serving credits | no overdraft, credit conservation |
 | `Kant.CodeMovie` | snippet playback | RLE, Gödel numbers, circuits |
 | `Kant.Pipeline` | the whole flow | end-to-end self-certifying round trip |
@@ -66,3 +67,4 @@ import RequestProject.Kant.Pipeline
 import RequestProject.Kant.Demo
 import RequestProject.Kant.ShareLog
 import RequestProject.Kant.Handoff
+import RequestProject.Kant.Cli

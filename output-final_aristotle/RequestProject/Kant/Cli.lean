@@ -45,6 +45,7 @@ browser client itself.
 import Mathlib
 import RequestProject.Kant.Join
 import RequestProject.Kant.Relay
+import RequestProject.Kant.Uucp
 
 set_option autoImplicit false
 set_option relaxedAutoImplicit false
@@ -385,6 +386,78 @@ theorem poll_eq_browserPoll (sv : Server) (c : Client) :
   simp [poll, browserPoll, serve, pollFrom, getReq, afterPrefix_append,
     route_pollPath (question_not_mem_roomOf c.secret), Client.room]
 
+/-! ## Every step of a session can be typed into a terminal
+
+Nothing in a room name, a cursor or a chat line is a space, so each
+request the client makes prints as one `curl` command and reads back as
+the request it was. -/
+
+theorem mem_decAux {c : Char} : ∀ (fuel n : Nat), c ∈ decAux fuel n → ∃ k, k < 10 ∧ c = digitChar k := by
+  intro fuel
+  induction fuel with
+  | zero => intro n h; simp [decAux] at h
+  | succ f ih =>
+      intro n h
+      rw [decAux] at h
+      by_cases hn : n < 10
+      · rw [if_pos hn] at h
+        rcases List.mem_singleton.mp h with rfl
+        exact ⟨n, hn, rfl⟩
+      · rw [if_neg hn] at h
+        rcases List.mem_append.mp h with h | h
+        · exact ih _ h
+        · rcases List.mem_singleton.mp h with rfl
+          exact ⟨n % 10, Nat.mod_lt _ (by norm_num), rfl⟩
+
+theorem space_not_mem_decNum (n : Nat) : ' ' ∉ decNum n := by
+  intro h
+  obtain ⟨k, hk, hc⟩ := mem_decAux (n + 1) n h
+  interval_cases k <;> exact absurd hc (by decide)
+
+theorem space_not_mem_roomOf (s : Blob) : ' ' ∉ roomOf s := by
+  intro hmem
+  have := mem_hexEncode_isCodeChar (bs := digest s) hmem
+  exact absurd this (by decide)
+
+theorem space_not_mem_printMsg (m : Msg) : ' ' ∉ printMsg m := by
+  intro hmem
+  have := allCode_encode (ofMsg m) ' ' hmem
+  exact absurd this (by decide)
+
+theorem space_not_mem_roomPath {room : List Char} (h : ' ' ∉ room) : ' ' ∉ roomPath room := by
+  intro hmem
+  rcases List.mem_append.mp hmem with hc | hc
+  · exact absurd hc (by decide)
+  · exact h hc
+
+/-- **Posting a line is one `curl` command.** -/
+theorem postLine_curl_roundTrip {c : Client} {line : List Char} (hr : ' ' ∉ c.relay)
+    (hl : ' ' ∉ line) : parseCurlLine (curlLine (postLine c line)) = some (postLine c line) := by
+  refine parseCurlLine_curlLine ?_ hl (by simp [postLine, postReq])
+  intro hmem
+  rcases List.mem_append.mp hmem with hc | hc
+  · exact hr hc
+  · exact space_not_mem_roomPath (space_not_mem_roomOf c.secret) hc
+
+/-- **Saying something is one `curl` command.** -/
+theorem say_curl_roundTrip {c : Client} {body : Blob} (hr : ' ' ∉ c.relay) :
+    parseCurlLine (curlLine (postLine c (printMsg (c.compose body))))
+      = some (postLine c (printMsg (c.compose body))) :=
+  postLine_curl_roundTrip hr (space_not_mem_printMsg _)
+
+/-- **Reading the room is one `curl` command.** -/
+theorem pollFrom_curl_roundTrip {c : Client} (hr : ' ' ∉ c.relay) :
+    parseCurlLine (curlLine (pollFrom c)) = some (pollFrom c) := by
+  refine parseCurlLine_curlLine ?_ (by simp [pollFrom, getReq]) (by simp [pollFrom, getReq])
+  intro hmem
+  simp only [pollFrom, getReq, List.mem_append] at hmem
+  rcases hmem with hc | hc | hc
+  · exact hr hc
+  · exact space_not_mem_roomPath (space_not_mem_roomOf c.secret) hc
+  · rcases List.mem_append.mp hc with hc | hc
+    · exact absurd hc (by decide)
+    · exact space_not_mem_decNum c.cursor hc
+
 /-! ## Opening a room, and joining one from a link -/
 
 /-- A brand new client holding a brand new room. -/
@@ -464,6 +537,87 @@ theorem messy_join_same_room {cfg : Config} (ho : BlankFree cfg.origin) {c : Cli
   rw [findInvite_in_message ho hw hbefore hlead htrailB hhash htrail hsp hsq]
   rfl
 
+/-! ## Loading a URL
+
+The agents' channel carries links, and a link points at the static page
+with the information added after the `'#'`.  Two kinds of information go
+there: an invitation (a room to meet in) and a mailbag (a conversation
+carried whole, with no relay at all, `Kant.Uucp`).  Loading a URL is
+deciding which of them it is. -/
+
+/-- What a URL turns out to carry. -/
+inductive Loaded
+  /-- A room to join. -/
+  | invitation (i : Invite)
+  /-- A conversation, carried in the link itself. -/
+  | bag (ms : List Msg)
+  /-- Nothing this client can use. -/
+  | nothing
+deriving Repr
+
+/-- **Load a URL.** -/
+def loadUrl (u : List Char) : Loaded :=
+  match findInvite u with
+  | some i => .invitation i
+  | none =>
+      match Kant.Uucp.readBagUrl u with
+      | some ms => .bag ms
+      | none => .nothing
+
+/-- **An invite link loads as the room it names.** -/
+theorem loadUrl_link {cfg : Config} (ho : BlankFree cfg.origin) {c : Client}
+    (hw : c.invite.Wire) : loadUrl (c.link cfg) = .invitation c.invite := by
+  unfold loadUrl Client.link
+  rw [findInvite_inviteUrl ho hw]
+
+/-- An envelope with a tag prints as something. -/
+theorem encode_ne_nil {e : Envelope} (ht : e.tag ≠ []) : e.encode ≠ [] := by
+  intro h
+  have hd : Envelope.decode e.encode = some e := Envelope.decode_encode e
+  rw [h, show Envelope.decode ([] : List Char) = some ⟨[], []⟩ from rfl] at hd
+  exact ht (congrArg Envelope.tag (Option.some.injEq _ _ ▸ hd)).symm
+
+/-- A mailbag link names no room: it is a conversation, not an
+invitation. -/
+theorem findInvite_bagUrl {base : List Char} (ho : BlankFree base) (ms : List Msg) :
+    findInvite (Kant.Uucp.bagUrl base ms) = none := by
+  have htag : (Kant.Uucp.ofBag ms).tag ≠ tagInvite := by
+    show Kant.Uucp.tagBag ≠ tagInvite
+    decide
+  have htne : (Kant.Uucp.ofBag ms).tag ≠ [] := by
+    show Kant.Uucp.tagBag ≠ []
+    decide
+  have hsplit : Kant.Uucp.bagUrl base ms
+      = base ++ Kant.Clipboard.hash :: ((Kant.Uucp.ofBag ms).encode ++ []) := by
+    simp [Kant.Uucp.bagUrl, Kant.Clipboard.shareUrl]
+  have hcode : AllCode ((Kant.Uucp.ofBag ms).encode) := allCode_encode _
+  have hblank : BlankFree (Kant.Uucp.bagUrl base ms) := by
+    rw [hsplit]
+    intro ch hch
+    simp only [List.mem_append, List.mem_cons, List.append_nil] at hch
+    rcases hch with hch | rfl | hch
+    · exact ho ch hch
+    · decide
+    · exact isCodeChar_not_blank (hcode ch hch)
+  have hne : Kant.Uucp.bagUrl base ms ≠ [] := by
+    rw [hsplit]
+    intro h
+    have := congrArg List.length h
+    simp at this
+  rw [findInvite_of_word hblank hne, wordInvite, hsplit,
+    codePart_junk hcode (encode_ne_nil htne) (by simp) (by intro x hx; simp at hx)]
+  unfold pasteInvite
+  rw [Envelope.decode_encode]
+  simp [toInvite, htag]
+
+/-- **A mailbag link loads as the conversation it carries** — with no
+relay, and nothing asked of the host but the page. -/
+theorem loadUrl_bagUrl {base : List Char} (ho : BlankFree base)
+    (hb : Kant.Clipboard.hash ∉ base) {ms : List Msg} (hw : ∀ m ∈ ms, m.Wire) :
+    loadUrl (Kant.Uucp.bagUrl base ms) = .bag ms := by
+  unfold loadUrl
+  rw [findInvite_bagUrl ho ms, Kant.Uucp.readBagUrl_bagUrl hb hw]
+
 /-! ## Two agents, one relay, one link: the whole run -/
 
 /-- The four moves after the link has been passed: A says something, B
@@ -512,13 +666,19 @@ theorem meet_fresh {relay : List Char} {secret : Blob} {a b : List Char} {ta tb 
   have hne : (Msg.mk (roomOf secret) b 1 tb) ≠ (Msg.mk (roomOf secret) a 1 ta) := by
     intro h
     exact hab (congrArg Msg.sender h).symm
+  have h1 : accept [] (printMsg ⟨roomOf secret, a, 1, ta⟩) = [⟨roomOf secret, a, 1, ta⟩] :=
+    accept_printMsg_of_not_mem hwa (by simp)
+  have h2 : accept [(⟨roomOf secret, a, 1, ta⟩ : Msg)]
+      (printMsg ⟨roomOf secret, a, 1, ta⟩) = [⟨roomOf secret, a, 1, ta⟩] :=
+    accept_printMsg_of_mem hwa (by simp)
+  have h3 : accept [(⟨roomOf secret, a, 1, ta⟩ : Msg)] (printMsg ⟨roomOf secret, b, 1, tb⟩)
+      = [⟨roomOf secret, b, 1, tb⟩, ⟨roomOf secret, a, 1, ta⟩] :=
+    accept_printMsg_of_not_mem hwb (by simp [hne])
   simp only [meet, say_eq_browserSay, poll_eq_browserPoll, browserSay, browserPoll, openRoom,
     Client.compose, Client.room, Server.fetch, Server.lines_post, Server.lines_empty,
-    List.nil_append, List.drop_zero, receive, List.foldl_cons, List.foldl_nil,
-    accept_printMsg_of_not_mem hwa (by simp),
-    accept_printMsg_of_not_mem hwb (by simp [hne]),
-    accept_printMsg_of_mem hwa (by simp)]
-  simp [Server.lines_post, List.length_append]
+    List.nil_append, List.drop_zero, receive, List.foldl_append, List.foldl_cons, List.foldl_nil,
+    List.length_append, List.length_cons, List.length_nil, Nat.zero_add, h1]
+  rw [h2, h3]
 
 /-- **Two command-line clients find each other and talk.**  Given only a
 link passed through some chat window, both sides end up holding both
@@ -622,6 +782,10 @@ private def guardClient : Client := openRoom "agent-a".toList "http://127.0.0.1:
 #guard parseCurlLine (curlLine (postReq "http://x/room/r".toList "abc".toList)) =
   some (postReq "http://x/room/r".toList "abc".toList)
 #guard parseArgv (printArgv (Cmd.say "hello".toList)) = some (Cmd.say "hello".toList)
+#guard pageOf "https://kant.example/#kzinvite".toList = "https://kant.example/".toList
+#guard (match loadUrl (Kant.Uucp.bagUrl "https://kant.example/".toList []) with
+  | .bag ms => ms.length = 0
+  | _ => false)
 #guard (openRoom "agent-a".toList "http://r".toList guardSecret).room = guardRoom
 
 end Guards

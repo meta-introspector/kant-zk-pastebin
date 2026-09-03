@@ -35,6 +35,10 @@ node web/join-test.mjs    # 14 checks of the cross-device join: two clients, one
 node web/page-test.mjs    # 75 checks driving web/index.html itself in a minimal DOM
 node web/sharelog-test.mjs   # 64 checks of sharing the log, posting it to the store, carrying blocks by hand
 node web/handpage-test.mjs   # 32 checks driving web/hand.html — the no-server, chat-only mode
+node web/cli-test.mjs        # 77 checks of the command-line client: two agents, a real relay, real curl
+node web/cli-page-test.mjs   # 10 checks: web/index.html opened at the link a terminal agent printed
+node scripts/kant-cli.mjs --help          # the client for a terminal, and for agents
+sh scripts/two-agents.sh                  # two agents find each other, every step in curl
 node scripts/invite-card.mjs '<code or link>'        # a scannable invite card: link + icon + caption, as SVG
 node scripts/sneakernet.mjs init site --name alice   # a static sneakernet site: no server to run
 node server/relay.mjs --port 8787 --static web    # the relay + the client, on your own machine
@@ -73,6 +77,7 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 | new (diagnostics) | `RequestProject/Kant/Diagnostics.lean` | the net/error log: bounded, ordered, readable back, and shareable with no secret in it |
 | new (sharing the log) | `RequestProject/Kant/ShareLog.lean` | the run handed over as text, as a post in the store, or as numbered chat messages — with no secret in any of them |
 | new (no server) | `RequestProject/Kant/Handoff.lean` | the numbered steps two people follow in a chat, the proof that none of them needs a server, and carrying a block by hand |
+| new (command line) | `RequestProject/Kant/Cli.lean` | the terminal client: the request as a `curl` command, the relay's router, the CLI equalling the browser, and two agents meeting through a link |
 | new (text) | `RequestProject/Kant/Text.lean` | ASCII transcoding, field framing, substring search, numeric byte encoding |
 | — | `RequestProject/Kant/Pipeline.lean` | end-to-end paste → address → frame → stego → recover theorem |
 | — | `RequestProject/Kant/Demo.lean` | `#guard`-checked worked examples of every layer |
@@ -331,7 +336,8 @@ test scripts (`web/test.mjs`, `web/wasm-test.mjs`, `web/net-test.mjs`,
 `web/qr-test.mjs`, `web/uucp-test.mjs`, `web/site-test.mjs`,
 `web/flow-test.mjs`, `web/join-test.mjs`, `web/page-test.mjs`,
 `web/diag-test.mjs`, `web/diagpage-test.mjs`, `web/carddebug-test.mjs`,
-`web/sharelog-test.mjs`, `web/handpage-test.mjs`), not by proof.
+`web/sharelog-test.mjs`, `web/handpage-test.mjs`, `web/cli-test.mjs`,
+`web/cli-page-test.mjs`), not by proof.
 
 ### Sharing the log, and running with no server at all
 
@@ -347,6 +353,26 @@ steps, the guarantee that none of them needs a server, and the rules for
 carrying a block or a run by hand are proved in
 `RequestProject/Kant/ShareLog.lean` and `RequestProject/Kant/Handoff.lean`, and
 written up in [`docs/SHARE-LOG-AND-MANUAL-CHAT.md`](docs/SHARE-LOG-AND-MANUAL-CHAT.md).
+
+### The command line, for people and for agents
+
+`scripts/kant-cli.mjs` is the whole client in a terminal: `open`, `link`,
+`join`, `say`, `read`, `bag`, `load`, with `--json` for agents and a state file
+per client. It makes exactly the requests the browser makes, so every step can
+be printed as the `curl` command that performs it (`curl read`, `curl say …`)
+or performed by `curl` itself (`--transport curl`). `sh scripts/two-agents.sh`
+runs the whole thing: A opens a room, the link travels through a chat window, B
+joins from the pasted message, and the two talk with curl commands typed out in
+full.
+
+What makes the terminal and the browser the same session is proved in
+`RequestProject/Kant/Cli.lean`: the printed command is the request
+(`parseCurlLine_curlLine`), the relay's router reads the URLs the client builds
+(`route_roomPath`, `route_pollPath`), going over HTTP leaves both sides in the
+state the browser client reaches (`say_eq_browserSay`, `poll_eq_browserPoll`),
+the host is only ever asked for the static page (`link_page_static`), and two
+agents given nothing but the link end up displaying the same conversation
+(`cliSession_agree`). The write-up is [`docs/CLI.md`](docs/CLI.md).
 
 ## WASM
 

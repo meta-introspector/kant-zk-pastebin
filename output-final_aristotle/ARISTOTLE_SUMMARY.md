@@ -1,3 +1,37 @@
+# Summary of changes for run caa82839-dc57-45c9-873c-8a4634c26165
+## A command-line client, and the proof that a terminal session is the browser session
+
+**The client — `scripts/kant-cli.mjs`** (with the shared logic in `web/kant-cli.mjs`). The whole app in a terminal, one state file per client, `--json` for agents:
+
+```
+open --relay <url>   link   invite   room   whoami
+join <text>   load <url>   say <text>   read   bag   watch   health
+curl read | say <text> | health          # print the command instead of running it
+```
+
+Options `--transport fetch|curl` (every request actually made by the `curl` binary) and `--print-curl` (print each command as it runs).
+
+**Two agents finding each other.** The page is static, so the only thing the two exchange is one line of text through whatever channel they already share. `link` prints it: the site, and after the `#`, the relay and the secret whose digest is the room. `join` accepts it however the chat window mangled it — a sentence around it, a bracket, a full stop, a trailing newline.
+
+**`sh scripts/two-agents.sh`** runs the whole demonstration and exits non-zero if it fails: a relay, agent A opening a room, the chat message A would send, B joining from the pasted message, a `POST` typed out in full as a `curl` command and run in the shell, the reply read back with another, and a final check that both agents display the same conversation.
+
+**Proved in Lean** — `RequestProject/Kant/Cli.lean` (no `sorry`; `propext`, `Classical.choice`, `Quot.sound` only):
+- the printed command *is* the request (`parseCurlLine_curlLine`), and every step of a session is one such command, because no room, cursor or chat line contains a space (`say_curl_roundTrip`, `pollFrom_curl_roundTrip`);
+- the relay's router reads the URLs the client builds (`route_roomPath`, `route_pollPath`, `digitsValue_decNum`);
+- **the CLI equals the browser**: going over `/room/<room>` and `?cursor=<n>` leaves the client and the relay in exactly the state the in-memory browser client reaches (`say_eq_browserSay`, `poll_eq_browserPoll`);
+- the host is only ever asked for the static page (`link_page_static`), and the added information comes back out of the fragment (`link_carries_invite`, `join_same_room`, `join_same_relay`, `messy_join_same_room`);
+- **two agents given nothing but the link** end up holding both messages and displaying the same conversation in one room (`meet_fresh`, `cliSession_agree`);
+- loading a URL does the right thing for each kind: a room to join, or a whole conversation carried in the link with no relay at all (`loadUrl_link`, `loadUrl_bagUrl`, `findInvite_bagUrl`);
+- every command reads back as itself (`parseArgv_printArgv`). Golden `#guard` vectors at the end are shared with the JavaScript.
+
+**Tested, all passing.**
+- `node web/cli-test.mjs` — **77 checks**: the pure layer against the Lean vectors; two separate CLI processes over a real `server/relay.mjs`; the same run again with `--transport curl`; the printed `curl` commands executed by a shell and picked up by the other client; the browser client (`web/kant-net.mjs`) joining the same link and showing the same transcript; a conversation carried in a link and loaded by a third client that never touches the relay; and `scripts/two-agents.sh` itself.
+- `node web/cli-page-test.mjs` — **10 checks**: `web/index.html` itself, in a minimal DOM, pointed at the link a terminal agent printed, as if pasted into a browser's address bar. The page loads the URL, walks into the room, shows the terminal's line, answers, and the terminal hears it; the two displays are then compared line for line.
+- No regressions: `lake build` clean over the whole project (8069 jobs, no `sorry`), and all fifteen existing web suites still pass.
+
+The write-up is `docs/CLI.md`; `README.md` and the Lean module map point at it. Everything is committed.
+
+
 # Summary of changes for run 92af095b-2fd0-4b15-8895-09fe2840d8dd
 Added the share-log button, the option to post the log to the store, and a mode that runs the whole system with no server at all — manual sharing steps through any chat.
 
