@@ -32,7 +32,9 @@ node web/uucp-test.mjs    # 28 checks of the relay-free sneakernet (bags, tweets
 node web/site-test.mjs    # 47 checks of the configuration file, the whole-URL codes and the share card
 node web/flow-test.mjs    # 85 checks of the guided flow: dressed invite codes, tolerant joining, screens, plain-text copy
 node web/join-test.mjs    # 14 checks of the cross-device join: two clients, one real relay, no shared browser
-node web/page-test.mjs    # 43 checks driving web/index.html itself in a minimal DOM
+node web/page-test.mjs    # 75 checks driving web/index.html itself in a minimal DOM
+node web/sharelog-test.mjs   # 64 checks of sharing the log, posting it to the store, carrying blocks by hand
+node web/handpage-test.mjs   # 32 checks driving web/hand.html — the no-server, chat-only mode
 node scripts/invite-card.mjs '<code or link>'        # a scannable invite card: link + icon + caption, as SVG
 node scripts/sneakernet.mjs init site --name alice   # a static sneakernet site: no server to run
 node server/relay.mjs --port 8787 --static web    # the relay + the client, on your own machine
@@ -66,6 +68,11 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 | new (joining) | `RequestProject/Kant/Join.lean` | finding the invitation in a pasted message however it arrives — in a sentence, in brackets, with a full stop or a newline after it |
 | new (onboarding) | `RequestProject/Kant/Onboarding.lean` | the screens, the camera switch, and the guided first run with its spoken prompts |
 | new (plain text) | `RequestProject/Kant/PlainText.lean` | copying a post as the text a human reads, with its title, link, address and time optional and separable |
+| new (connecting) | `RequestProject/Kant/Connectivity.lean` | which relay a client actually uses, when two clients are linked, and the verdict when they are not |
+| new (which code is this) | `RequestProject/Kant/CardDebug.lean` | what a pasted code is — a card, an invitation or a page link — and why two cards can never connect |
+| new (diagnostics) | `RequestProject/Kant/Diagnostics.lean` | the net/error log: bounded, ordered, readable back, and shareable with no secret in it |
+| new (sharing the log) | `RequestProject/Kant/ShareLog.lean` | the run handed over as text, as a post in the store, or as numbered chat messages — with no secret in any of them |
+| new (no server) | `RequestProject/Kant/Handoff.lean` | the numbered steps two people follow in a chat, the proof that none of them needs a server, and carrying a block by hand |
 | new (text) | `RequestProject/Kant/Text.lean` | ASCII transcoding, field framing, substring search, numeric byte encoding |
 | — | `RequestProject/Kant/Pipeline.lean` | end-to-end paste → address → frame → stego → recover theorem |
 | — | `RequestProject/Kant/Demo.lean` | `#guard`-checked worked examples of every layer |
@@ -199,6 +206,26 @@ python3 -m http.server -d web 8080   # then open http://localhost:8080/
 - `Kant.PlainText.copyPlain_eq_content`, `copyPlain_ne_copyText`, `bodyOf_copyPlainWithMeta`, `metaOf_copyPlainWithMeta`, `copyPlainWithMeta_link_visible` — copying a post gives the characters that were typed rather than an encoding of them; with the details attached, the text and the four details are both recoverable, and the whole page link really is printed in the footer.
 - `Kant.Uucp.Site.serve_static`, `visitor_catches_up`, `snapshot_is_stale` — the static server has no state to lose, a visitor who pastes the page catches up with the publisher, and a line written after publication stays invisible until a fresher code is pasted.
 
+**Connecting, and saying why not**
+
+- `Kant.Connectivity.effectiveRelay_configured`, `effectiveRelay_selfHosted`, `effectiveRelay_needs_probe` — a configured relay that answers wins; with none configured, the origin that served the page is used if it really answers as a relay; an origin that has not answered a probe is never used.
+- `Kant.Connectivity.two_browsers_one_machine_linked`, `two_browsers_one_machine_stuck`, `same_browser_linked`, `Linked.symm` — two browsers on one machine are linked exactly when a relay joins them, tabs of one browser need nothing, and being linked is symmetric.
+- `Kant.Connectivity.diagnose_eq_ok_iff`, `diagnose_noRoom`, `diagnose_roomMismatch`, `diagnose_relayDown`, `diagnose_two_browsers_no_relay`, `explain_ne_nil`, `explain_injective` — the verdict is `ok` exactly when the two clients can talk, each failure gets its own verdict, and the six explanations are six different sentences.
+- `Kant.CardDebug.card_no_room`, `page_no_room`, `pair_not_connectable_of_card_left`, `pair_not_connectable_of_card_right`, `pair_not_connectable_of_page_left` — a share card and a page link name no room, so pairing either with anything is never `connectable`.
+- `Kant.CardDebug.pair_connectable_iff`, `connectable_linked`, `configured_relay_links`, `static_deployment_stuck` — two codes connect exactly when both are invitations to one room through one non-empty relay; such a pair really does link two clients; a reachable `relay =` links them wherever the page is hosted, and a blank one on a static origin provably cannot.
+- `Kant.CardDebug.userCard_classify`, `userCard_no_room`, `userCard_pair`, `userCard_not_connectable`, `userPageLink_classify`, `userCard_warnings` — the reported text, classified: one share card (not two), naming no room, with a relative picture reference.
+- `Kant.CardDebug.explain_ne_nil`, `explain_injective` — six outcomes, six different sentences.
+- `Kant.Diagnostics.parseEvent_printEvent`, `parseLog_renderLog`, `parseHeader_header`, `parseReport_renderReport` — an event, a whole log and a whole shared report are written out as text and read back unchanged.
+- `Kant.Diagnostics.Log.add_length_le`, `Log.add_getLast`, `Log.add_total`, `Log.Wf.record` — the log is bounded, drops the oldest rather than the newest, and counts honestly what it dropped.
+- `Kant.Diagnostics.share_no_secret`, `share_clean`, `share_keeps`, `report_events_clean`, `ref_length`, `ref_ne` — a shared run quotes no room secret, keeps everything else, and names rooms by an eight-character handle.
+
+- `Kant.ShareLog.shared_no_secret`, `shareReport_room_ne`, `shared_keeps`, `posted_no_secret`, `chat_no_secret` — a shared run carries no secret and no room, only an eight-character handle, and withholds nothing else; the same holds of what the store holds and of what arrives through a chat.
+- `Kant.ShareLog.postLog_resolves`, `postLog_idem`, `postLog_monotone`, `postLog_in_feed`, `logPaste_content_roundTrip`, `logPaste_witness_congr` — posting the run to the store gives it an address that resolves, twice is a no-op, nothing already held is lost, it appears in the feed, it parses back, and two people with the same run post the same block.
+- `Kant.ShareLog.readChatParts_chatParts`, `readChatParts_perm`, `chatParts_fit_tweet`, `isAscii_logText` — the run cut into chat messages arrives intact, in any order, with every message inside a tweet and every character plain ASCII.
+- `Kant.Handoff.script_serverless`, `serverless_all`, `codes_script_isAscii` — no step of any script the app can show needs a server, and everything it asks you to send is plain text.
+- `Kant.Handoff.run_delivers`, `run_delivers_back`, `run_keeps`, `run_agree`, `run_after_write_new` — four copy-pastes and both sides display the same conversation; saying something new and repeating them delivers it.
+- `Kant.Handoff.carry_resolves`, `carry_agrees`, `carry_idem`, `carry_monotone`, `logScript_delivers` — a block, or a whole run, copied into a chat and pasted on the other side lands under exactly the address it left with.
+
 **End to end**
 
 - `Kant.Pipeline.pipeline_roundTrip` — paste → witness → frames → LSB-stego carrier → recovered paste is the identity.
@@ -238,9 +265,22 @@ diagrams, and the theorem behind each promise — is
 - **copying gives you the words.** Copy a note as plain text, or as plain text
   with its title, link, address and time under a `-- ` line.
 - **it says when it cannot reach anybody.** The relay is named in
-  `web/kant.config` and probed on startup; with none configured the first
-  screen says that only tabs of this browser will find each other, instead of
-  failing silently.
+  `web/kant.config` and probed on startup; with none configured the client
+  asks the origin that served the page whether it is itself a relay, and if
+  it is not, the first screen says that only tabs of this browser will find
+  each other, instead of failing silently.
+- **it keeps a log, and shares it.** Every probe, request, socket, channel
+  and uncaught error goes into one bounded run log. **More → Diagnostics**
+  shows the verdict and a live tail; [`web/diag.html`](web/diag.html) shows
+  the whole run, re-runs the checks, and copies, saves or links it with the
+  room secret and the invite withheld. See
+  [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md).
+- **it says what a pasted code *is*.** `diag.html` → **What is this code?**
+  takes one code or two — a whole share card, a bare `kzcard:` / `kzinvite:`
+  line, or a page link — and says what each one is, whether the two can
+  connect, and what to do instead. `node scripts/kant-debug.mjs` does the
+  same from a terminal, and `--probe` checks whether the deployment has any
+  meeting point at all. See [`docs/CARD-DEBUG.md`](docs/CARD-DEBUG.md).
 
 `web/lab.html` is the **workbench** — the whole control panel, reachable from
 **More → Open the workbench**. It lets you
@@ -269,6 +309,11 @@ built out of.
 plus the transports; `web/kant-uucp.mjs` is the transcription of `Kant.Uucp`,
 the relay-free sneakernet; `web/kant-site.mjs` is the transcription of
 `Kant.SiteCard`, the configuration file, the full-URL codes and the share card;
+`web/kant-diag.mjs` is the transcription of `Kant.Connectivity` and
+`Kant.Diagnostics` — the relay decision, the verdicts, the run log and the
+shareable report;
+`web/kant-carddebug.mjs` is the transcription of `Kant.CardDebug` — which of
+the three codes a pasted block is, and what two of them do together;
 `web/kant-qr.mjs` is a self-contained QR encoder for the chat code, the mailbag
 and the card. See [`docs/DISCOVERY-AND-CHAT.md`](docs/DISCOVERY-AND-CHAT.md),
 [`docs/STATIC-SNEAKERNET.md`](docs/STATIC-SNEAKERNET.md) and
@@ -283,7 +328,25 @@ one up). Edit that file — or pass `--config` / `--base` to
 
 Everything in `web/` and `server/` is *unverified*: it is checked only by the
 test scripts (`web/test.mjs`, `web/wasm-test.mjs`, `web/net-test.mjs`,
-`web/qr-test.mjs`, `web/uucp-test.mjs`, `web/site-test.mjs`), not by proof.
+`web/qr-test.mjs`, `web/uucp-test.mjs`, `web/site-test.mjs`,
+`web/flow-test.mjs`, `web/join-test.mjs`, `web/page-test.mjs`,
+`web/diag-test.mjs`, `web/diagpage-test.mjs`, `web/carddebug-test.mjs`,
+`web/sharelog-test.mjs`, `web/handpage-test.mjs`), not by proof.
+
+### Sharing the log, and running with no server at all
+
+**Share the log** (under *More → Diagnostics*, and on `web/diag.html`) hands the
+run over as text, as numbered chat messages each inside a tweet, or — with
+**Post the log to the store** — as an ordinary content-addressed post with a
+witness and a link. A shared run never quotes a secret and never carries the
+room, only its eight-character handle.
+
+`web/hand.html` is the same system with the network removed: two people, any
+chat window, four copy-pastes, and both sides hold the same conversation. The
+steps, the guarantee that none of them needs a server, and the rules for
+carrying a block or a run by hand are proved in
+`RequestProject/Kant/ShareLog.lean` and `RequestProject/Kant/Handoff.lean`, and
+written up in [`docs/SHARE-LOG-AND-MANUAL-CHAT.md`](docs/SHARE-LOG-AND-MANUAL-CHAT.md).
 
 ## WASM
 
@@ -352,6 +415,45 @@ relay does see them, since line contents are not yet encrypted. The full
 walkthrough, protocol, systemd unit, nginx snippet and Cloudflare instructions
 are in [`docs/DISCOVERY-AND-CHAT.md`](docs/DISCOVERY-AND-CHAT.md) and
 [`server/README.md`](server/README.md).
+
+### Two browsers on one machine, and what to do when nothing connects
+
+Two *tabs* of one browser find each other with no server at all. Two
+*browsers* — or a window and a private window, or two profiles — share
+nothing, so they need a relay even when they are on the same laptop. With
+`relay =` left empty in `web/kant.config`, the client now asks the origin it
+was served from whether it is itself a relay, so
+
+```
+node server/relay.mjs --port 8787 --static web --log relay.log
+# open http://localhost:8787/ in two different browsers
+```
+
+is enough, with no configuration. A configured relay that answers always
+wins; an origin that has not answered a probe is never used. The rule and
+its proofs are `effectiveRelay` in
+[`RequestProject/Kant/Connectivity.lean`](RequestProject/Kant/Connectivity.lean).
+
+Every transport step is written into one bounded log — the config, the
+probes, each relay request with its status, socket open/close/error, the
+same-browser channel, every ICE and data-channel state, and uncaught page
+errors. Nothing is swallowed. The "more" screen shows the verdict and a
+live tail, and [`web/diag.html`](web/diag.html) shows the whole run, runs
+the checks again on demand, and copies, saves or links it — with the room
+secret and the invite withheld, which is proved rather than asserted. The
+log, the verdicts and the relay's `--log` are described in
+[`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md); the model is
+[`RequestProject/Kant/Diagnostics.lean`](RequestProject/Kant/Diagnostics.lean).
+
+Codes are not interchangeable, and the difference is the usual reason two
+people cannot connect: a **share card** (`kzcard:`) and a **page link**
+(`<origin>#<64 hex>`) name a page and carry no room, while only an
+**invitation** (`kzinvite:`) carries the relay and the secret whose digest is
+the room. Paste either into *What is this code?* on
+[`web/diag.html`](web/diag.html), or run `node scripts/kant-debug.mjs`, and
+it will say which you are holding. The rules are proved in
+[`RequestProject/Kant/CardDebug.lean`](RequestProject/Kant/CardDebug.lean) and
+worked through in [`docs/CARD-DEBUG.md`](docs/CARD-DEBUG.md).
 
 ### No relay: the static sneakernet
 

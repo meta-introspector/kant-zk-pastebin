@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kant — carry it by hand</title>
+<style>
+  :root { --ink: #0f0; --dim: #7a7; --hi: #0ff; --bg: #0a0a0a; --panel: #111; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 820px; margin: 0 auto; padding: 0 14px 80px;
+         background: var(--bg); color: var(--ink); }
+  h1 { font-size: 1.15rem; color: var(--hi); }
+  h2 { font-size: 1rem; color: var(--hi); margin: 0 0 6px; }
+  button { background: var(--ink); color: #000; border: none; border-radius: 8px;
+           padding: 10px 14px; margin: 4px 6px 4px 0; cursor: pointer;
+           font-family: inherit; font-size: 1rem; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  textarea, input { width: 100%; background: var(--panel); color: var(--ink);
+                    border: 1px solid #2a2; border-radius: 8px; padding: 10px;
+                    font-family: ui-monospace, monospace; font-size: .9rem; }
+  .card { background: var(--panel); border: 1px solid #222; border-radius: 10px;
+          padding: 12px; margin: 10px 0; }
+  .meta { color: var(--dim); font-size: .85rem; font-family: ui-monospace, monospace;
+          white-space: pre-wrap; }
+  .warn { color: #fb0; }
+  .good { color: #6f6; }
+  ol { padding-left: 20px; }
+  li { margin: 6px 0; }
+  a { color: var(--hi); }
+  label { display: block; margin: 6px 0 2px; color: var(--dim); font-size: .85rem; }
+  #chat { max-height: 40vh; overflow: auto; }
+</style>
+</head>
+<body>
+
+<h1>Carry it by hand</h1>
+<p class="meta">No server, no relay, no network between you: two people with any chat
+window — Signal, SMS, a shared document, a photograph of a screen — copy one code each
+way and end up holding the same conversation. The four steps, and the proof that none of
+them needs anything running anywhere, are
+<code>RequestProject/Kant/Handoff.lean</code>; that the codes carry everything and lose
+nothing is <code>RequestProject/Kant/Uucp.lean</code>.</p>
+<p class="meta"><a href="./index.html">← back to the app</a></p>
+
+<div class="card">
+  <h2>1. Who you are, and which conversation</h2>
+  <label for="name">A name for yourself</label>
+  <input id="name" placeholder="alice" />
+  <label for="passphrase">A passphrase you and they agree on, out loud or in the chat</label>
+  <input id="passphrase" placeholder="the same words on both devices" />
+  <button id="btn-start">Use these</button>
+  <div class="meta" id="who"></div>
+</div>
+
+<div class="card">
+  <h2>2. Say something</h2>
+  <p class="meta">Nothing is sent anywhere. What you write is added to your own copy and
+  goes out only inside the code below, when you send it.</p>
+  <input id="say" placeholder="say something" />
+  <button id="btn-say">Add it</button>
+  <div class="meta" id="saymsg"></div>
+</div>
+
+<div class="card">
+  <h2>3. The steps</h2>
+  <ol id="steps"></ol>
+  <label for="mycode">Your code — everything you hold</label>
+  <textarea id="mycode" rows="4" readonly></textarea>
+  <button id="btn-copycode">Copy my code</button>
+  <button class="ghost" id="btn-split">Cut it into chat-sized messages</button>
+  <div class="meta" id="codemsg"></div>
+  <label for="theircode">Paste what they sent you (one code, or all the numbered
+    messages, in any order)</label>
+  <textarea id="theircode" rows="4" placeholder="6b7a626167:… — or several messages, one per line"></textarea>
+  <button id="btn-paste">Paste it in</button>
+  <div class="meta" id="pastemsg"></div>
+</div>
+
+<div class="card">
+  <h2>4. The conversation</h2>
+  <div class="meta" id="chat">(nothing said yet)</div>
+  <div class="meta" id="status"></div>
+</div>
+
+<div class="card">
+  <h2>Carry a block by hand</h2>
+  <p class="meta">The same thing for a post: a block copied out of one device's store and
+  pasted here lands under exactly the address it left with, because the store is addressed
+  by content and not by trust (<code>Kant.Handoff.carry_resolves</code>). A run shared
+  from the app's <em>Post the log to the store</em> button travels this way too.</p>
+  <label for="carry">Paste a block, or a shared run</label>
+  <textarea id="carry" rows="3" placeholder="6b7a7061737465:… — or a whole diagnostics run"></textarea>
+  <button id="btn-carry">Take it in</button>
+  <button class="ghost" id="btn-copystore">Copy everything I hold</button>
+  <div class="meta" id="carrymsg"></div>
+  <div class="meta" id="storelist"></div>
+</div>
+
+<footer class="meta">
+  The rules on this page are proved, not tested:
+  <code>Kant.Handoff.run_agree</code> (four copy-pastes and both sides show the same
+  conversation), <code>Kant.Handoff.script_serverless</code> (no step needs a server),
+  <code>Kant.Uucp.readThread_perm</code> (the numbered messages may arrive in any order)
+  and <code>Kant.ShareLog.readChatParts_chatParts</code> (a run survives the same trip).
+</footer>
+
+<script type="module">
+import * as K from "./kantzk.mjs";
+import * as U from "./kant-uucp.mjs";
+import * as SL from "./kant-sharelog.mjs";
+
+const $ = (id) => document.getElementById(id);
+
+const NODE_KEY = "kant-hand-node";
+const WHO_KEY = "kant-hand-who";
+
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = document.createElement("textarea");
+    t.value = text;
+    document.body.appendChild(t);
+    t.select();
+    document.execCommand("copy");
+    t.remove();
+  }
+}
+
+let who = { name: "", passphrase: "", room: "" };
+let node = U.SneakerNode.blank("");
+let store = SL.loadStore(globalThis.localStorage);
+
+function loadState() {
+  try {
+    const w = JSON.parse(globalThis.localStorage?.getItem(WHO_KEY) ?? "null");
+    if (w) who = w;
+    const n = JSON.parse(globalThis.localStorage?.getItem(NODE_KEY) ?? "null");
+    node = n ? U.SneakerNode.fromJSON(n) : U.SneakerNode.blank(who.name || "you");
+  } catch { node = U.SneakerNode.blank(who.name || "you"); }
+}
+
+function saveState() {
+  try {
+    globalThis.localStorage?.setItem(WHO_KEY, JSON.stringify(who));
+    globalThis.localStorage?.setItem(NODE_KEY, JSON.stringify(node.toJSON()));
+  } catch { /* a full store must not break the page */ }
+}
+
+/** The four steps, named for the two people (`Kant.Handoff.script`). */
+function renderSteps() {
+  const mine = node.bag();
+  const plan = SL.script({ me: who.name || "you", them: "them", mine, theirsAfter: "" });
+  const sentences = [
+    "copy your code — the button below — and send it in your chat",
+    "they paste it into this same page on their device",
+    "they copy their code and send it back",
+    "you paste theirs into the box below; you are now both holding the same conversation",
+  ];
+  $("steps").innerHTML = plan
+    .map((s, i) => `<li><b>${K.escapeHtml(s.actor)}</b>: ${K.escapeHtml(sentences[i])}</li>`)
+    .join("");
+  $("mycode").value = mine;
+  const fits = U.bagFits(mine, "tweet");
+  $("codemsg").textContent =
+    `${mine.length} characters — ${fits ? "fits in a single message anywhere" :
+      `too long for a tweet, ${U.bagForCarrier(mine, "tweet").length} messages if you need them`}` +
+    `; nothing on this page contacts a server.`;
+}
+
+function renderChat() {
+  const view = node.view();
+  $("chat").innerHTML = view.length
+    ? view.map((m) =>
+        `<div>${K.escapeHtml(m.sender)}: ${K.escapeHtml(K.fromUtf8(m.body))}</div>`).join("")
+    : "(nothing said yet)";
+  $("status").textContent =
+    `${view.length} line(s) held · ${who.room ? `room ${who.room.slice(0, 8)}…` : "no passphrase yet"}` +
+    ` · you are exactly as up to date as the last code you pasted`;
+}
+
+function renderStore() {
+  $("storelist").textContent = store.entries.length
+    ? store.entries.map((p) =>
+        `${p.witness.slice(0, 16)}…  ${p.title}  (${p.content.length} bytes)`).join("\n")
+    : "(no blocks held)";
+}
+
+function renderAll() {
+  $("name").value = who.name;
+  $("passphrase").value = who.passphrase;
+  $("who").textContent = who.room
+    ? `you are ${who.name} · the passphrase names room ${who.room.slice(0, 16)}…`
+    : "pick a name and a passphrase; the passphrase is what puts you both in the same room";
+  renderSteps();
+  renderChat();
+  renderStore();
+}
+
+$("btn-start").onclick = () => {
+  who = {
+    name: $("name").value.trim() || "you",
+    passphrase: $("passphrase").value,
+    room: $("passphrase").value ? K.witness(Array.from($("passphrase").value)) : "",
+  };
+  node.name = who.name;
+  saveState();
+  renderAll();
+};
+
+$("btn-say").onclick = () => {
+  const text = $("say").value.trim();
+  if (!text) { $("saymsg").textContent = "write something first"; return; }
+  if (!who.room) { $("saymsg").innerHTML = '<span class="warn">pick a passphrase first</span>'; return; }
+  node.write(who.room, text);
+  $("say").value = "";
+  saveState();
+  renderAll();
+  $("saymsg").textContent =
+    "added to your copy — send your code for them to see it";
+};
+
+$("btn-copycode").onclick = async () => {
+  await copy(node.bag());
+  $("codemsg").textContent = "copied — paste it into your chat and send it";
+};
+
+$("btn-split").onclick = async () => {
+  const parts = U.bagForCarrier(node.bag(), "tweet");
+  const text = parts.map((c, i) => `--- ${i + 1}/${parts.length} ---\n${c}`).join("\n");
+  await copy(text);
+  $("codemsg").textContent =
+    `copied as ${parts.length} message(s), each inside a tweet — send them in any order, ` +
+    "the other side can paste them all at once";
+};
+
+$("btn-paste").onclick = () => {
+  const text = $("theircode").value.trim();
+  if (!text) { $("pastemsg").textContent = "paste their code first"; return; }
+  const before = node.view().length;
+  const r = node.paste(text);
+  if (!r.accepted) {
+    $("pastemsg").innerHTML =
+      '<span class="warn">that code did not read back — nothing was changed. ' +
+      "A code that has been edited, or is missing a message, is refused whole.</span>";
+    return;
+  }
+  saveState();
+  renderAll();
+  $("theircode").value = "";
+  $("pastemsg").innerHTML =
+    `<span class="good">taken in: ${node.view().length - before} new line(s), ` +
+    `${node.view().length} held.</span>`;
+};
+
+$("btn-carry").onclick = () => {
+  const text = $("carry").value.trim();
+  if (!text) { $("carrymsg").textContent = "paste a block first"; return; }
+  const taken = SL.carry(store, text);
+  if (taken.accepted) {
+    SL.saveStore(store, globalThis.localStorage);
+    $("carry").value = "";
+    renderStore();
+    $("carrymsg").innerHTML =
+      `<span class="good">held as ${K.escapeHtml(taken.witness.slice(0, 16))}… ` +
+      "— the very address it left with.</span>";
+    return;
+  }
+  const bundle = K.pasteAll(text);
+  if (bundle && bundle.length) {
+    for (const p of bundle) store.put(p);
+    SL.saveStore(store, globalThis.localStorage);
+    $("carry").value = "";
+    renderStore();
+    $("carrymsg").innerHTML =
+      `<span class="good">took in ${bundle.length} block(s); ${store.entries.length} held.</span>`;
+    return;
+  }
+  const run = SL.readShared(text);
+  if (run) {
+    const { witness, already } =
+      SL.postLog(store, run, { id: `run_${Date.now()}`, timestamp: new Date().toISOString() });
+    SL.saveStore(store, globalThis.localStorage);
+    $("carry").value = "";
+    renderStore();
+    $("carrymsg").innerHTML =
+      `<span class="good">that is somebody's run: ${run.events.length} event(s), verdict ` +
+      `${K.escapeHtml(run.verdict)} — ${already ? "already held" : "posted to your store"} as ` +
+      `${K.escapeHtml(witness.slice(0, 16))}…</span>`;
+    return;
+  }
+  $("carrymsg").innerHTML =
+    '<span class="warn">that is neither a block nor a run — nothing was changed.</span>';
+};
+
+$("btn-copystore").onclick = async () => {
+  await copy(K.copyAll(store.entries));
+  $("carrymsg").textContent =
+    `copied ${store.entries.length} block(s) as one bundle — paste it into somebody ` +
+    "else's workbench and they hold them all";
+};
+
+loadState();
+renderAll();
+</script>
+</body>
+</html>

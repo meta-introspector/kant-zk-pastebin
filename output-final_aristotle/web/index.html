@@ -154,6 +154,36 @@
   </div>
 
   <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Diagnostics</h2>
+    <p class="meta">Everything the network does is written down: every probe, every
+       request, every refusal, every error. Nothing is swallowed.</p>
+    <p class="meta">Holding two codes that will not connect? The diagnostics page has
+       <em>What is this code?</em>: paste both and it says what each one is. A share card
+       or a page link names a page, never a room — only a <code>kzinvite</code> code can
+       join two clients.</p>
+    <div class="meta" id="verdict">…</div>
+    <pre class="meta" id="diagtail" style="max-height:34vh;overflow:auto;margin:8px 0"></pre>
+    <button id="btn-diagshare">Share the log</button>
+    <button class="ghost" id="btn-diagpost">Post the log to the store</button>
+    <button class="ghost" id="btn-diagcopy">Copy the whole run</button>
+    <button class="ghost" id="btn-diagsave">Save the run as a file</button>
+    <button class="ghost" id="btn-diagpage">Open the diagnostics page</button>
+    <div class="meta" id="diagmsg"></div>
+    <div class="meta" id="diagshare"></div>
+    <textarea id="diagparts" rows="4" readonly
+      placeholder="the run, cut into chat-sized messages"></textarea>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">No server at all</h2>
+    <p class="meta">Nothing to run, nothing to deploy: two people with any chat window
+       between them copy one code each way and end up holding the same conversation.
+       The steps, and the proof that they need no server, are in
+       <code>RequestProject/Kant/Handoff.lean</code>.</p>
+    <p><a href="./hand.html">Carry it by hand →</a></p>
+  </div>
+
+  <div class="card">
     <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Everything else</h2>
     <p><a href="./lab.html">Open the workbench</a> — the pastebin, stego pictures,
        the sneakernet, credits, code movies, the wasm kernel.</p>
@@ -175,13 +205,47 @@ import * as K from "./kantzk.mjs";
 import * as N from "./kant-net.mjs";
 import * as S from "./kant-site.mjs";
 import * as F from "./kant-flow.mjs";
+import * as D from "./kant-diag.mjs";
+import * as C from "./kant-carddebug.mjs";
+import * as SL from "./kant-sharelog.mjs";
 
 const $ = (id) => document.getElementById(id);
+
+// --------------------------------------------------------------- the log
+//
+// One log for the whole run (`RequestProject/Kant/Diagnostics.lean`): a
+// bounded ring that keeps its order, never drops the newest line, and can
+// be shared without carrying the room secret with it.
+
+let diagPending = false;
+function queueDiagRender() {
+  if (diagPending) return;
+  diagPending = true;
+  setTimeout(() => { diagPending = false; renderDiag(); }, 120);
+}
+
+const LOG = new D.DiagLog({ cap: 3000, onEvent: () => queueDiagRender() });
+// The run before this one is kept, because a crash is exactly when the log
+// matters; this one is written down as it happens, so a reload does not
+// lose it either.
+const PREVIOUS = D.rotateStoredRun(globalThis.localStorage);
+LOG.persist("kant-diag-run", globalThis.localStorage);
+LOG.info("app", "page opened", location.href.split("#")[0]);
+if (PREVIOUS.length) {
+  LOG.info("app", `the previous run had ${PREVIOUS.length} events`,
+    "open the diagnostics page to read it");
+}
+
+window.addEventListener("error", (ev) =>
+  LOG.error("app", "uncaught error", `${ev.message} (${ev.filename}:${ev.lineno})`));
+window.addEventListener("unhandledrejection", (ev) =>
+  LOG.error("app", "a promise was rejected", ev.reason?.message ?? String(ev.reason)));
 
 // ------------------------------------------------------------- the config
 
 let cfg = { ...S.DEFAULT_CONFIG };
 let relayBase = "";
+let reach = { configured: "", configuredUp: false, origin: "", originIsRelay: false };
 
 /** Where this copy actually lives, when the configuration says nothing
  *  useful.  A code that points at a page nobody can open is worse than no
@@ -263,7 +327,9 @@ $("again").onclick = () => { spokenFor = ""; speak(F.promptFor(ui)); };
 function newNode() {
   return new N.KantNode({
     peer: "peer-" + Math.random().toString(36).slice(2, 7),
-    relay: relayBase,
+    relay: D.effectiveRelay(reach),
+    log: LOG,
+    reach,
     onChange: () => { renderChat(); },
   });
 }
@@ -273,8 +339,12 @@ function attach(fresh) {
   node = fresh;
   node.connect();
   node.onChange = () => renderChat();
-  node.announceSelf().then(() => node.dialKnownPeers()).catch(() => {});
-  node.startPolling({ wait: 25 }).catch(() => {});
+  node.announceSelf()
+    .then(() => node.dialKnownPeers())
+    .catch((e) => LOG.error("app", "could not announce into the room", e));
+  node.startPolling({ wait: 25 })
+    .catch((e) => LOG.error("relay", "polling stopped", e));
+  renderDiag();
 }
 
 const currentInvite = () =>
@@ -346,7 +416,7 @@ $("btn-shareroom").onclick = () => dispatch({ type: "goto", screen: "share" });
 
 $("btn-open").onclick = () => {
   const fresh = newNode();
-  fresh.createRoom(relayBase);
+  fresh.createRoom(D.effectiveRelay(reach));
   attach(fresh);
   $("caption").value = $("caption").value || cfg.caption;
   $("icon").value = $("icon").value || cfg.picture;
@@ -424,10 +494,21 @@ $("btn-leave").onclick = () => {
 function joinFrom(text, msgId) {
   const inv = F.findInvite(text);
   if (!inv) {
+    // Say what it *is*, not only what it is not (`Kant.CardDebug.classify`).
+    const what = C.classify(text);
+    const named = what.kind === "card"
+      ? "That is a <b>share card</b>: a page, a caption and a picture. It names no room, " +
+        "so there is nothing in it to join."
+      : what.kind === "page"
+        ? "That is a <b>page link</b>: the address of a paste. It names no room, so there " +
+          "is nothing in it to join."
+        : "";
     $(msgId).innerHTML =
-      '<span class="bad">no invite link in that text.</span> ' +
-      "It should look like <code>https://…/#kzinvite…</code>. " +
+      '<span class="bad">no invite link in that text.</span> ' + named +
+      " An invitation looks like <code>https://…/#kzinvite…</code>, and comes from " +
+      "<b>Share \u2192 Invite someone to chat</b> on the other device. " +
       "Copy the whole message if you are not sure which part is the link.";
+    LOG.warn("ingest", "the text pasted is not an invitation", what.kind);
     return false;
   }
   const fresh = newNode();
@@ -523,38 +604,149 @@ async function copy(text) {
 
 // ------------------------------------------------------------ the relay
 
-async function probeRelay(base) {
-  if (!base) {
-    return {
-      ok: false,
-      text: "No relay is configured. Two tabs of this browser will find each " +
-        "other, but a link opened on another device will not. Set `relay = …` " +
-        "in kant.config (see server/README.md) or enter one under More.",
-    };
-  }
-  try {
-    const res = await fetch(`${base.replace(/\/+$/, "")}/health`, { cache: "no-cache" });
-    if (!res.ok) return { ok: false, text: `The relay at ${base} answered ${res.status}.` };
-    const j = await res.json().catch(() => ({}));
-    return { ok: true, text: `Relay ${base} is up${j.name ? ` (${j.name})` : ""} — other devices can join.` };
-  } catch (e) {
-    return { ok: false, text: `Cannot reach the relay at ${base} (${e.message}).` };
-  }
-}
-
+/** Work out where this copy can meet other clients, and say so plainly.
+ *
+ *  A configured relay wins.  With nothing configured the page's *own*
+ *  origin is probed: when the site is served by `node server/relay.mjs
+ *  --static web` that origin is a relay, and using it is what lets two
+ *  different browsers on one machine find each other.  An origin that
+ *  does not answer as a relay is never used as one
+ *  (`Kant.Connectivity.effectiveRelay`). */
 async function refreshTransport() {
-  const r = await probeRelay(relayBase);
-  $("transport").innerHTML = r.ok
-    ? K.escapeHtml(r.text)
-    : `<span class="warn">${K.escapeHtml(r.text)}</span>`;
-  $("relaymsg").textContent = r.text;
+  reach = await D.resolveReachability({
+    configured: relayBase,
+    origin: location.origin,
+    log: LOG,
+  });
+  const used = D.effectiveRelay(reach);
+  const text = used
+    ? (reach.configured
+        ? `Relay ${used} is up — other devices can join.`
+        : `This page is served by a relay (${used}) — other browsers on this machine, ` +
+          "and other devices that can reach it, can join.")
+    : (reach.configured
+        ? `The relay at ${reach.configured} did not answer (${reach.probe?.reason ?? "?"}). ` +
+          "Nobody outside this browser can join."
+        : "No relay: two tabs of THIS browser will find each other, but a second " +
+          "browser or a second device will not. Serve the page with " +
+          "`node server/relay.mjs --static web`, or set `relay =` in kant.config.");
+  $("transport").innerHTML = used ? K.escapeHtml(text) : `<span class="warn">${K.escapeHtml(text)}</span>`;
+  $("relaymsg").textContent = text;
+  if (node) {
+    node.reach = reach;
+    node.relayBase = used;
+    node.client = used ? new N.RelayClient(used, { log: LOG }) : null;
+  }
+  renderDiag();
+  return reach;
 }
 
 $("btn-testrelay").onclick = async () => {
   relayBase = $("relay").value.trim();
-  if (node) { node.relayBase = relayBase; node.client = relayBase ? new N.RelayClient(relayBase) : null; }
   await refreshTransport();
   if (node) drawShare();
+};
+
+// ------------------------------------------------------ the diagnostics
+
+/** The current run, with the room secret and the invite withheld
+ *  (`Kant.Diagnostics.Log.share`). */
+function currentReport() {
+  if (node) return node.report({ browser: 1 });
+  const self = D.clientOf({ room: "", reach, bus: typeof BroadcastChannel === "function" });
+  return {
+    verdict: D.diagnose(self, { ...self, browser: 2 }),
+    room: "",
+    relay: D.effectiveRelay(reach),
+    events: LOG.share([]),
+    dropped: LOG.dropped,
+  };
+}
+
+function renderDiag() {
+  if (!$("verdict")) return;
+  const r = currentReport();
+  const bad = r.verdict !== "ok";
+  $("verdict").innerHTML =
+    `${bad ? '<span class="warn">' : ""}${K.escapeHtml(D.explain(r.verdict))}${bad ? "</span>" : ""}` +
+    `\nroom ${K.escapeHtml(r.room || "(none)")} · relay ${K.escapeHtml(r.relay || "(none)")}` +
+    ` · ${LOG.total} events${LOG.dropped ? ` (${LOG.dropped} dropped)` : ""}`;
+  const tail = LOG.events.slice(-40).map((e) =>
+    `${String(e.ms).padStart(6)}ms ${e.level.padEnd(5)} ${e.area.padEnd(6)} ${e.text}` +
+    `${e.detail ? `  |  ${e.detail}` : ""}`).join("\n");
+  $("diagtail").textContent = tail;
+}
+
+$("btn-diagcopy").onclick = async () => {
+  await copy(D.reportText(currentReport()));
+  $("diagmsg").textContent =
+    "copied — paste it anywhere; the room secret and the invite are not in it";
+};
+
+$("btn-diagsave").onclick = () => {
+  const blob = new Blob([D.reportText(currentReport())], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "kant-diagnostics.txt";
+  a.click();
+  URL.revokeObjectURL(url);
+  $("diagmsg").textContent = "saved as kant-diagnostics.txt";
+};
+
+// Sharing the run: the system share sheet if this device has one, the
+// clipboard otherwise — and, either way, the run cut into chat-sized
+// messages, because a chat window is a transport that always exists
+// (`Kant.ShareLog.chatParts`, `Kant.Handoff.logScript`).
+$("btn-diagshare").onclick = async () => {
+  const r = currentReport();
+  const text = D.reportText(r);
+  const steps = SL.logScript(100, "you", r);
+  const parts = SL.codes(steps);
+  $("diagparts").value = parts
+    .map((c, i) => `--- ${i + 1}/${parts.length} ---\n${c}`).join("\n");
+  let how = "copied";
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "kant-zk diagnostics", text });
+      how = "shared";
+    } else {
+      await copy(text);
+    }
+  } catch { await copy(text); }
+  $("diagshare").textContent =
+    `${how} — the room secret and the invite are not in it. ` +
+    `No chat that takes a whole run? Send the ${parts.length} message(s) below instead, ` +
+    "in any order; the other side pastes them into the diagnostics page.";
+  LOG.info("app", "the run was shared", `${how}, ${parts.length} part(s)`);
+};
+
+// Posting the run to the store: it becomes an ordinary content-addressed
+// post, with a witness and a link, held by this device
+// (`Kant.ShareLog.postLog`).
+$("btn-diagpost").onclick = async () => {
+  const r = currentReport();
+  const store = SL.loadStore(globalThis.localStorage);
+  const stamp = new Date().toISOString();
+  const { paste, witness, already } =
+    SL.postLog(store, r, { id: `run_${Date.now()}`, timestamp: stamp });
+  SL.saveStore(store, globalThis.localStorage);
+  const link = SL.logLink(hereUrl(), paste);
+  $("diagshare").innerHTML =
+    `${already ? "already in the store" : "posted to the store"} as ` +
+    `<code>${K.escapeHtml(witness.slice(0, 16))}…</code>\n${K.escapeHtml(link)}\n` +
+    `${store.entries.length} block(s) held on this device.`;
+  $("diagparts").value = SL.carryText(paste);
+  $("diagmsg").textContent =
+    "the block itself is in the box below: paste it into somebody else's " +
+    "\u201ccarry a block by hand\u201d box and they hold the very same run.";
+  LOG.info("app", "the run was posted to the store", witness.slice(0, 16));
+};
+
+$("btn-diagpage").onclick = () => {
+  const r = currentReport();
+  sessionStorage.setItem("kant-diag", D.renderReport(r));
+  window.open("./diag.html", "_blank");
 };
 
 // --------------------------------------------------------------- startup
@@ -562,7 +754,10 @@ $("btn-testrelay").onclick = async () => {
 (async () => {
   const loaded = await S.loadConfig();
   cfg = loaded.config;
+  LOG.info("config", loaded.ok === false ? "kant.config could not be read" : "kant.config read",
+    loaded.ok === false ? "using the defaults" : cfg.origin);
   relayBase = await S.loadRelay();
+  await refreshTransport();
   $("relay").value = relayBase;
   $("caption").value = cfg.caption;
   $("icon").value = cfg.picture;
@@ -572,7 +767,7 @@ $("btn-testrelay").onclick = async () => {
   if (frag && F.findInvite(frag)) joinFrom(frag, "joinmsg");
 
   render();
-  refreshTransport();
+  renderDiag();
 
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});

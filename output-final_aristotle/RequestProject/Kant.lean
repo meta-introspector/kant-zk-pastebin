@@ -27,6 +27,9 @@ This module re-exports the whole port.  The layers, bottom up:
 | `Kant.Onboarding` | screens, the camera switch, the guided first run | camera always stoppable, one link, tasks that finish |
 | `Kant.PlainText` | copying a post as readable text, with optional details | plain text out, footer separable, text survives the footer |
 | `Kant.Uucp` | the relay-free static sneakernet: DMs, tweets, bang paths | mailbag round trips, no news without a paste, relay redundancy, snapshot staleness |
+| `Kant.Connectivity` | where clients meet, and why they did not | the relay decision, linked-or-not, a verdict per failure |
+| `Kant.CardDebug` | what a pasted code is, and why two cards never connect | a card names no room, the report's own text classified, what does connect |
+| `Kant.Diagnostics` | the net/error log and the shareable run | bounded ordered log, exact round trip, no secrets shared |
 | `Kant.Credits` | serving credits | no overdraft, credit conservation |
 | `Kant.CodeMovie` | snippet playback | RLE, Gödel numbers, circuits |
 | `Kant.Pipeline` | the whole flow | end-to-end self-certifying round trip |
@@ -54,7 +57,12 @@ import RequestProject.Kant.Join
 import RequestProject.Kant.Onboarding
 import RequestProject.Kant.PlainText
 import RequestProject.Kant.Uucp
+import RequestProject.Kant.Connectivity
+import RequestProject.Kant.Diagnostics
+import RequestProject.Kant.CardDebug
 import RequestProject.Kant.Credits
 import RequestProject.Kant.CodeMovie
 import RequestProject.Kant.Pipeline
 import RequestProject.Kant.Demo
+import RequestProject.Kant.ShareLog
+import RequestProject.Kant.Handoff

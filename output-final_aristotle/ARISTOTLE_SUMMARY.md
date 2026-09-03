@@ -1,3 +1,106 @@
+# Summary of changes for run 92af095b-2fd0-4b15-8895-09fe2840d8dd
+Added the share-log button, the option to post the log to the store, and a mode that runs the whole system with no server at all — manual sharing steps through any chat.
+
+**In the app**
+- *More → Diagnostics* now has **Share the log** (uses the device's share sheet when there is one, the clipboard otherwise, and always also shows the run cut into numbered chat-sized messages) and **Post the log to the store** (the run becomes an ordinary content-addressed post with a witness and a link, held by this device; the block itself is shown so it can be handed on by hand).
+- `web/diag.html` gained the same two options — *Cut it into chat messages* and *Post it to the store* — and its "read somebody else's run" box now also accepts the numbered messages, pasted in any order.
+- New page `web/hand.html`, linked from the app: the whole system with the network removed. Pick a name and a passphrase, say something, copy your code, send it in any chat, paste theirs back — four steps and both sides hold the same conversation. Its last card takes a block, a bundle, or somebody's shared run and puts it in this device's store.
+- New module `web/kant-sharelog.mjs` carries the shared logic; the store is one bundle in local storage that every page of the app reads, so a run posted in one page is a block the others hold.
+
+**Proved in Lean** (`RequestProject/Kant/ShareLog.lean`, `RequestProject/Kant/Handoff.lean`; no `sorry`, only the standard axioms)
+- A shared run never quotes a secret and never carries the room, only an eight-character handle (`shared_no_secret`, `shareReport_room_ne`), and withholds nothing else (`shared_keeps`); the same for what the store holds and what arrives through a chat (`posted_no_secret`, `chat_no_secret`).
+- Posting the run: the address resolves, posting twice is a no-op, nothing already held is lost, it appears in the feed, it parses back to exactly the run shared, and two people with the same run post the same block.
+- The run cut into chat messages arrives intact, in any order, with every message inside a tweet and every character plain ASCII.
+- The manual mode: no step of any script the app can show needs a server (`script_serverless`, `serverless_all`); the four steps deliver each way and leave both sides displaying the same conversation (`run_agree`); saying something new and repeating them delivers it; a block or a whole run copied into a chat and pasted on the other side lands under exactly the address it left with (`carry_resolves`, `carry_agrees`).
+- Golden `#guard` vectors at the end of both modules are shared with the JavaScript.
+
+**Verification**: `lake build` clean over the whole project (8068 jobs), no `sorry`; all web suites pass, including the new `sharelog-test` (64 checks against the Lean vectors) and `handpage-test` (32 checks driving `hand.html`, which installs a `fetch` that throws and asserts at the end that it was never called — the page provably made no request to anything). Existing suites were extended: `page-test` 75, `diagpage-test` 34.
+
+The write-up is `docs/SHARE-LOG-AND-MANUAL-CHAT.md`; `README.md` points at it. Everything is committed.
+
+# Summary of changes for run e68780a9-7cf9-41da-93ce-af3aa543f835
+## Debugged. There are two separate reasons, and one answer about the log.
+
+### 1. Those are not two things — and a card cannot connect anything
+
+Both blocks you pasted are **byte-identical**, and both decode to one share card:
+
+| field | value |
+|---|---|
+| url | `https://kant.cicada71.net/#ff810f291f187b808a0183f83c0466874573ef5c4c6d7d9ed430c6f7d710f605` |
+| caption | `kant-zk-pastebin` |
+| picture | `./kant-logo.svg` |
+| alt | `the Kant pastebin logo` |
+
+(`6b7a63617264` is `kzcard`.) So there is one object here, shared twice — not two endpoints.
+
+More to the point, **a card is not a connection**. The system issues three codes and they are not interchangeable:
+
+| code | carries | can it connect two clients? |
+|---|---|---|
+| `kzcard:…` (share card) | page URL, caption, picture | **no** — names no room |
+| page link `<origin>#<64 hex>` | a content address | **no** — names no room |
+| `kzinvite:…` (invitation) | a relay + a secret whose digest is the room | **yes** |
+
+Nothing was failing in the connecting machinery, because nothing ever asked it to connect. To connect, use **Share → Invite someone to chat** on one device and let the other scan or paste that `kzinvite` code.
+
+### 2. Even a correct invitation cannot connect two devices on that deployment
+
+Checked live: `https://kant.cicada71.net/` serves the current build, its `kant.config` has `relay =` **blank**, and `/health` and `/room/<room>` both answer **404** — the origin is a plain static host, not a relay. With no relay configured and the origin not being one, there is no meeting point at all: two tabs of one browser still find each other, but two devices or two browsers provably cannot. Fix, one line in `web/kant.config`:
+
+```
+relay = https://relay.kant.cicada71.net       # a deployed server/relay.mjs or server/worker.js
+```
+
+Locally, `node server/relay.mjs --port 8787 --static web` makes the origin itself the relay. Reproduce the check with `node scripts/kant-debug.mjs --probe`.
+
+### 3. Where the log is
+
+There is no server-side log because on a static host no server is in the conversation. The run log is on your machine: the **Diagnostics** card at the bottom of the app (live tail, copy, save, kept across reloads), the full run at **`/diag.html`** — which is deployed on your site — and, if you run one, the relay's own `--log relay.log`.
+
+## What is now in the project
+
+**Proved in Lean** — `RequestProject/Kant/CardDebug.lean` (no `sorry`; only `propext`, `Classical.choice`, `Quot.sound`): `classify` (which of the three codes is this?) and `pair` (what two of them do together); `card_no_room` / `page_no_room`; `pair_not_connectable_of_card_left`/`_right`/`_of_page_left`; `pair_connectable_iff` (it takes two invitations, one room, one non-empty shared relay) and `connectable_linked` (such a pair really does link two clients); `configured_relay_links` (a reachable `relay =` links them anywhere) versus `static_deployment_stuck` (a blank one on a static origin cannot); `explain_injective` (six outcomes, six different sentences); and your exact text run through it — `userCard_classify`, `userCard_no_room`, `userCard_pair`, `userCard_not_connectable`, `userPageLink_classify`, `userCard_warnings`. Golden `#guard` vectors at the end are shared with the JavaScript.
+
+**Tooling**
+- `web/diag.html` → new **What is this code?** box: paste one code or two, get what each is, whether they can connect, and what to do instead.
+- `scripts/kant-debug.mjs` — the same from a terminal, plus `--probe` (does this deployment have any meeting point?) and `--where-is-the-log`.
+- `web/kant-carddebug.mjs` — the rules in the client; cached by the service worker.
+- The **join box** now names what you pasted instead of only refusing it: "That is a share card: … it names no room, so there is nothing in it to join."
+- One smaller finding: `picture = ./kant-logo.svg` is relative, so a card pasted anywhere off the site shows no logo — reported as `relative-picture`; use a full `https://` URL or a `data:` URI in `kant.config` if cards are meant to travel.
+
+**Verification**: `lake build` clean over the whole project (8066 jobs), no `sorry`; all web suites pass — `test`, `net-test` 32, `qr-test` 15, `site-test` 47, `uucp-test` 28, `wasm-test`, `flow-test` 85, `join-test` 14, `page-test` 62, `diag-test` 68, `diagpage-test` 25, and the new `carddebug-test` 73.
+
+The whole diagnosis, with the live probe results and the fix, is written up in `docs/CARD-DEBUG.md`; `README.md` and `docs/DIAGNOSTICS.md` point at it. Everything is committed.
+
+# Summary of changes for run 3b124247-b4af-4017-a352-bf384212d472
+## Why two clients on the same machine were not connecting
+
+Two *tabs* of one browser find each other over a `BroadcastChannel` with no server; two *browsers* (or a window and a private window, or two profiles) share nothing. `web/kant.config` ships with `relay =` empty, and the client refused to use any relay that was not written there — so on one machine there was **no transport at all** between them, and if the page had been served by `node server/relay.mjs --static web` the relay sitting right on the origin was ignored. On top of that, every transport failure was swallowed by bare `catch {}`, so nothing said why.
+
+## What is now in the project
+
+**The fix, specified and proved in Lean.** `RequestProject/Kant/Connectivity.lean` defines `effectiveRelay`: a configured relay that answers wins; otherwise the origin that served the page is used, but *only* if it really answers `/health` as a relay; never otherwise. Proved: `effectiveRelay_configured`, `effectiveRelay_selfHosted`, `effectiveRelay_needs_probe`, `two_browsers_one_machine_linked` (the user's case, now working), `two_browsers_one_machine_stuck` (the same case without the fix — proved to fail), `diagnose_eq_ok_iff` (the page says "ok" exactly when the two clients really can exchange a line), one verdict per failure mode, and `explain_injective` (six verdicts, six different sentences).
+
+**The log, specified and proved.** `RequestProject/Kant/Diagnostics.lean` models the run log as a bounded ring: `Log.add_length_le` (bounded), `Log.add_getLast` (the newest event is never the one dropped), `Log.add_total` (honest about drops), `parseEvent_printEvent` / `parseLog_renderLog` / `parseReport_renderReport` (a run written out reads back exactly), and `share_no_secret` / `share_clean` / `share_keeps` / `report_events_clean` (a shared run quotes no room secret and keeps everything else; rooms appear as an eight-character handle).
+
+**The client.** `web/kant-diag.mjs` transcribes both Lean modules and is pinned to golden vectors Lean computes. `web/kant-net.mjs` now logs every transport step — relay request URL/status/exception, socket open/close/error, whether `BroadcastChannel` exists, every ICE and data-channel state — and no `catch {}` remains. `web/index.html` keeps one log for the whole run (persisted to `localStorage`, previous run kept across a reload), captures uncaught errors and rejections, auto-detects a self-hosting origin, and has a Diagnostics card with the verdict, a live tail, and copy / save / open-the-page buttons.
+
+**The diagnostics page.** `web/diag.html` is standalone: verdict and what to do about it, the whole run as a table, *Run the checks on this machine* (probes origin and configured relay, `BroadcastChannel`, WebRTC), copy / save / copy-a-link (the run travels in the URL fragment), paste-or-open somebody else's run, and *Load the run from before the last reload*.
+
+**The relay.** `server/relay.mjs --log relay.log` writes every request (method, path with the room reduced to a handle, status, lines, duration), refusals, and socket lifecycle; `--quiet` for stdout.
+
+**A second bug found and fixed while testing:** with no relay in use the poll loop returned immediately and went straight round again — a spin that starves every timer on the page and floods the log thousands of times a second. It now idles and says "nothing to poll" once; `web/diag-test.mjs` checks both.
+
+## Verification
+
+`lake build` completes over the whole project (8065 jobs) with no `sorry`; the new theorems depend only on `propext`, `Classical.choice` and `Quot.sound`. All JS suites pass: `test`, `net-test` 32, `qr-test` 15, `site-test` 47, `uucp-test` 28, `wasm-test`, `flow-test` 85, `join-test` 14, `page-test` 58, `diag-test` 68 (including a real relay subprocess, self-hosting-origin discovery, a dead relay, a non-relay origin, and two clients chatting over the relay with the same-browser channel switched off), `diagpage-test` 19.
+
+Documentation: `docs/DIAGNOSTICS.md` (the bug, the relay rule, the log, the verdict table, the relay's log, and how to reproduce a two-browser session on one machine), plus new README sections and a `web/kant.config` note.
+
+To try it: `node server/relay.mjs --port 8787 --static web --log relay.log`, then open `http://localhost:8787/` in two different browsers — both Diagnostics cards should read `ok`.
+
+
 # Summary of changes for run c5a69e86-5748-4a3b-ae95-7e5a2b0cc0f9
 ## What you asked for
 

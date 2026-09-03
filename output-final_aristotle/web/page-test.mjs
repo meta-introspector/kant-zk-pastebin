@@ -75,12 +75,35 @@ globalThis.location = {
   pathname: "/kant/",
   protocol: "https:",
   hash: "",
+  href: "https://example.test/kant/",
 };
 Object.defineProperty(globalThis, "navigator", {
   configurable: true,
   value: { clipboard: { writeText: async (t) => { clipboard.last = t; } } },
 });
-globalThis.window = { speechSynthesis: null };
+const pageErrors = [];
+globalThis.window = {
+  speechSynthesis: null,
+  addEventListener: (kind, fn) => pageErrors.push([kind, fn]),
+  open: (u) => { opened.push(u); return null; },
+};
+const opened = [];
+const local = new Map();
+// A run left behind by an earlier visit, as a real browser would hold it.
+local.set("kant-diag-run",
+  "6b7a6c6f67::05:01:09:616e206561726c6965722072756e:");
+globalThis.localStorage = {
+  getItem: (k) => (local.has(k) ? local.get(k) : null),
+  setItem: (k, v) => local.set(k, v),
+};
+
+const session = new Map();
+globalThis.sessionStorage = {
+  getItem: (k) => (session.has(k) ? session.get(k) : null),
+  setItem: (k, v) => session.set(k, v),
+};
+globalThis.Blob = class { constructor(parts) { this.parts = parts; } };
+globalThis.URL = { createObjectURL: () => "blob:diag", revokeObjectURL: () => {} };
 globalThis.requestAnimationFrame = () => 0;
 globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
 
@@ -174,6 +197,24 @@ try {
   ok("junk does not join", $("s-join").shown);
   ok("...and says why", /no invite link/.test($("joinmsg").innerHTML));
 
+  // A share card pasted into the join box is named for what it is, rather
+  // than only refused (`Kant.CardDebug.classify`).
+  $("joinbox").value =
+    "kant-zk-pastebin\n" +
+    "https://kant.cicada71.net/#ff810f291f187b808a0183f83c0466874573ef5c4c6d7d9ed430c6f7d710f605\n" +
+    "6b7a63617264:68747470733a2f2f6b616e742e63696361646137312e6e65742f236666383130663239" +
+    "3166313837623830386130313833663833633034363638373435373365663563346336643764396564" +
+    "343330633666376437313066363035:6b616e742d7a6b2d706173746562696e:2e2f6b616e742d6c6f" +
+    "676f2e737667:746865204b616e7420706173746562696e206c6f676f";
+  $("btn-dojoin").click();
+  ok("a share card does not join", $("s-join").shown);
+  ok("...and is named as a share card", /share card/.test($("joinmsg").innerHTML));
+  ok("...saying it names no room", /names no room/.test($("joinmsg").innerHTML));
+  $("joinbox").value =
+    "https://kant.cicada71.net/#ff810f291f187b808a0183f83c0466874573ef5c4c6d7d9ed430c6f7d710f605";
+  $("btn-dojoin").click();
+  ok("a page link is named as a page link", /page link/.test($("joinmsg").innerHTML));
+
   // --------------------------------------------------------- the camera
   $("back").click();
   $("btn-scan").click();
@@ -197,6 +238,77 @@ try {
   ok("...along with the details", meta !== null && meta.link.includes("example.test"));
   await $("btn-copynotelink").onclick();
   ok("a link to the note is a page link", clipboard.last.startsWith("https://example.test/kant/#"));
+
+  // --------------------------------------------------------- diagnostics
+  //
+  // `web/kant-diag.mjs` and the two Lean modules behind it: the run is
+  // written down, the verdict is stated, and the whole thing can be shared
+  // without carrying the room secret.
+  const D = await import("./kant-diag.mjs");
+  const SL = await import("./kant-sharelog.mjs");
+  const K = await import("./kantzk.mjs");
+  ok("the verdict is on the page", $("verdict").innerHTML.length > 0);
+  ok("the verdict names the same-machine failure",
+    /only-this-browser|no-transport|no-room/.test($("verdict").innerHTML));
+  ok("the run is shown", $("diagtail").textContent.includes("ms"));
+  ok("the probe of this origin is in it",
+    /probe|relay/.test($("diagtail").textContent));
+  await $("btn-diagcopy").onclick();
+  ok("copying gives a readable run", clipboard.last.startsWith("kant-zk diagnostics"));
+  const shared = D.findReport(clipboard.last);
+  ok("...that reads back as a report", shared !== null && shared.events.length > 0);
+  ok("...whose events are in order",
+    shared.events.every((e, i) => i === 0 || shared.events[i - 1].seq < e.seq));
+  ok("...and which does not carry the invite", !clipboard.last.includes(link.split("#")[1]));
+  $("btn-diagsave").click();
+  ok("saving says so", /kant-diagnostics\.txt/.test($("diagmsg").textContent));
+
+  // Share the log: the clipboard on a device with no share sheet, plus the
+  // run cut into chat-sized messages for a conversation that takes nothing
+  // bigger (`Kant.ShareLog.chatParts`).
+  await $("btn-diagshare").onclick();
+  ok("sharing the log says what happened", /copied|shared/.test($("diagshare").textContent));
+  ok("...and hands over a readable run", clipboard.last.startsWith("kant-zk diagnostics"));
+  const partsText = $("diagparts").value.split(/^--- \d+\/\d+ ---$/m)
+    .map((s) => s.trim()).filter(Boolean);
+  ok("...cut into chat-sized messages", partsText.length > 0);
+  ok("...each of which fits in a tweet", partsText.every((p) => p.length <= 280));
+  ok("...and which reassemble into the run",
+    (SL.readChatParts(partsText)?.events?.length ?? 0) > 0);
+  ok("...still without the invite", !$("diagparts").value.includes(link.split("#")[1]));
+
+  // Post the log to the store: an ordinary content-addressed block.
+  $("btn-diagpost").click();
+  ok("posting the log gives it an address", /posted to the store/.test($("diagshare").innerHTML));
+  const posted = SL.loadStore(globalThis.localStorage);
+  ok("...held by this device", posted.entries.length === 1);
+  ok("...as the run", posted.entries[0].title === "the run so far");
+  ok("...which reads back", (SL.readPostedLog(posted.entries[0])?.events?.length ?? 0) > 0);
+  ok("...and can be carried by hand",
+    SL.carry(new K.Store(), $("diagparts").value).witness === posted.entries[0].witness);
+  ok("...and posting the same run again is a no-op",
+    SL.postLog(posted, SL.readPostedLog(posted.entries[0]),
+      { id: posted.entries[0].id, timestamp: posted.entries[0].timestamp }).already);
+  await new Promise((r) => setTimeout(r, 250));
+  ok("posting the run is itself written down",
+    $("diagtail").textContent.includes("posted to the store"));
+  $("btn-diagpage").click();
+  ok("the diagnostics page can be opened", opened.some((u) => String(u).includes("diag.html")));
+  ok("...with the run handed to it",
+    D.parseReport(session.get("kant-diag") ?? "") !== null);
+  // the run is written down on a timer, so give that timer its moment
+  const stored = () => (D.parseLog(local.get("kant-diag-run") ?? "") ?? []).length;
+  for (let i = 0; i < 40 && stored() <= 3; i += 1) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  ok("the run is written down as it happens", stored() > 3);
+  ok("the earlier run was kept, not overwritten",
+    (D.parseLog(local.get("kant-diag-previous") ?? "") ?? []).length === 1);
+  ok("...and the page says there was one",
+    /previous run/.test($("diagtail").textContent));
+  ok("the page listens for uncaught errors",
+    pageErrors.some(([k]) => k === "error") &&
+    pageErrors.some(([k]) => k === "unhandledrejection"));
 
   // ---------------------------------------------------------- the mute
   $("hush").click();
