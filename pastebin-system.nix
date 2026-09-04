@@ -653,11 +653,11 @@ in
           extraConfig = ''add_header Access-Control-Allow-Origin "*"; proxy_read_timeout 120s; proxy_send_timeout 120s;'';
         };
 
-        # ═══════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
         # Aristotle Projects — 27 static sites at /arist/
-        # Index:  /arist/  (pre-built by build-arist-index.py)
+        # Index:  /arist/
         # Sites:  /arist/<uuid>/
-        # ═══════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
         locations."/arist/" = {
           alias = "/mnt/data1/time-2026/05-may/07/arist/49cde238-502e-46e8-933a-29085ac44cd7/output-final_aristotle/arist-index-out/";
           extraConfig = ''
@@ -667,41 +667,40 @@ in
           '';
         };
 
-        # --- individual project sites ---
         locations."/arist/49cde238-502e-46e8-933a-29085ac44cd7/" = {
           alias = "/mnt/data1/time-2026/05-may/07/arist/49cde238-502e-46e8-933a-29085ac44cd7/output-final_aristotle/dist/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/ff756caf-8d26-4f8c-af96-981be215a038/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/ff756caf-8d26-4f8c-af96-981be215a038/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/ff756caf-8d26-4f8c-af96-981be215a038/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/e848cef2-9456-407a-880c-650aee38cf3d/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/e848cef2-9456-407a-880c-650aee38cf3d/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/e848cef2-9456-407a-880c-650aee38cf3d/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/97b722f5-7ccb-464b-a2ee-6990deb0ab46/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/97b722f5-7ccb-464b-a2ee-6990deb0ab46/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/97b722f5-7ccb-464b-a2ee-6990deb0ab46/output-final_aristotle/site/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/8ca0886c-8b67-49af-9cf7-7a87432ae2ef/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/8ca0886c-8b67-49af-9cf7-7a87432ae2ef/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/8ca0886c-8b67-49af-9cf7-7a87432ae2ef/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/8466c852-2184-4971-b3d9-8387832725d6/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/8466c852-2184-4971-b3d9-8387832725d6/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/8466c852-2184-4971-b3d9-8387832725d6/output-final_aristotle/site/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/7cf3d70a-7e0a-4b69-a15e-efb3f5f91b47/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/7cf3d70a-7e0a-4b69-a15e-efb3f5f91b47/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/7cf3d70a-7e0a-4b69-a15e-efb3f5f91b47/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/70faa4e4-6997-4577-8f8b-19157a44d1f4/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/70faa4e4-6997-4577-8f8b-19157a44d1f4/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/70faa4e4-6997-4577-8f8b-19157a44d1f4/output-final_aristotle/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/6eef2143-29e7-4daf-a720-88e8b2f10558/" = {
@@ -709,11 +708,11 @@ in
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/45f2b7a7-9f63-41cb-a1a9-2e7148fcc790/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/45f2b7a7-9f63-41cb-a1a9-2e7148fcc790/site/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/45f2b7a7-9f63-41cb-a1a9-2e7148fcc790/output-final_aristotle/site/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/320e10ec-82df-413a-8095-40696936945c/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/320e10ec-82df-413a-8095-40696936945c/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/320e10ec-82df-413a-8095-40696936945c/output-final_aristotle/site/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/1df7337a-6cf3-4369-9947-f6cd72758391/" = {
@@ -721,62 +720,63 @@ in
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/026c4360-d325-4310-915c-65ed42cb51fa/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/026c4360-d325-4310-915c-65ed42cb51fa/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/026c4360-d325-4310-915c-65ed42cb51fa/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/f9c6ef16-7a30-42a3-ae51-61cc4b026ef7/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/f9c6ef16-7a30-42a3-ae51-61cc4b026ef7/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/f9c6ef16-7a30-42a3-ae51-61cc4b026ef7/output-final_aristotle/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/f4bbd347-082b-4823-9d8b-d3fd9cdbc49f/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/f4bbd347-082b-4823-9d8b-d3fd9cdbc49f/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/f4bbd347-082b-4823-9d8b-d3fd9cdbc49f/output-final_aristotle/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/f070c0af-1098-4492-911d-5735d260182b/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/f070c0af-1098-4492-911d-5735d260182b/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/f070c0af-1098-4492-911d-5735d260182b/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/ae06ae06-2580-422a-8fc3-92aeaaca8762/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/ae06ae06-2580-422a-8fc3-92aeaaca8762/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/ae06ae06-2580-422a-8fc3-92aeaaca8762/output-final_aristotle/site/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/9cbef93a-b178-4e37-ad8b-d0015f5c6320/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/9cbef93a-b178-4e37-ad8b-d0015f5c6320/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/9cbef93a-b178-4e37-ad8b-d0015f5c6320/output-final_aristotle/site/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/8c581d03-4852-4bef-97f2-52da8b6ddd9c/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/8c581d03-4852-4bef-97f2-52da8b6ddd9c/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/8c581d03-4852-4bef-97f2-52da8b6ddd9c/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/7b8ed53e-3e05-436e-b2b5-6f4ea15dc081/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/7b8ed53e-3e05-436e-b2b5-6f4ea15dc081/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/7b8ed53e-3e05-436e-b2b5-6f4ea15dc081/output-final_aristotle/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/5e8b853a-1adc-404c-a762-f694d2c8a4cf/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/5e8b853a-1adc-404c-a762-f694d2c8a4cf/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/5e8b853a-1adc-404c-a762-f694d2c8a4cf/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/432c5102-a632-421f-bef9-ff66365d59eb/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/432c5102-a632-421f-bef9-ff66365d59eb/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/432c5102-a632-421f-bef9-ff66365d59eb/output-final_aristotle/site/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/20ce677d-de2f-498b-9f6a-8f84d57375f2/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/20ce677d-de2f-498b-9f6a-8f84d57375f2/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/20ce677d-de2f-498b-9f6a-8f84d57375f2/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/01cf5ff3-cc71-4aef-8b74-1644d23da7de/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/01cf5ff3-cc71-4aef-8b74-1644d23da7de/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/01cf5ff3-cc71-4aef-8b74-1644d23da7de/output-final_aristotle/site/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/d79d4cfd-1c60-40fc-ae16-bb0498953ec1/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/d79d4cfd-1c60-40fc-ae16-bb0498953ec1/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/d79d4cfd-1c60-40fc-ae16-bb0498953ec1/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
         locations."/arist/25ed1bd0-03e5-404a-8af0-7348190495c8/" = {
-          alias = "/mnt/data1/time-2026/05-may/07/arist/25ed1bd0-03e5-404a-8af0-7348190495c8/output-final_aristotle/dist/";
+          alias = "/mnt/data1/time-2026/05-may/07/arist/25ed1bd0-03e5-404a-8af0-7348190495c8/output-final_aristotle/web/";
           extraConfig = ''index index.html; try_files $uri $uri/ =404; add_header Cache-Control "public, max-age=3600";'';
         };
-        locations."/notebooklm/" = {
+
+                locations."/notebooklm/" = {
           alias = "/var/www/${domain}/notebooklm/";
           extraConfig = ''autoindex on; autoindex_exact_size off; charset utf-8; add_header Cache-Control "no-cache, must-revalidate, max-age=0"; expires -1;'';
         };
