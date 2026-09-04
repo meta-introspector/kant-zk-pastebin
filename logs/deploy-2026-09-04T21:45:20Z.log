@@ -1,0 +1,4 @@
+[2026-09-04T21:45:20Z] Building system-manager config...
+warning: Git tree '/home/mdupont/projects/system-manager' is dirty
+error: flake 'git+file:///home/mdupont/projects/system-manager' does not provide attribute 'packages.x86_64-linux.all-services', 'legacyPackages.x86_64-linux.all-services' or 'all-services'
+[2026-09-04T21:45:23Z] ERROR: system-manager config build failed
