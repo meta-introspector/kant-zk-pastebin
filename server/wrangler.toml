@@ -12,8 +12,8 @@ class_name = "Room"
 tag = "v1"
 new_sqlite_classes = ["Room"]
 
-# Optional: serve the browser client from the same origin, so the page and
+# Serve the browser client from the same origin, so the page and
 # its relay share a host and no CORS is needed.
-# [assets]
-# directory = "../web"
-# binding = "ASSETS"
+[assets]
+directory = "../web"
+binding = "ASSETS"
