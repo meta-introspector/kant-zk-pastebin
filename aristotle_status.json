@@ -1,6 +1,14 @@
 {
+  "can_have_declarations": true,
   "created_at": "2026-09-02T01:35:43.395437",
   "description": "kant-zk-pastebin",
+  "github_info": null,
   "has_files": true,
-  "has_input": false
+  "has_input": false,
+  "last_updated": "2026-09-04T00:28:40.308766",
+  "latest_run_status": "COMPLETE_WITH_ERRORS",
+  "project_id": "6f91c03d-87e8-4c6a-8d3f-de39edee2f6d",
+  "read_only": false,
+  "sharing_enabled": 1,
+  "status": 2
 }
