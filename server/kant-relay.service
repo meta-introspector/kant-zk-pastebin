@@ -6,20 +6,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=kantzk
-Group=kantzk
-WorkingDirectory=/opt/kant-zk-pastebin
-ExecStart=/usr/bin/node /opt/kant-zk-pastebin/server/relay.mjs --port 8787 --host 127.0.0.1 --static /opt/kant-zk-pastebin/web
+User=mdupont
+Group=mdupont
+WorkingDirectory=/mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d
+ExecStart=/usr/bin/node /mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d/server/relay.mjs --port 8787 --host 127.0.0.1 --static /mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d/web
 Restart=on-failure
 RestartSec=2
 
-# The relay keeps everything in memory and needs nothing from the disk
-# beyond the static files it serves.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadOnlyPaths=/opt/kant-zk-pastebin
+ReadOnlyPaths=/mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d
 MemoryMax=512M
 
 [Install]
