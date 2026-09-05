@@ -37,19 +37,38 @@ const json = (obj, status = 200) =>
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const start = Date.now();
 
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+    if (request.method === "OPTIONS") {
+      console.log("OPTIONS", request.url);
+      return new Response(null, { status: 204, headers: CORS });
+    }
 
     if (url.pathname === "/health") {
+      console.log("HEALTH", request.url);
       return json({ ok: true, name: "kant-zk-relay", version: VERSION, platform: "cloudflare" });
     }
 
     const m = url.pathname.match(/^\/(room|ws)\/([^/]+)$/);
-    if (!m) return json({ ok: false, error: "not found" }, 404);
+    if (!m) {
+      console.log("404", request.url, "method=", request.method);
+      return json({ ok: false, error: "not found" }, 404);
+    }
 
-    const room = decodeURIComponent(m[2]);
+    const [, kind, roomRaw] = m;
+    const room = decodeURIComponent(roomRaw);
     const id = env.ROOMS.idFromName(room);
-    return env.ROOMS.get(id).fetch(request);
+    console.log("ROUTE", kind, room, "url=", request.url, "method=", request.method);
+
+    try {
+      const resp = await env.ROOMS.get(id).fetch(request);
+      const ms = Date.now() - start;
+      console.log("RESPONSE", kind, room, "status=", resp.status, "ms=", ms);
+      return resp;
+    } catch (e) {
+      console.log("ERROR", kind, room, "url=", request.url, "err=", e?.message ?? e);
+      return json({ ok: false, error: String(e?.message ?? e) }, 500);
+    }
   },
 };
 
@@ -65,16 +84,20 @@ export class Room {
       const kept = await this.state.storage.get("log");
       if (kept) { this.base = kept.base; this.lines = kept.lines; }
     });
+    console.log("ROOM_INIT", "loaded=", this.lines.length, "base=", this.base);
   }
 
   async persist() {
     await this.state.storage.put("log", { base: this.base, lines: this.lines });
+    console.log("ROOM_PERSIST", "lines=", this.lines.length, "base=", this.base);
   }
 
   fetchFrom(cursor) {
     const end = this.base + this.lines.length;
     const from = Math.max(cursor, this.base);
-    return { cursor: end, lines: this.lines.slice(from - this.base), truncated: cursor < this.base };
+    const out = { cursor: end, lines: this.lines.slice(from - this.base), truncated: cursor < this.base };
+    console.log("ROOM_FETCH", "cursor=", cursor, "->", out.cursor, "lines=", out.lines.length, "truncated=", out.truncated);
+    return out;
   }
 
   append(lines) {
@@ -84,6 +107,7 @@ export class Room {
       this.lines.splice(0, drop);
       this.base += drop;
     }
+    console.log("ROOM_APPEND", "accepted=", lines.length, "total=", this.lines.length, "base=", this.base);
     for (const w of [...this.waiters]) { this.waiters.delete(w); w(); }
     for (const s of [...this.sockets]) {
       const out = this.fetchFrom(s.cursor);
@@ -106,18 +130,28 @@ export class Room {
   async fetch(request) {
     await this.loaded;
     const url = new URL(request.url);
+    const started = Date.now();
 
-    if (url.pathname.startsWith("/ws/")) return this.upgrade(request, url);
+    if (url.pathname.startsWith("/ws/")) {
+      console.log("ROOM_UPGRADE", url.pathname);
+      return this.upgrade(request, url);
+    }
 
     if (request.method === "POST") {
       const body = await request.text();
-      if (body.length > MAX_BODY) return json({ ok: false, error: "body too large" }, 413);
+      if (body.length > MAX_BODY) {
+        console.log("ROOM_POST", "413 body too large", body.length);
+        return json({ ok: false, error: "body too large" }, 413);
+      }
       const lines = body.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
       if (lines.some((l) => l.length > MAX_LINE)) {
+        console.log("ROOM_POST", "413 line too long");
         return json({ ok: false, error: "line too long" }, 413);
       }
       const cursor = this.append(lines);
       await this.persist();
+      const ms = Date.now() - started;
+      console.log("ROOM_POST", "cursor=", cursor, "accepted=", lines.length, "ms=", ms);
       return json({ ok: true, cursor, accepted: lines.length });
     }
 
@@ -126,12 +160,16 @@ export class Room {
       const wait = Math.min(Number(url.searchParams.get("wait") ?? 0) || 0, 30);
       let out = this.fetchFrom(cursor);
       if (wait > 0 && out.lines.length === 0) {
+        console.log("ROOM_GET", "wait=", wait, "cursor=", cursor);
         await this.wait(wait * 1000);
         out = this.fetchFrom(cursor);
       }
+      const ms = Date.now() - started;
+      console.log("ROOM_GET", "cursor=", cursor, "->", out.cursor, "lines=", out.lines.length, "ms=", ms);
       return json({ ok: true, ...out });
     }
 
+    console.log("ROOM_METHOD_NOT_ALLOWED", request.method, url.pathname);
     return json({ ok: false, error: "method not allowed" }, 405);
   }
 
