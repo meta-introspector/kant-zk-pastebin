@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 WEB_DIR="$SCRIPT_DIR/web"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+PROJECT_DIR="$SCRIPT_DIR"
 SERVER_DIR="$PROJECT_DIR/server"
 
 LOG_DIR="$SCRIPT_DIR/logs"
