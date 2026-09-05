@@ -2,12 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-PROJECT_DIR="$SCRIPT_DIR"
+WEB_DIR="$SCRIPT_DIR/web"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 SERVER_DIR="$PROJECT_DIR/server"
-WEB_DIR="$PROJECT_DIR/web"
-SYSTEM_MANAGER_DIR="$HOME/projects/system-manager"
 
-LOG_DIR="$PROJECT_DIR/logs"
+LOG_DIR="$SCRIPT_DIR/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LOG_FILE="${LOG_DIR}/deploy-${TIMESTAMP}.log"
 
@@ -27,108 +26,61 @@ log_err() {
   echo "[$ts] ERROR: $msg" | tee -a "$LOG_FILE" >&2
 }
 
-run_sudo() {
-  if [ "${EUID}" -eq 0 ]; then
-    "$@"
-  else
-    sudo "$@"
-  fi
-}
-
 usage() {
   cat <<USAGE
-Usage: $0 [deploy|restart|switch]
+Usage: $0 [pages|worker|all] 
 
 Commands:
-  deploy    Full deploy: git commit, system-manager switch, restart services
-  restart   Restart relay + nginx only
-  switch    Build + activate system-manager config with sudo
+  pages      Deploy static frontend to Cloudflare Pages
+  worker     Deploy backend Worker to Cloudflare
+  all        Deploy both pages and worker
 USAGE
 }
 
-deploy() {
+deploy_pages() {
+  log "Deploying static frontend to Cloudflare Pages..."
+  cd "$WEB_DIR"
+  
+  log "Creating deployment bundle..."
+  local tmpdir
+  tmpdir="$(mktemp -d)"
+  cp -r "$WEB_DIR"/* "$tmpdir/"
+  
+  log "Deploying to Cloudflare Pages..."
+  nix develop -c npx wrangler pages project create kant-zk-pastebin --production-branch main 2>/dev/null || true
+  nix develop -c npx wrangler pages deploy "$tmpdir" --project-name kant-zk-pastebin --branch main >> "$LOG_FILE" 2>&1
+  
+  rm -rf "$tmpdir"
+  log "Frontend deployed"
+}
+
+deploy_worker() {
+  log "Deploying backend Worker to Cloudflare..."
+  cd "$SERVER_DIR"
+  
+  nix develop -c npx wrangler deploy >> "$LOG_FILE" 2>&1
+  log "Backend deployed"
+}
+
+deploy_all() {
   log "=== Deploy started ==="
   log "Project: $PROJECT_DIR"
-
-  log "Step 1: Git commit"
-  cd "$PROJECT_DIR"
-  git add -A
-  git commit -m "deploy: auto-commit before deploy $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
-  log "Local commit verified: $(git rev-parse HEAD)"
-
-  log "Step 2: System-manager switch"
-  switch_system_manager
-
-  log "Step 3: Restart services"
-  run_sudo systemctl daemon-reload >> "$LOG_FILE" 2>&1 || true
-  run_sudo systemctl restart kant-zk-relay.service >> "$LOG_FILE" 2>&1 || log "WARNING: kant-zk-relay restart failed"
-  run_sudo systemctl restart nginx.service >> "$LOG_FILE" 2>&1 || log "WARNING: nginx restart failed"
-
-  log "Step 4: Verify"
-  verify
-
+  
+  deploy_pages
+  deploy_worker
+  
   log "=== Deploy complete ==="
 }
 
-switch_system_manager() {
-  log "Building system-manager config..."
-  cd "$SYSTEM_MANAGER_DIR"
-  
-  STORE_PATH="$(nix build --impure .#systemConfigs.all-services --no-link --json 2>>"$LOG_FILE" | jq -r '.[0].outputs.out')" || {
-    log_err "system-manager config build failed"
-    exit 1
-  }
-  log "Built: $STORE_PATH"
-
-  if [ ! -x "$STORE_PATH/bin/activate" ]; then
-    log_err "activation script not found at $STORE_PATH/bin/activate"
-    exit 1
-  fi
-
-  log "Activating (requires sudo)..."
-  run_sudo "$STORE_PATH/bin/activate" >> "$LOG_FILE" 2>&1 || {
-    log_err "system-manager activation failed"
-    exit 1
-  }
-  log "Activation OK"
-}
-
-restart() {
-  log "=== Restart ==="
-  run_sudo systemctl daemon-reload >> "$LOG_FILE" 2>&1 || true
-  run_sudo systemctl restart kant-zk-relay.service >> "$LOG_FILE" 2>&1 || log "WARNING: kant-zk-relay restart failed"
-  run_sudo systemctl restart nginx.service >> "$LOG_FILE" 2>&1 || log "WARNING: nginx restart failed"
-  verify
-  log "=== Restart complete ==="
-}
-
-verify() {
-  log "Verifying services..."
-  for svc in kant-zk-relay nginx; do
-    if run_sudo systemctl is-active --quiet "$svc.service" 2>/dev/null; then
-      log "  ✅ $svc.service"
-    else
-      log "  ⚠️  $svc.service not active"
-    fi
-  done
-
-  log "Verifying relay endpoint..."
-  if curl -sf http://127.0.0.1:8787/health > /dev/null 2>&1; then
-    log "  ✅ Relay health: $(curl -s http://127.0.0.1:8787/health)"
-  else
-    log "  ⚠️  Relay not responding on 8787"
-  fi
-}
-
-case "${1:-deploy}" in
-  deploy)
-    deploy
+case "${1:-pages}" in
+  pages)
+    deploy_pages
     ;;
-  restart)
-    restart
+  worker)
+    deploy_worker
     ;;
-  switch)
-    switch_system_manager
+  all)
+    deploy_all
     ;;
   -h|--help|help)
     usage

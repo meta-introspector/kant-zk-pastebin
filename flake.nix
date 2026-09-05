@@ -25,8 +25,7 @@
 
         packages = {
           inherit nodejs;
-          wrangler = wrangler;
-          default = wrangler;
+          default = nodejs;
         };
       }
     );
