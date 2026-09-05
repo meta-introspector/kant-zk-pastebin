@@ -225,12 +225,9 @@ function queueDiagRender() {
   setTimeout(() => { diagPending = false; renderDiag(); }, 120);
 }
 
-const LOG = new D.DiagLog({ cap: 3000, onEvent: () => queueDiagRender() });
-// The run before this one is kept, because a crash is exactly when the log
-// matters; this one is written down as it happens, so a reload does not
-// lose it either.
+const LOG = new D.DiagLog({ cap: 500, onEvent: () => queueDiagRender() });
 const PREVIOUS = D.rotateStoredRun(globalThis.localStorage);
-LOG.persist("kant-diag-run", globalThis.localStorage);
+LOG.persist("kant-diag-run", globalThis.localStorage, { every: 2000 });
 LOG.info("app", "page opened", location.href.split("#")[0]);
 if (PREVIOUS.length) {
   LOG.info("app", `the previous run had ${PREVIOUS.length} events`,

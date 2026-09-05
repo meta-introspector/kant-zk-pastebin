@@ -845,7 +845,9 @@ export class KantNode {
         failures = 0;
       } catch (e) {
         failures += 1;
-        this.log.error("relay", `polling failed (${failures} in a row)`, e);
+        if (failures <= 3 || failures % 5 === 0) {
+          this.log.error("relay", `polling failed (${failures} in a row)`, e);
+        }
         await sleep(Math.min(interval * failures, 15000));
       }
       // Always yield, even when the relay answers at once: a long poll that
