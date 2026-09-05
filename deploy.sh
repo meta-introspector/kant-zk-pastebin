@@ -57,7 +57,7 @@ deploy_pages() {
   
   log "Deploying to Cloudflare Pages..."
   nix develop -c npx wrangler pages project create kant-zk-pastebin --production-branch main 2>/dev/null || true
-  nix develop -c npx wrangler pages deploy "$tmpdir" --project-name kant-zk-pastebin --branch main >> "$LOG_FILE" 2>&1
+  nix develop -c npx wrangler pages deploy "$tmpdir" --project-name kant-zk-pastebin --branch main --commit-dirty=true >> "$LOG_FILE" 2>&1
   
   rm -rf "$tmpdir"
   log "Frontend deployed"
