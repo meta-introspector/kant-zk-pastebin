@@ -231,6 +231,30 @@ export function readCard(doc) {
 /** The bare code for a URL, without caption or picture. */
 export const urlQrSvg = (url, opts = {}) => qrSvg(qrEncode(url), opts);
 
+/** Render a card as a PNG blob. */
+export async function cardPng(k, qr, { scale = 8, border = 4, dark = "#000", light = "#fff" } = {}) {
+  const svgStr = cardSvg(k, qr, { scale, border, dark, light });
+  const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(resolve, "image/png");
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("failed to load card SVG for PNG export"));
+    };
+    img.src = url;
+  });
+}
+
 // ----------------------------------------------------------------- chat
 
 /** A card for a chat that carries nothing but text. */

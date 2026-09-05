@@ -448,17 +448,22 @@ $("btn-copycard").onclick = async () => {
   dispatch({ type: "copyLink" });
 };
 
-$("btn-savecode").onclick = () => {
+$("btn-savecode").onclick = async () => {
   if (!node) return;
-  const svg = F.inviteCardSvg(effectiveConfig(), dress(), currentInvite(),
-    { scale: 8, border: 4, dark: "#000", light: "#fff" });
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "kant-invite.svg";
-  a.click();
-  URL.revokeObjectURL(url);
-  $("sharestatus").textContent = "saved — the picture carries the link, the words and the icon";
+  try {
+    const card = F.inviteCard(effectiveConfig(), dress(), currentInvite());
+    const qr = S.qrEncode(card.url);
+    const blob = await S.cardPng(card, qr, { scale: 8, border: 4, dark: "#000", light: "#fff" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "kant-invite.png";
+    a.click();
+    URL.revokeObjectURL(url);
+    $("sharestatus").textContent = "saved — the picture carries the link, the words and the icon";
+  } catch (e) {
+    $("sharestatus").textContent = "save failed: " + e.message;
+  }
 };
 
 for (const id of ["caption", "icon"]) $(id).oninput = () => { if (node) drawShare(); };
