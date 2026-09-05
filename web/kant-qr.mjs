@@ -385,6 +385,29 @@ export function qrDraw(canvas, qr, { scale = 4, border = 4, dark = "#000", light
   return canvas;
 }
 
+/** Export a QR matrix as a PNG blob. */
+export async function qrPng(qr, { scale = 4, border = 4, dark = "#000", light = "#fff" } = {}) {
+  const dim = (qr.size + 2 * border) * scale;
+  const canvas = document.createElement("canvas");
+  canvas.width = dim;
+  canvas.height = dim;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = light;
+  ctx.fillRect(0, 0, dim, dim);
+  ctx.fillStyle = dark;
+  for (let r = 0; r < qr.size; r++) for (let c = 0; c < qr.size; c++) {
+    if (qr.modules[r][c] === 1) ctx.fillRect((c + border) * scale, (r + border) * scale, scale, scale);
+  }
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+/** Copy a QR matrix to clipboard as PNG. */
+export async function qrCopyPng(qr, opts = {}) {
+  const blob = await qrPng(qr, opts);
+  if (!navigator.clipboard || !navigator.clipboard.write) throw new Error("clipboard not available");
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+}
+
 /** A compact fingerprint of a matrix, for tests. */
 export function qrFingerprint(qr) {
   let h = 0x811c9dc5;

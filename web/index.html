@@ -93,9 +93,11 @@
     </div>
     <input id="icon" />
     <div id="qr"></div>
+    <canvas id="qr-canvas" style="display:none"></canvas>
     <div class="meta" id="qrmeta"></div>
     <button class="ghost" id="btn-savecode">Save the code as a picture</button>
     <button class="ghost" id="btn-copycard">Copy the code as text</button>
+    <button class="ghost" id="btn-copyqr">Copy QR as PNG</button>
   </div>
   <div class="meta" id="sharestatus"></div>
 </section>
@@ -187,7 +189,7 @@
     <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Everything else</h2>
     <p><a href="./lab.html">Open the workbench</a> — the pastebin, stego pictures,
        the sneakernet, credits, code movies, the wasm kernel.</p>
-    <p><a href="../docs/UX-FLOW.md">How this flow is put together</a></p>
+    <p><a href="./docs/UX-FLOW.md">How this flow is put together</a></p>
   </div>
 </section>
 
@@ -208,6 +210,7 @@ import * as F from "./kant-flow.mjs";
 import * as D from "./kant-diag.mjs";
 import * as C from "./kant-carddebug.mjs";
 import * as SL from "./kant-sharelog.mjs";
+import { qrDraw, qrPng, qrCopyPng } from "./kant-qr.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -364,10 +367,14 @@ function dress() {
 
 /** The one link and the one code — the code being the link, dressed with the
  *  chosen picture and the chosen words (`Kant.InviteCard`). */
+let currentQr = null;
+
 function drawShare() {
   const link = inviteLink();
   $("link").value = link;
   try {
+    const card = F.inviteCard(effectiveConfig(), dress(), currentInvite());
+    currentQr = S.qrEncode(card.url);
     const svg = F.inviteCardSvg(effectiveConfig(), dress(), currentInvite(),
       { scale: 6, border: 4, dark: "#0f0", light: "#000" });
     $("qr").innerHTML = svg;
@@ -375,6 +382,7 @@ function drawShare() {
       `the code carries the whole link (${link.length} characters), ` +
       `so any camera app can open it — not just this one`;
   } catch (e) {
+    currentQr = null;
     $("qr").innerHTML = "";
     $("qrmeta").textContent =
       `the link is too long for one code (${e.message}) — send it as text instead`;
@@ -448,17 +456,30 @@ $("btn-copycard").onclick = async () => {
   dispatch({ type: "copyLink" });
 };
 
-$("btn-savecode").onclick = () => {
-  if (!node) return;
-  const svg = F.inviteCardSvg(effectiveConfig(), dress(), currentInvite(),
-    { scale: 8, border: 4, dark: "#000", light: "#fff" });
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "kant-invite.svg";
-  a.click();
-  URL.revokeObjectURL(url);
-  $("sharestatus").textContent = "saved — the picture carries the link, the words and the icon";
+$("btn-copyqr").onclick = async () => {
+  if (!currentQr) return;
+  try {
+    await qrCopyPng(currentQr, { scale: 8, border: 4, dark: "#000", light: "#fff" });
+    $("sharestatus").textContent = "QR code copied as PNG";
+  } catch (e) {
+    $("sharestatus").textContent = "copy failed: " + e.message;
+  }
+};
+
+$("btn-savecode").onclick = async () => {
+  if (!currentQr) return;
+  try {
+    const blob = await qrPng(currentQr, { scale: 8, border: 4, dark: "#000", light: "#fff" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "kant-invite.png";
+    a.click();
+    URL.revokeObjectURL(url);
+    $("sharestatus").textContent = "saved — the picture carries the link, the words and the icon";
+  } catch (e) {
+    $("sharestatus").textContent = "save failed: " + e.message;
+  }
 };
 
 for (const id of ["caption", "icon"]) $(id).oninput = () => { if (node) drawShare(); };
