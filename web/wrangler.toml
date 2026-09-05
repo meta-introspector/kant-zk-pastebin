@@ -1,0 +1,5 @@
+name = "kant-zk-pastebin"
+compatibility_date = "2024-01-01"
+
+[pages]
+production_branch = "main"
