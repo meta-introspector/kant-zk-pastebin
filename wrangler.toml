@@ -1,0 +1,7 @@
+name = "kant-zk-pastebin"
+compatibility_date = "2024-01-01"
+account_id = "0ceffbadd0a04623896f5317a1e40d94"
+
+[pages]
+production_branch = "main"
+pages_build_output_dir = "web"
