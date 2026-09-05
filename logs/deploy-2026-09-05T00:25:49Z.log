@@ -1,4 +1,0 @@
-[2026-09-05T00:25:49Z] === Deploy started ===
-[2026-09-05T00:25:49Z] Project: /home/mdupont/projects
-[2026-09-05T00:25:49Z] Deploying static frontend to Cloudflare Pages...
-[2026-09-05T00:25:49Z] ERROR: wrangler not found. Install with: npm install -g wrangler
