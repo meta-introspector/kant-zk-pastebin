@@ -208,6 +208,7 @@ import * as F from "./kant-flow.mjs";
 import * as D from "./kant-diag.mjs";
 import * as C from "./kant-carddebug.mjs";
 import * as SL from "./kant-sharelog.mjs";
+import { qrEncode } from "./kant-qr.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -452,7 +453,7 @@ $("btn-savecode").onclick = async () => {
   if (!node) return;
   try {
     const card = F.inviteCard(effectiveConfig(), dress(), currentInvite());
-    const qr = S.qrEncode(card.url);
+    const qr = qrEncode(card.url);
     const blob = await S.cardPng(card, qr, { scale: 8, border: 4, dark: "#000", light: "#fff" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
