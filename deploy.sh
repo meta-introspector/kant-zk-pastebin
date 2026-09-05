@@ -41,6 +41,15 @@ deploy_pages() {
   log "Deploying static frontend to Cloudflare Pages..."
   cd "$WEB_DIR"
   
+  if [ -f "$HOME/.cloudflare" ]; then
+    export CLOUDFLARE_API_TOKEN="$(cat "$HOME/.cloudflare" | tr -d '\n')"
+  fi
+  
+  if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+    log_err "CLOUDFLARE_API_TOKEN not set. Skipping Cloudflare Pages deploy."
+    return 0
+  fi
+  
   log "Creating deployment bundle..."
   local tmpdir
   tmpdir="$(mktemp -d)"
@@ -57,6 +66,15 @@ deploy_pages() {
 deploy_worker() {
   log "Deploying backend Worker to Cloudflare..."
   cd "$SERVER_DIR"
+  
+  if [ -f "$HOME/.cloudflare" ]; then
+    export CLOUDFLARE_API_TOKEN="$(cat "$HOME/.cloudflare" | tr -d '\n')"
+  fi
+  
+  if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+    log_err "CLOUDFLARE_API_TOKEN not set. Skipping Cloudflare Worker deploy."
+    return 0
+  fi
   
   nix develop -c npx wrangler deploy >> "$LOG_FILE" 2>&1
   log "Backend deployed"
