@@ -1,0 +1,13 @@
+[2026-09-05T00:27:09Z] === Deploy started ===
+[2026-09-05T00:27:09Z] Project: /home/mdupont/projects
+[2026-09-05T00:27:09Z] Deploying static frontend to Cloudflare Pages...
+[2026-09-05T00:27:09Z] Creating deployment bundle...
+[2026-09-05T00:27:09Z] Deploying to Cloudflare Pages...
+
+ ⛅️ wrangler 4.129.0
+────────────────────
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mIn a non-interactive environment, it's necessary to set a CLOUDFLARE_API_TOKEN environment variable for wrangler to work. Please go to https://developers.cloudflare.com/fundamentals/api/get-started/create-token/ for instructions on how to create an api token, and assign its value to CLOUDFLARE_API_TOKEN.[0m
+
+
+🪵  Logs were written to "/home/mdupont/.config/.wrangler/logs/wrangler-2026-09-05_00-27-11_165.log"
