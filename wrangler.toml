@@ -4,4 +4,4 @@ account_id = "0ceffbadd0a04623896f5317a1e40d94"
 
 [pages]
 production_branch = "main"
-pages_build_output_dir = "."
+pages_build_output_dir = "web"

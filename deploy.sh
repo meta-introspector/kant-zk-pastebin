@@ -39,7 +39,7 @@ USAGE
 
 deploy_pages() {
   log "Deploying static frontend to Cloudflare Pages..."
-  cd "$WEB_DIR"
+  cd "$PROJECT_DIR"
   
   if [ -f "$HOME/.cloudflare" ]; then
     export CLOUDFLARE_API_TOKEN="$(cat "$HOME/.cloudflare" | tr -d '\n')"
@@ -50,16 +50,10 @@ deploy_pages() {
     return 0
   fi
   
-  log "Creating deployment bundle..."
-  local tmpdir
-  tmpdir="$(mktemp -d)"
-  cp -r "$WEB_DIR"/* "$tmpdir/"
-  
-  log "Deploying to Cloudflare Pages..."
+  log "Deploying web/ directory to Cloudflare Pages..."
   nix develop -c npx wrangler pages project create kant-zk-pastebin --production-branch main 2>/dev/null || true
-  nix develop -c npx wrangler pages deploy "$tmpdir" --project-name kant-zk-pastebin --branch main --commit-dirty=true >> "$LOG_FILE" 2>&1
+  nix develop -c npx wrangler pages deploy "$PROJECT_DIR" --project-name kant-zk-pastebin --branch main --commit-dirty=true >> "$LOG_FILE" 2>&1
   
-  rm -rf "$tmpdir"
   log "Frontend deployed"
 }
 
