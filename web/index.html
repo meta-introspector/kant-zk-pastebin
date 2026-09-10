@@ -93,9 +93,11 @@
     </div>
     <input id="icon" />
     <div id="qr"></div>
+    <canvas id="qr-canvas" style="display:none"></canvas>
     <div class="meta" id="qrmeta"></div>
     <button class="ghost" id="btn-savecode">Save the code as a picture</button>
     <button class="ghost" id="btn-copycard">Copy the code as text</button>
+    <button class="ghost" id="btn-copyqr">Copy QR as PNG</button>
   </div>
   <div class="meta" id="sharestatus"></div>
 </section>
@@ -208,7 +210,7 @@ import * as F from "./kant-flow.mjs";
 import * as D from "./kant-diag.mjs";
 import * as C from "./kant-carddebug.mjs";
 import * as SL from "./kant-sharelog.mjs";
-import { qrEncode } from "./kant-qr.mjs";
+import { qrEncode, qrDraw, qrPng, qrCopyPng } from "./kant-qr.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -362,10 +364,14 @@ function dress() {
 
 /** The one link and the one code — the code being the link, dressed with the
  *  chosen picture and the chosen words (`Kant.InviteCard`). */
+let currentQr = null;
+
 function drawShare() {
   const link = inviteLink();
   $("link").value = link;
   try {
+    const card = F.inviteCard(effectiveConfig(), dress(), currentInvite());
+    currentQr = qrEncode(card.url);
     const svg = F.inviteCardSvg(effectiveConfig(), dress(), currentInvite(),
       { scale: 6, border: 4, dark: "#0f0", light: "#000" });
     $("qr").innerHTML = svg;
@@ -373,6 +379,7 @@ function drawShare() {
       `the code carries the whole link (${link.length} characters), ` +
       `so any camera app can open it — not just this one`;
   } catch (e) {
+    currentQr = null;
     $("qr").innerHTML = "";
     $("qrmeta").textContent =
       `the link is too long for one code (${e.message}) — send it as text instead`;
@@ -446,12 +453,20 @@ $("btn-copycard").onclick = async () => {
   dispatch({ type: "copyLink" });
 };
 
-$("btn-savecode").onclick = async () => {
-  if (!node) return;
+$("btn-copyqr").onclick = async () => {
+  if (!currentQr) return;
   try {
-    const card = F.inviteCard(effectiveConfig(), dress(), currentInvite());
-    const qr = qrEncode(card.url);
-    const blob = await S.cardPng(card, qr, { scale: 8, border: 4, dark: "#000", light: "#fff" });
+    await qrCopyPng(currentQr, { scale: 8, border: 4, dark: "#000", light: "#fff" });
+    $("sharestatus").textContent = "QR code copied as PNG";
+  } catch (e) {
+    $("sharestatus").textContent = "copy failed: " + e.message;
+  }
+};
+
+$("btn-savecode").onclick = async () => {
+  if (!currentQr) return;
+  try {
+    const blob = await qrPng(currentQr, { scale: 8, border: 4, dark: "#000", light: "#fff" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

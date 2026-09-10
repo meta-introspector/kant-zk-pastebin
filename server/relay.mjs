@@ -258,6 +258,7 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
     const m = url.pathname.match(/^\/room\/([^/]+)$/);
     if (m) {
       const room = decodeURIComponent(m[1]);
+      log.info("relay", `route room ${roomRef(room)}`, `${req.method} ${shown}`);
       if (req.method === "POST") {
         let body;
         try { body = await readBody(req, cfg.maxBody); }
@@ -273,25 +274,35 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
           return;
         }
         const cursor = rooms.post(room, lines);
+        log.info("relay", `posted ${lines.length} lines`, `${roomRef(room)} cursor=${cursor}`);
         sendJson(res, cfg, 200, { ok: true, cursor, accepted: lines.length });
         return;
       }
       if (req.method === "GET") {
         const cursor = Number(url.searchParams.get("cursor") ?? 0) || 0;
         const wait = Math.min(Number(url.searchParams.get("wait") ?? 0) || 0, 60);
+        log.info("relay", `fetch room`, `${roomRef(room)} cursor=${cursor} wait=${wait}`);
         let out = rooms.fetch(room, cursor);
         if (wait > 0 && out.lines.length === 0) {
+          log.info("relay", `waiting for room`, `${roomRef(room)} cursor=${cursor} wait=${wait}s`);
           await rooms.wait(room, wait * 1000);
           out = rooms.fetch(room, cursor);
         }
+        log.info("relay", `fetched room`, `${roomRef(room)} cursor=${cursor} -> ${out.cursor} lines=${out.lines.length} truncated=${out.truncated}`);
         sendJson(res, cfg, 200, { ok: true, ...out });
         return;
       }
+      log.warn("relay", "method not allowed", `${roomRef(room)} ${req.method}`);
       sendJson(res, cfg, 405, { ok: false, error: "method not allowed" });
       return;
     }
 
-    if (cfg.staticDir) { serveStatic(cfg, res, url.pathname); return; }
+    if (cfg.staticDir) {
+      log.info("relay", "static", shown);
+      serveStatic(cfg, res, url.pathname);
+      return;
+    }
+    log.warn("relay", "not found", shown);
     sendJson(res, cfg, 404, { ok: false, error: "not found" });
   });
 
@@ -365,8 +376,13 @@ function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, er
   const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
   const m = url.pathname.match(/^\/ws\/([^/]+)$/);
   const key = req.headers["sec-websocket-key"];
-  if (!m || !key) { socket.destroy(); return; }
+  if (!m || !key) {
+    log.warn("relay", "websocket upgrade rejected", "missing room or key");
+    socket.destroy();
+    return;
+  }
   const room = decodeURIComponent(m[1]);
+  log.info("relay", "websocket upgrade", `${roomRef(room)} cursor=${url.searchParams.get("cursor") ?? 0}`);
 
   socket.write(
     "HTTP/1.1 101 Switching Protocols\r\n" +
