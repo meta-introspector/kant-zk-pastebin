@@ -23,6 +23,12 @@
  *   node scripts/kant-cli.mjs --state b.json read
  *   node scripts/kant-cli.mjs --state b.json say 'hello back'
  *
+ *   # the chat window can be the Kant pastebin itself: agent A posts the
+ *   # link there, agent B takes the latest paste out of the UUCP spool
+ *   node scripts/kant-cli.mjs --state a.json pastebinit
+ *   node scripts/kant-cli.mjs --state b.json accept            # latest in the spool
+ *   node scripts/kant-cli.mjs --state b.json accept <url>     # or a paste URL
+ *
  *   # and the same thing with nothing but curl
  *   node scripts/kant-cli.mjs --state a.json curl read
  *   node scripts/kant-cli.mjs --state a.json curl say 'hello from the terminal'
@@ -35,6 +41,11 @@
  *   --origin <url>       the site the links point at (default from kant.config)
  *   --config <file>      the deployment configuration (default web/kant.config)
  *   --name <id>          this client's peer name (default a random one)
+ *   --spool <dir>        the UUCP spool `accept` looks in (default $UUCP_SPOOL
+ *                        or /var/spool/uucp/pastebin, where the live
+ *                        kant-pastebin service stores its pastes)
+ *   --backend <url>      the pastebin `pastebinit` posts to
+ *                        (default solana.solfunmeme.com/pastebin)
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -56,6 +67,8 @@ const opts = {
   name: null,
   relay: null,
   wait: 0,
+  spool: process.env.UUCP_SPOOL ?? "/var/spool/uucp/pastebin",
+  backend: "solana.solfunmeme.com/pastebin",
 };
 const rest = [];
 for (let i = 0; i < argv.length; i += 1) {
@@ -71,6 +84,8 @@ for (let i = 0; i < argv.length; i += 1) {
     case "--name": opts.name = take(); break;
     case "--relay": opts.relay = take(); break;
     case "--wait": opts.wait = Number(take()) || 0; break;
+    case "--spool": opts.spool = take(); break;
+    case "--backend": opts.backend = take(); break;
     case "-h": case "--help": rest.push("help"); break;
     default: rest.push(tok);
   }
@@ -160,6 +175,37 @@ const needRoom = (c) => {
   }
 };
 
+/** Take in whatever a text carries — a whole conversation in a bag, or an
+ *  invitation to join a room — wherever in the text it happens to be.  On
+ *  success the state is saved and a report printed; the return is the client
+ *  as it now stands (joined or absorbed), or `"nothing"` when no loadable
+ *  line is in there. */
+function loadText(st, c, text) {
+  const what = C.loadUrl(text);
+  if (what.kind === "bag") {
+    // A conversation carried in the link itself: no relay in it at all.
+    const taken = C.absorb(c, what.messages.map((m) => C.printMsg(m)));
+    save(store(st, c));
+    out(`took ${taken} line(s) out of the link`, {
+      ok: true, kind: "bag", taken, page: C.pageOf(text.trim()),
+      view: C.view(c).map((m) => ({ sender: m.sender, seq: m.seq, text: C.msgText(m) })),
+    });
+    return c;
+  }
+  if (what.kind === "invitation") {
+    const joined = C.joinText(c.self, text);
+    if (!joined) return "nothing";
+    joined.self = c.self;
+    save(store(st, joined));
+    out(`joined room ${C.clientRoom(joined)}\nrelay ${joined.relay || "(none)"}`, {
+      ok: true, room: C.clientRoom(joined), relay: joined.relay, self: joined.self,
+      page: C.pageOf(text.trim()),
+    });
+    return joined;
+  }
+  return "nothing";
+};
+
 function usage() {
   console.log(`kant-cli — the kant-zk-pastebin client for a terminal
 
@@ -170,6 +216,10 @@ function usage() {
   whoami                 name, relay, room, counters
   join <text>            join the room named by a pasted message or link
   load <url>             load a URL: join a room, or take in a conversation
+  pastebinit [text]      post to the pastebin (default: this client's link;
+  pastebinit --file <f>    or the given text, a file, or stdin with `-`)
+  accept [url]           take in a paste: the URL pastebinit printed, or
+                         with no argument the latest paste in the spool
   say <text>             say something in the room
   read                   read the room and print the conversation
   bag                    the whole conversation as one link (no relay needed)
@@ -178,7 +228,8 @@ function usage() {
   curl read|say <text>|link   print the curl command instead of running it
 
 Options: --state <file> --json --transport fetch|curl --print-curl
-         --origin <url> --config <file> --name <id> --relay <url>`);
+         --origin <url> --config <file> --name <id> --relay <url>
+         --spool <dir> --backend <url>`);
 }
 
 async function main() {
@@ -248,27 +299,101 @@ async function main() {
     case "load": {
       const text = rest.slice(1).join(" ");
       if (!text) { console.error("load needs a URL or the text somebody sent you"); process.exit(2); }
-      const what = C.loadUrl(text);
-      if (what.kind === "bag") {
-        // A conversation carried in the link itself: no relay in it at all.
-        const taken = C.absorb(c, what.messages.map((m) => C.printMsg(m)));
-        save(store(st, c));
-        out(`took ${taken} line(s) out of the link`, {
-          ok: true, kind: "bag", taken, page: C.pageOf(text.trim()),
-          view: C.view(c).map((m) => ({ sender: m.sender, seq: m.seq, text: C.msgText(m) })),
-        });
-        return;
-      }
-      if (what.kind === "nothing") {
+      const now = loadText(st, c, text);
+      if (now === "nothing") {
         const named = describe(classify(text.trim()));
-        console.error(`nothing this client can load: ${named}`);
+        console.error(`nothing this client can load: ${named.kind}` +
+          (named.kind === "page" ? ` ${named.addr}` : ""));
         if (opts.json) console.log(JSON.stringify({ ok: false, kind: "nothing", reason: named },
           null, 2));
         process.exit(1);
       }
-      // An invitation: fall through to joining it.
-      rest[0] = "join";
-      break;
+      return;
+    }
+
+    case "pastebinit": {
+      // What to post: the given text, a file, stdin (an explicit `-`), or by
+      // default this client's link — the one line the other agent needs.
+      let content, what = "text";
+      const args = rest.slice(1);
+      if (args[0] === "--file") {
+        if (!args[1]) { console.error("pastebinit --file needs a path"); process.exit(2); }
+        content = readFileSync(args[1], "utf8"); what = args[1];
+      } else if (args[0] === "-") {
+        content = readFileSync(0, "utf8"); what = "stdin";
+      } else if (args.length) {
+        content = args.join(" ");
+      } else {
+        needRoom(c);
+        content = `${C.clientLink(cfg, c)}\n`; what = "link";
+      }
+      const res = spawnSync("pastebinit", ["-b", opts.backend, "-a", c.self],
+        { input: content, encoding: "utf8" });
+      const url = res.status === 0 ? res.stdout.trim().split("\n").pop().trim() : "";
+      if (!url) {
+        const why = (res.stderr || "").trim() || `pastebinit exited ${res.status}`;
+        console.error(`pastebinit failed: ${why}`);
+        if (opts.json) console.log(JSON.stringify({ ok: false, error: why }, null, 2));
+        process.exit(1);
+      }
+      st.lastPaste = url;
+      st.lastPasteAt = new Date().toISOString();
+      save(store(st, c));
+      out(`posted ${what} to the pastebin:\n${url}`, {
+        ok: true, url, what, room: C.clientRoom(c),
+        link: what === "link" ? content.trim() : undefined,
+      });
+      return;
+    }
+
+    case "accept": {
+      // Take in a paste: the URL pastebinit printed, or — with no argument —
+      // the latest paste in the UUCP spool this client can load.
+      const arg = rest.slice(1).join(" ").trim();
+      if (arg) {
+        let text = arg, from = arg;
+        if (/^https?:\/\//.test(arg)) {
+          // a paste URL: fetch the raw text behind it
+          const raw = arg.includes("/raw/") ? arg : arg.replace(/\/paste\//, "/raw/");
+          const r = await fetch(raw);
+          if (!r.ok) { console.error(`fetch ${raw} failed: ${r.status}`); process.exit(1); }
+          text = await r.text(); from = raw;
+        }
+        const now = loadText(st, c, text);
+        if (now === "nothing") {
+          const named = describe(classify(text.trim()));
+          console.error(`nothing this client can load in that paste: ${named.kind}` +
+            (named.kind === "page" ? ` ${named.addr}` : ""));
+          if (opts.json) console.log(JSON.stringify({ ok: false, kind: "nothing", reason: named },
+            null, 2));
+          process.exit(1);
+        }
+        st.lastAccepted = from;
+        save(store(st, now));
+        return;
+      }
+      // No argument: walk the spool index from the end until a paste loads.
+      const idx = `${opts.spool}/index.jsonl`;
+      if (!existsSync(idx)) { console.error(`no spool index at ${idx}`); process.exit(2); }
+      const entries = readFileSync(idx, "utf8").trim().split("\n").filter(Boolean);
+      for (let n = entries.length - 1; n >= 0 && n >= entries.length - 50; n -= 1) {
+        let e; try { e = JSON.parse(entries[n]); } catch { continue; }
+        const path = e.uucp_path ?? (e.filename ? `${opts.spool}/${e.filename}` : null);
+        if (!path || !existsSync(path)) continue;
+        let text; try { text = readFileSync(path, "utf8"); } catch { continue; }
+        const now = loadText(st, c, text);
+        if (now !== "nothing") {
+          st.lastAccepted = e.id ?? path;
+          save(store(st, now));
+          console.error(`accepted from spool entry ${entries.length - n} of ${entries.length}: ${e.id ?? path}`);
+          return;
+        }
+      }
+      console.error(`nothing loadable in the last ${Math.min(50, entries.length)} spool entr` +
+        `${Math.min(50, entries.length) === 1 ? "y" : "ies"}`);
+      if (opts.json) console.log(JSON.stringify({ ok: false, kind: "nothing",
+        spool: opts.spool, looked: Math.min(50, entries.length) }, null, 2));
+      process.exit(1);
     }
 
     default: break;
@@ -281,7 +406,8 @@ async function main() {
       const joined = C.joinText(c.self, text);
       if (!joined) {
         const what = describe(classify(text.trim()));
-        console.error(`nothing to join in that: ${what}`);
+        console.error(`nothing to join in that: ${what.kind}` +
+          (what.kind === "page" ? ` ${what.addr}` : ""));
         if (opts.json) console.log(JSON.stringify({ ok: false, reason: what }, null, 2));
         process.exit(1);
       }
