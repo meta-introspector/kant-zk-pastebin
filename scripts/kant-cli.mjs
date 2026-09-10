@@ -51,6 +51,8 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import * as C from "../web/kant-cli.mjs";
+import * as P from "../web/kant-pastebin.mjs";
+import { pastebinChannel } from "../web/kant-share.mjs";
 import { parseConfig, DEFAULT_CONFIG } from "../web/kant-site.mjs";
 import { classify, describe } from "../web/kant-carddebug.mjs";
 
@@ -327,20 +329,17 @@ async function main() {
         needRoom(c);
         content = `${C.clientLink(cfg, c)}\n`; what = "link";
       }
-      const res = spawnSync("pastebinit", ["-b", opts.backend, "-a", c.self],
-        { input: content, encoding: "utf8" });
-      const url = res.status === 0 ? res.stdout.trim().split("\n").pop().trim() : "";
-      if (!url) {
-        const why = (res.stderr || "").trim() || `pastebinit exited ${res.status}`;
-        console.error(`pastebinit failed: ${why}`);
-        if (opts.json) console.log(JSON.stringify({ ok: false, error: why }, null, 2));
-        process.exit(1);
-      }
+      // Put it on the pastebin through the carrier layer (kant-pastebin.mjs):
+      // no pastebinit binary, just the API every Kant pastebin speaks.
+      const ch = pastebinChannel(`https://${opts.backend}`, null);
+      const res = await ch.share(content, { title: what === "link" ? "kant invite" : undefined });
+      const url = res.url;
       st.lastPaste = url;
       st.lastPasteAt = new Date().toISOString();
       save(store(st, c));
       out(`posted ${what} to the pastebin:\n${url}`, {
-        ok: true, url, what, room: C.clientRoom(c),
+        ok: true, url, permalink: res.permalink, id: res.id, cid: res.cid,
+        what, room: C.clientRoom(c),
         link: what === "link" ? content.trim() : undefined,
       });
       return;
@@ -350,14 +349,18 @@ async function main() {
       // Take in a paste: the URL pastebinit printed, or — with no argument —
       // the latest paste in the UUCP spool this client can load.
       const arg = rest.slice(1).join(" ").trim();
+      // The carrier layer does the fetching and the spool walking; this
+      // command just decides what a loadable paste looks like (loadText).
+      const ch = pastebinChannel(`https://${opts.backend}`, opts.spool, {
+        takeFn: (text) => (loadText(st, c, text) !== "nothing" ? text : null),
+      });
       if (arg) {
-        let text = arg, from = arg;
-        if (/^https?:\/\//.test(arg)) {
-          // a paste URL: fetch the raw text behind it
-          const raw = arg.includes("/raw/") ? arg : arg.replace(/\/paste\//, "/raw/");
-          const r = await fetch(raw);
-          if (!r.ok) { console.error(`fetch ${raw} failed: ${r.status}`); process.exit(1); }
-          text = await r.text(); from = raw;
+        const text = await ch.take(arg);
+        if (text == null) {
+          console.error(`could not read a paste at ${arg}`);
+          if (opts.json) console.log(JSON.stringify({ ok: false, kind: "no-paste", url: arg },
+            null, 2));
+          process.exit(1);
         }
         const now = loadText(st, c, text);
         if (now === "nothing") {
@@ -368,31 +371,26 @@ async function main() {
             null, 2));
           process.exit(1);
         }
-        st.lastAccepted = from;
+        st.lastAccepted = arg;
         save(store(st, now));
         return;
       }
       // No argument: walk the spool index from the end until a paste loads.
-      const idx = `${opts.spool}/index.jsonl`;
-      if (!existsSync(idx)) { console.error(`no spool index at ${idx}`); process.exit(2); }
-      const entries = readFileSync(idx, "utf8").trim().split("\n").filter(Boolean);
-      for (let n = entries.length - 1; n >= 0 && n >= entries.length - 50; n -= 1) {
-        let e; try { e = JSON.parse(entries[n]); } catch { continue; }
-        const path = e.uucp_path ?? (e.filename ? `${opts.spool}/${e.filename}` : null);
-        if (!path || !existsSync(path)) continue;
-        let text; try { text = readFileSync(path, "utf8"); } catch { continue; }
-        const now = loadText(st, c, text);
-        if (now !== "nothing") {
-          st.lastAccepted = e.id ?? path;
-          save(store(st, now));
-          console.error(`accepted from spool entry ${entries.length - n} of ${entries.length}: ${e.id ?? path}`);
-          return;
-        }
+      const got = ch.spool
+        ? ch.spool.take((text) => (loadText(st, c, text) !== "nothing" ? text : null))
+        : null;
+      if (got) {
+        st.lastAccepted = got.entry.id ?? got.entry.uucp_path;
+        save(store(st, c)); // loadText already saved the joined state
+        console.error(`accepted from spool entry ${got.tried} of ${ch.spool.list().length}: ` +
+          `${got.entry.id ?? got.entry.uucp_path}`);
+        return;
       }
-      console.error(`nothing loadable in the last ${Math.min(50, entries.length)} spool entr` +
-        `${Math.min(50, entries.length) === 1 ? "y" : "ies"}`);
+      const looked = ch.spool ? Math.min(50, ch.spool.list().length) : 0;
+      console.error(`nothing loadable in the last ${looked} spool entr` +
+        `${looked === 1 ? "y" : "ies"}`);
       if (opts.json) console.log(JSON.stringify({ ok: false, kind: "nothing",
-        spool: opts.spool, looked: Math.min(50, entries.length) }, null, 2));
+        spool: opts.spool, looked }, null, 2));
       process.exit(1);
     }
 
