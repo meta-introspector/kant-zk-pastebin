@@ -1,0 +1,40 @@
+# kant-zk-archive.service — standalone systemd unit
+# Extracted from system-manager config. No nix store paths.
+#
+# Install:
+#   sudo cp kant-zk-archive.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable kant-zk-archive
+#   sudo systemctl start kant-zk-archive
+#
+# The room config lives in /var/lib/kant-zk/rooms/*.json
+# State (root paste id, cursor) lives in *.state.json beside them.
+
+[Unit]
+Description=Kant ZK Archive — room discussion → pastebin thread
+After=network.target
+
+[Service]
+Type=simple
+User=mdupont
+Group=mdupont
+WorkingDirectory=/home/mdupont/projects/pastebin-lean
+ExecStart=/usr/bin/node server/archive.mjs \
+  --rooms /var/lib/kant-zk/rooms \
+  --relay https://solana.solfunmeme.com/relay \
+  --backend https://solana.solfunmeme.com/pastebin
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Hardening (matches system-manager config)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kant-zk
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

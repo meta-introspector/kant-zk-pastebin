@@ -1,0 +1,9 @@
+# Kant ZK services — crontab entry
+# Install:
+#   (crontab -l 2>/dev/null; cat /home/mdupont/projects/pastebin-lean/deploy/cron/crontab) | crontab -
+#
+# Archive: every 5 minutes (polls the relay, posts new lines to pastebin)
+*/5 * * * * /home/mdupont/projects/pastebin-lean/deploy/cron/kant-zk-archive-cron.sh
+#
+# Forward: every 2 minutes (bridges local relay to cloudflare worker)
+*/2 * * * * /home/mdupont/projects/pastebin-lean/deploy/cron/kant-zk-forward-cron.sh

@@ -117,6 +117,8 @@ const room = witness(hexDecode(fields[1]));
 const statePath = arg("state", `/tmp/kant-forward-${room.slice(0, 8)}.json`);
 info(`room ${room.slice(0, 8)}…`, `${from} -> ${to}`);
 
+const once = arg("once", false);
+
 const fwd = new Bridge({ from, to, room, statePath, interval: arg("interval", 10) });
 
 // First carry the backlog once, then loop: long-poll the source, post
@@ -141,5 +143,9 @@ async function loop(bridge, label) {
     }
   }
 }
-loop(fwd, "fwd").catch((e) => { error("fwd loop died", e.message ?? e); process.exit(1); });
-setInterval(() => {}, 1 << 30);
+if (once) {
+  await fwd.carry().catch((e) => { error("once carry failed", e.message ?? e); process.exit(1); });
+} else {
+  loop(fwd, "fwd").catch((e) => { error("fwd loop died", e.message ?? e); process.exit(1); });
+  setInterval(() => {}, 1 << 30);
+}

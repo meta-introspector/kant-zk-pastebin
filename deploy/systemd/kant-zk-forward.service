@@ -1,0 +1,43 @@
+# kant-zk-forward.service — standalone systemd unit
+# Extracted from system-manager config. No nix store paths.
+#
+# Install:
+#   sudo cp kant-zk-forward.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable kant-zk-forward
+#   sudo systemctl start kant-zk-forward
+#
+# The invite is passed via Environment (only the public room digest is used;
+# the secret is never needed by the bridge).  State lives in
+# /var/lib/kant-zk/forward-state.json.
+
+[Unit]
+Description=Kant ZK Forward — bridge local relay to cloudflare relay
+After=network.target
+
+[Service]
+Type=simple
+User=mdupont
+Group=mdupont
+WorkingDirectory=/home/mdupont/projects/pastebin-lean
+Environment="KANT_ZK_INVITE=https://solana.solfunmeme.com/relay/#6b7a696e76697465:68747470733a2f2f736f6c616e612e736f6c66756e6d656d652e636f6d2f72656c6179:f436f2a7fc1378621989a2121aed902a53fe120ee4be013e1d412ed9a279c792:6c65747461"
+ExecStart=/usr/bin/node server/forward.mjs \
+  --invite "$KANT_ZK_INVITE" \
+  --from https://solana.solfunmeme.com/relay \
+  --to https://kant-zk-relay.jmikedupont2.workers.dev \
+  --state /var/lib/kant-zk/forward-state.json
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Hardening (matches system-manager config)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kant-zk
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

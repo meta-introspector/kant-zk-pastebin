@@ -219,6 +219,8 @@ if (roomsDir && existsSync(roomsDir)) {
   process.exit(2);
 }
 
+const once = arg("once", false);
+
 const rooms = [];
 for (const c of configs) {
   try {
@@ -238,5 +240,9 @@ for (const c of configs) {
 if (!rooms.length) { error("no rooms to archive"); process.exit(1); }
 
 // Every room runs its own loop; the process stays up as long as any does.
-for (const r of rooms) r.run().catch((e) => { error("room loop died", e.message ?? e); process.exit(1); });
-setInterval(() => {}, 1 << 30); // keep the event loop alive
+if (once) {
+  for (const r of rooms) await r.tick().catch((e) => { error("once tick failed", e.message ?? e); });
+} else {
+  for (const r of rooms) r.run().catch((e) => { error("room loop died", e.message ?? e); process.exit(1); });
+  setInterval(() => {}, 1 << 30); // keep the event loop alive
+}
