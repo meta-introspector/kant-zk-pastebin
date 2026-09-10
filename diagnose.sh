@@ -135,7 +135,10 @@ else
 fi
 
 section "ports"
-# Only check pastebin-relevant ports (8090, 8081, 4000)
+# BIND_PORT is the deployed pastebin — fatal if down.
+# BETA_PORT (8081) and nora (4000) belong to configs that may not be
+# activated (kant-pastebin-only does not include the beta pastebin);
+# report them but do not fail the deploy on them.
 for port in "$BIND_PORT" "$BETA_PORT" 4000; do
   proc="$(port_process "$port")"
   if [ "$proc" = "-" ]; then
@@ -172,11 +175,21 @@ else
 fi
 
 section "HTTP"
+# BIND_PORT endpoints are the deployed pastebin — fatal on 000.
+# BETA_PORT and nora :4000 may not be part of the active config
+# (kant-pastebin-only) — informational only, never fatal.
 for url in "http://127.0.0.1:${BIND_PORT}/" "http://127.0.0.1:${BIND_PORT}/health" "http://127.0.0.1:${BETA_PORT}/" "http://127.0.0.1:4000/health" "$PUBLIC_URL"; do
   code="$(http_code "$url")"
   if [ "$code" = "000" ]; then
-    echo "  ERROR $code $url"
-    failed=1
+    case "$url" in
+      *:${BIND_PORT}*|*"$PUBLIC_URL"*)
+        echo "  ERROR $code $url"
+        failed=1
+        ;;
+      *)
+        echo "  (not in active config) $code $url"
+        ;;
+    esac
   else
     echo "  $code $url"
   fi
