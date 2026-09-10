@@ -1,4 +1,4 @@
-{ config, lib, pkgs, pastebin-src, nora-src, ... }:
+{ config, lib, pkgs, pastebin-src, nora-src, kant-zk-pastebin-src, ... }:
 
 let
   system = pkgs.stdenv.hostPlatform.system;
@@ -7,6 +7,19 @@ let
   domain = "solana.solfunmeme.com";
   kant-pastebin = pastebin-src.packages.${system}.kant-pastebin;
   nora = nora-src.packages.${system}.default;
+  # Kant ZK Relay — node relay.mjs from the kant-zk-pastebin mirror.
+  # Included here so a pastebin-only deploy does not remove the relay
+  # unit or the /relay/ nginx location (same reason nora is included).
+  kant-zk-relay-pkg = pkgs.writeShellApplication {
+    name = "kant-zk-relay";
+    runtimeInputs = [ pkgs.nodejs ];
+    text = ''
+      exec ${pkgs.nodejs}/bin/node ${kant-zk-pastebin-src}/server/relay.mjs \
+        --port 8787 \
+        --host 127.0.0.1 \
+        --static ${kant-zk-pastebin-src}/web
+    '';
+  };
   daslTilesRust = "/nix/store/syy7kivh3sfprsbmsqxyxhad1a1j1rx8-dasl-tiles-rust-0.1.0";
   DASL_TESTING = "${HOME}/dasl/dasl-testing";
   # Harness binaries — built from ~/dasl/dasl-testing/harnesses/ (cargo build --release)
@@ -83,6 +96,25 @@ in
         NFT_DIR = "/mnt/data1/time-2026/03-march/13/nft_enriched";
         ENRICH_PIPELINE = "/mnt/data1/time-2026/03-march/09/mmgroup-rust/enrich-qid.sh";
         RUST_LOG = "info"; TILES_DIR = "";
+      };
+    };
+
+    # ═══════════════════════════════════════════════════════════
+    # Kant ZK Relay (:8787) — rendezvous relay for the lean client
+    # ═══════════════════════════════════════════════════════════
+    systemd.services.kant-zk-relay = {
+      enable = true;
+      description = "Kant ZK Rendezvous Relay — local append-only log per room";
+      after = [ "network.target" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "simple"; User = "kant"; Group = "kant";
+        ExecStart = "${kant-zk-relay-pkg}/bin/kant-zk-relay";
+        Restart = "always"; RestartSec = "5";
+        TimeoutStartSec = 0; TimeoutStopSec = 0; TimeoutAbortSec = 0; TimeoutSec = 0;
+        StandardOutput = "journal"; StandardError = "journal";
+        NoNewPrivileges = true; PrivateTmp = true; PrivateDevices = true;
+        ProtectKernelTunables = true; ProtectKernelModules = true; ProtectControlGroups = true;
       };
     };
 
@@ -597,6 +629,12 @@ in
       commonHttpConfig = ''
         client_body_buffer_size 1024k;
         map $status $is_error { ~^[23] 0; default 1; }
+        # WebSocket upgrade for proxied services (kant-zk relay /ws/{room})
+        # (triple-quote is how a literal two-quote escapes inside a Nix indented string)
+        map $http_upgrade $connection_upgrade {
+          default upgrade;
+          '''      close;
+        }
         log_format research '"$time_iso8601" client=$remote_addr method=$request_method uri=$request_uri status=$status body_bytes=$body_bytes_sent referer=$http_referer user_agent=$http_user_agent request_time=''${request_time}s upstream_addr=$upstream_addr upstream_status=$upstream_status scheme=$scheme host=$host';
         access_log /var/log/nginx/research.access.log research;
         error_log /var/log/nginx/research.error.log warn;
@@ -624,6 +662,20 @@ in
             proxy_read_timeout 3600s; proxy_send_timeout 3600s; proxy_connect_timeout 3600s;
             proxy_buffering off; proxy_request_buffering off;
             charset utf-8;
+          '';
+        };
+        locations."/relay/" = {
+          proxyPass = "http://127.0.0.1:8787/";
+          proxyWebsockets = true;
+          extraConfig = ''
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 120s;
+            proxy_connect_timeout 10s;
+            proxy_buffering off;
+            proxy_request_buffering off;
           '';
         };
         locations."/block/" = {

@@ -190,6 +190,22 @@
         "type": "github"
       }
     },
+    "kant-zk-pastebin-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789046931,
+        "narHash": "sha256-N/WNMMvu6b3LGEVeICQ7n8kr+cvy0I5QVkVKjWBPmrI=",
+        "ref": "refs/heads/main",
+        "rev": "1fa9bc92601e5cc73c59366c21acf0ca73cfdbfb",
+        "revCount": 51,
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/mdupont/kant-zk-pastebin.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///home/mdupont/git/github.com/mdupont/kant-zk-pastebin.git"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1781619580,
@@ -367,6 +383,7 @@
       "inputs": {
         "crane": "crane",
         "flake-utils": "flake-utils",
+        "kant-zk-pastebin-src": "kant-zk-pastebin-src",
         "nixpkgs": "nixpkgs",
         "nora-cargo": "nora-cargo",
         "nora-src": "nora-src",

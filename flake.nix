@@ -11,9 +11,13 @@
     };
     system-manager.url = "git+file:///mnt/data1/git/github.com/numtide/system-manager.git?ref=omain";
     nora-src.url = "git+file:///mnt/data1/git/github.com/getnora-io/nora.git";
+    kant-zk-pastebin-src = {
+      url = "git+file:///home/mdupont/git/github.com/mdupont/kant-zk-pastebin.git";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, system-manager, crane, nora-cargo, nora-src }:
+  outputs = { self, nixpkgs, flake-utils, system-manager, crane, nora-cargo, nora-src, kant-zk-pastebin-src }:
     (flake-utils.lib.eachDefaultSystem (system:
       let
         lib = nixpkgs.lib;
@@ -113,7 +117,7 @@ EOF
     )) // {
       systemConfigs.kant-pastebin-only = system-manager.lib.makeSystemConfig {
         modules = [ ./pastebin-system.nix { nixpkgs.hostPlatform = "x86_64-linux"; } ];
-        specialArgs = { pastebin-src = self; nora-src = nora-src; };
+        specialArgs = { pastebin-src = self; nora-src = nora-src; kant-zk-pastebin-src = kant-zk-pastebin-src; };
       };
     };
 }
