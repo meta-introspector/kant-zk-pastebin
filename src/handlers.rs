@@ -681,6 +681,9 @@ pub async fn get_paste(
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
     let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
 
+    // A CID permalink (bafk...) is an alias: resolve it to the real paste id.
+    let id = resolve_cid_alias(&uucp_dir, &id);
+
     // Load index for prev/next/related
     let index_file = format!("{}/index.jsonl", uucp_dir);
     let entries: Vec<PasteIndex> = fs::read_to_string(&index_file)
@@ -2461,11 +2464,23 @@ if (exportChunkedBtn) exportChunkedBtn.onclick = exportChunkedVisible;
 fn read_paste_content_by_id(paste_id: &str) -> Option<String> {
     let uucp_dir =
         env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    // A CID permalink (bafk...) is an alias: the .cid file holds the real id.
+    let resolved = resolve_cid_alias(&uucp_dir, paste_id);
     read_index_entries(&uucp_dir)
         .into_iter()
-        .find(|e| e.id == paste_id)
+        .find(|e| e.id == resolved)
         .and_then(|e| read_paste_content(&e.uucp_path))
-        .or_else(|| read_paste_content(&format!("{}/{}.txt", uucp_dir, paste_id)))
+        .or_else(|| read_paste_content(&format!("{}/{}.txt", uucp_dir, resolved)))
+}
+
+/// A paste's CID permalink names a .cid file whose content is the paste id
+/// it aliases (written by the dedup path of create_paste_inner).
+fn resolve_cid_alias(uucp_dir: &str, paste_id: &str) -> String {
+    let cid_file = format!("{}/{}.cid", uucp_dir, paste_id);
+    match std::fs::read_to_string(&cid_file) {
+        Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
+        _ => paste_id.to_string(),
+    }
 }
 
 fn resolve_split_content(body: &serde_json::Value) -> std::result::Result<String, HttpResponse> {
