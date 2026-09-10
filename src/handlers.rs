@@ -2534,7 +2534,11 @@ fn read_paste_content(uucp_path: &str) -> Option<String> {
             if raw[content_start..].starts_with('\n') {
                 content_start += 1;
             }
-            if let Some(rdfa_start) = raw[content_start..].find("<div") {
+            // The footer is the sheaf's RDFa, stored HTML-escaped
+            // (Section::to_rdfa writes &lt;div typeof="erdfa:SheafSection...).
+            // Cut at that, not at a bare "<div": a paste's own text may
+            // contain HTML without being the footer.
+            if let Some(rdfa_start) = raw[content_start..].find("&lt;div typeof=\"erdfa:SheafSection") {
                 return Some(
                     raw[content_start..content_start + rdfa_start]
                         .trim()
@@ -2546,7 +2550,7 @@ fn read_paste_content(uucp_path: &str) -> Option<String> {
 
         if let Some(body_start2) = raw[body_start + 2..].find("\n\n") {
             let content_start = body_start + 2 + body_start2 + 2;
-            if let Some(rdfa_start) = raw[content_start..].find("<div") {
+            if let Some(rdfa_start) = raw[content_start..].find("&lt;div typeof=\"erdfa:SheafSection") {
                 return Some(
                     raw[content_start..content_start + rdfa_start]
                         .trim()
@@ -2633,20 +2637,42 @@ fn parse_query_param(uri: &str, key: &str) -> Option<String> {
         let k = parts.next().unwrap_or("").trim();
         if k == key {
             let v = parts.next().unwrap_or("").trim().to_string();
-            if v.contains('%') {
-                return Some(
-                    v.replace("+", " ")
-                        .replace("%20", " ")
-                        .replace("%28", "(")
-                        .replace("%29", ")")
-                        .replace("%2C", ",")
-                        .replace("%2F", "/"),
-                );
+            if v.contains('%') || v.contains('+') {
+                return Some(percent_decode(&v));
             }
             return Some(v);
         }
     }
     None
+}
+
+/// Decode an application/x-www-form-urlencoded value: `+` is a space,
+/// `%HH` is the byte 0xHH.  Invalid escapes are left as they are, so a
+/// stray percent sign cannot lose data.  (The old fixed replacement
+/// table missed %3A and every escape it did not know, which made
+/// /api/search unable to find text containing colons or any other
+/// unlisted character.)
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < bytes.len() => {
+                match u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                    Ok(b) => {
+                        out.push(b);
+                        i += 2;
+                    }
+                    Err(_) => out.push(b'%'),
+                }
+            }
+            b => out.push(b),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn search_terms(query: &str) -> Vec<String> {
@@ -5782,5 +5808,46 @@ mod tests {
         assert_eq!(parts[0].1, "alpha\n");
         assert_eq!(parts[1].1, "beta\n");
         assert_eq!(parts[2].1, "gamma\n");
+    }
+
+    #[test]
+    fn percent_decode_handles_plus_and_all_escapes() {
+        // the old fixed table missed these
+        assert_eq!(percent_decode("a+b"), "a b");
+        assert_eq!(percent_decode("11%3A14%3A16"), "11:14:16");
+        assert_eq!(percent_decode("%28x%29"), "(x)");
+        assert_eq!(percent_decode("%2C%20%2F"), ", /");
+        // invalid escapes are kept, not dropped
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("a%ZZb"), "a%ZZb");
+        // utf-8 bytes survive
+        assert_eq!(percent_decode("caf%C3%A9"), "café");
+    }
+
+    #[test]
+    fn parse_query_param_decodes_colons_and_plus() {
+        let uri = "/api/search?q=2026-09-10T11%3A14%3A16&limit=5";
+        assert_eq!(parse_query_param(uri, "q").as_deref(), Some("2026-09-10T11:14:16"));
+        assert_eq!(parse_query_param(uri, "limit").as_deref(), Some("5"));
+        let plus = "/api/search?q=kant+invite";
+        assert_eq!(parse_query_param(plus, "q").as_deref(), Some("kant invite"));
+    }
+
+    #[test]
+    fn read_paste_content_strips_escaped_rdfa_footer_and_keeps_html_content() {
+        let dir = std::env::temp_dir().join("kant-paste-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("paste_with_html.txt");
+        // a paste whose own text contains a bare <div>, followed by the
+        // escaped sheaf footer the server writes
+        let stored = "--- id ---\nTitle: t\nKeywords: k\nCID: bafk1\nWitness: w\nIPFS: \n\
+                      DASL: d\nReply-To: \nSheaf: 1,2,3 raw p=1\n\n\
+                      <div>user content here</div>\n\n\
+                      &lt;div typeof=\"erdfa:SheafSection dasl:Type5\" about=\"#bafk1\"&gt;\n\
+                      &lt;/div&gt;\n";
+        std::fs::write(&path, stored).unwrap();
+        let got = read_paste_content(path.to_str().unwrap()).unwrap();
+        assert_eq!(got, "<div>user content here</div>");
+        let _ = std::fs::remove_file(&path);
     }
 }
