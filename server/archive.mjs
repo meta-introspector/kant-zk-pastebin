@@ -201,7 +201,13 @@ if (roomsDir && existsSync(roomsDir)) {
   for (const f of readdirSync(roomsDir).filter((f) => f.endsWith(".json")).sort()) {
     const p = pathJoin(roomsDir, f);
     const j = JSON.parse(readFileSync(p, "utf8"));
-    if (j.invite) configs.push({ ...j, statePath: p });
+    if (j.invite) {
+      // Room configs are read-only inputs: the mutable state (root
+      // paste id, cursor) lives beside them as <name>.state.json, so a
+      // save never clobbers the invite.
+      configs.push({ ...j,
+        statePath: j.statePath ?? p.replace(/\.json$/, ".state.json") });
+    }
   }
   info(`loaded ${configs.length} room(s) from ${roomsDir}`);
 } else if (invite) {
