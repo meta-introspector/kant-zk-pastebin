@@ -297,3 +297,27 @@ commands = [
   "curl -s http://127.0.0.1:4000/cargo/api/v1/crates/dasl 2>&1 | head -20",
   "echo '  -> Verification complete'"
 ]
+
+# GOAP enrich — regenerate+reconcile state, then readiness report
+# per ~/gitplan.org: pipelight orchestrates build→publish→deploy; this is the plan-refresh step
+[[pipelines]]
+name = "goap-enrich"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "goap-state-regen"
+commands = [
+  "python3 /home/mdupont/dasl-planning/scripts/goap-state-regen.py --write",
+]
+
+[[pipelines.steps]]
+name = "goap-plan-readiness"
+commands = [
+  "python3 /home/mdupont/dasl-planning/scripts/goap-plan-readiness.py",
+]
+
+[[pipelines.steps]]
+name = "goap-state-to-shmem"
+commands = [
+  "bash /home/mdupont/dasl-planning/scripts/goap/readiness-to-shmem.sh",
+]
