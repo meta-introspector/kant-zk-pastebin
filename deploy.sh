@@ -11,9 +11,9 @@ if [ -n "$PASTEBIN_UPSTREAM" ]; then
   PASTEBIN_BRANCH="${PASTEBIN_UPSTREAM#*/}"
 fi
 
-# Use the pastebin-only config which now includes nora services too.
-# This prevents activating pastebin from removing nora's systemd units.
-FLAKE="${PASTEBIN_FLAKE:-git+file://${PASTEBIN_REPO}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only}"
+# Use the system-manager all-services config which includes pastebin + nora + svg2anim
+# + ipld-car-shmem (shmem-dedup, tantivy-indexer, letta-ipld-memory) structures.
+FLAKE="${PASTEBIN_FLAKE:-git+file:///home/mdupont/projects/system-manager?ref=main#systemConfigs.all-services}"
 
 LOG_DIR="${PASTEBIN_DIR}/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
