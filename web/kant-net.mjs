@@ -161,14 +161,31 @@ export function toInvite(e) {
 /** The text a chat QR code carries. */
 export const copyInvite = (i) => envelopeEncode(ofInvite(i));
 
-/** Read a scanned or pasted invitation. */
-export const pasteInvite = (s) => toInvite(envelopeDecode(s));
+/** Read a scanned or pasted invitation.  A kzpass is read as the
+ *  invitation it wraps (its spending limit is the relay's business,
+ *  not the client's). */
+export const pasteInvite = (s) => {
+  const e = envelopeDecode(s);
+  if (!e) return null;
+  const i = toInvite(e);
+  if (i) return i;
+  if (e.fields.length >= 6) {
+    return toInvite({ tag: TAG_INVITE, fields: e.fields.slice(0, e.fields.length - 3) });
+  }
+  return null;
+};
 
 /** The same invitation as a link. */
 export const inviteUrl = (base, i) => shareUrl(base, ofInvite(i));
 
 /** Read an invitation out of a link. */
 export const parseInviteUrl = (u) => toInvite(parseShareUrl(u));
+
+/** The envelope text a share link's fragment carries (for pasteInvite). */
+const parseShareUrlText = (u) => {
+  const e = parseShareUrl(u);
+  return e ? envelopeEncode(e) : "";
+};
 
 /** Does the printed invitation fit in a single QR code? */
 export const inviteFitsQr = (i) => copyInvite(i).length <= CHANNEL_CAPACITY.qr;
@@ -642,7 +659,8 @@ export class KantNode {
 
   /** Join the room named by a scanned invitation. */
   joinInvite(text) {
-    const i = pasteInvite(text) ?? parseInviteUrl(text);
+    const i = pasteInvite(text) ?? parseInviteUrl(text)
+      ?? (text.includes("#") ? pasteInvite(parseShareUrlText(text)) : null);
     if (!i) return null;
     this.secret = i.secret;
     this.room = inviteRoom(i);

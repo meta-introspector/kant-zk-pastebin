@@ -102,3 +102,36 @@ re-checks each line's witness (`Kant.Relay.parseMsg`).  The archive
 only stores what every peer can already display.  The CF snapshot is
 static: it can only go stale, never lie about what it contains
 (witnesses included).
+
+## Limited invites — kzpass
+
+An invite (`kzinvite`) is a bearer secret: whoever has it can post
+forever.  A **pass** (`kzpass`) is the same invite plus a spending
+limit:
+
+```
+kzpass = invite fields + limit + id(16B) + sig(32B)
+sig    = witness(secret ‖ id ‖ limit)
+```
+
+Only the room owner (who holds the secret) can mint passes — a pass
+holder cannot mint more.  Both relays verify the signature and count
+spends (node: `node:sqlite` at `/var/lib/kant-zk/passes.sqlite`;
+CF: Durable Object storage), refusing the (limit+1). post with 429.
+Posts without a pass fall under a per-sender rate limit (10 posts /
+10 min).
+
+**Minting** (owner, in the SPA share screen, or in code):
+
+```js
+import * as P from "./web/kant-pass.mjs";
+const pass = P.mintPass(invite, 1);        // 1 = one-time, N = group
+const link = P.passUrl(origin, pass);      // #kzpass… link
+const code = P.copyPass(pass);             // raw hex code
+```
+
+**Using**: open the link on the static paste page
+(`https://kant-zk-pastebin.pages.dev/paste`) — it joins the room,
+loads the proved wasm kernel, and posts `kzchat` lines with the pass
+in the `x-kant-pass` header.  The relay's response carries
+`passRemaining`; at 0 the pass is spent.

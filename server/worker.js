@@ -6,6 +6,10 @@
 //
 //   GET  /health                          -> { ok, name, version }
 //   POST /room/{room}   body: lines       -> { ok, cursor, accepted }
+//   POST may carry `x-kant-pass` (a kzpass: a limited invite) or
+//   `x-kant-invite` (the owner's unlimited kzinvite).  The pass is
+//   verified and its spend counted here — the same rules as the Node
+//   relay's PassStore, so the twins agree on what a pass buys.
 //   GET  /room/{room}?cursor=N[&wait=S]   -> { ok, cursor, lines, truncated }
 //   WS   /ws/{room}?cursor=N              -> pushes { ok, cursor, lines }
 //
@@ -24,7 +28,7 @@ const MAX_BODY = 1048576;
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "content-type",
+  "access-control-allow-headers": "content-type, x-kant-pass, x-kant-invite",
   "access-control-max-age": "86400",
 };
 
@@ -33,6 +37,100 @@ const json = (obj, status = 200) =>
     status,
     headers: { "content-type": "application/json", ...CORS },
   });
+
+// ------------------------------------------------------------ kzpass
+//
+// A minimal, self-contained verifier for the pass codes of
+// `web/kant-pass.mjs` (the worker is a single file, so the codec is
+// inlined rather than imported).  Only what the relay needs to check
+// is here: parse the envelope, recompute the signature, count spends.
+
+const FNV_OFFSET = 14695981039346656037n;
+const FNV_PRIME = 1099511628211n;
+const MASK64 = (1n << 64n) - 1n;
+
+function fnv1a(bytes) {
+  let h = FNV_OFFSET;
+  for (const b of bytes) h = ((h ^ BigInt(b & 0xff)) * FNV_PRIME) & MASK64;
+  return h;
+}
+
+/** The 32-byte digest `witness()` hex-encodes (kantzk.mjs `digest`). */
+function digestBytes(bytes) {
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    let h = fnv1a([i, ...bytes]);
+    for (let j = 7; j >= 0; j--) out.push(Number((h >> BigInt(8 * j)) & 0xffn));
+  }
+  return out;
+}
+
+const hexDec = (s) => {
+  if (s.length % 2 || !/^[0-9a-f]*$/.test(s)) return null;
+  const out = [];
+  for (let i = 0; i < s.length; i += 2) out.push(parseInt(s.slice(i, i + 2), 16));
+  return out;
+};
+
+const bytesEq = (a, b) => Array.isArray(a) && Array.isArray(b) &&
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
+const ascii = (b) => Array.from(b, (x) => String.fromCharCode(x)).join("");
+
+/**
+ * Parse a kzpass (limited) or kzinvite (unlimited, limit 0) code.
+ * Returns { secret, limit, id, sig } or null.  Room-membership fields
+ * (relay, peer, addrs) are not needed for enforcement.
+ */
+function parsePassCode(s) {
+  const parts = String(s).split(":");
+  if (parts.length < 4) return null;
+  const tag = ascii(hexDec(parts[0]) ?? []);
+  const relay = hexDec(parts[1]);
+  const secret = hexDec(parts[2]);
+  if (!relay || !secret) return null;
+  if (tag === "kzinvite") return { secret, limit: 0 };
+  if (tag !== "kzpass" || parts.length < 7) return null;
+  // fields: relay, secret, peer, [addrs…] — the last three are limit, id, sig.
+  const limitF = hexDec(parts[parts.length - 3]);
+  const id = hexDec(parts[parts.length - 2]);
+  const sig = hexDec(parts[parts.length - 1]);
+  if (!limitF || !id || !sig) return null;
+  const limit = limitF.reduce((a, x) => a * 256 + x, 0);
+  if (limit < 1 || id.length !== 16 || sig.length !== 32) return null;
+  return { secret, limit, id, sig };
+}
+
+/** The room a pass opens: witness(secret), hex. */
+function passRoom(pass) {
+  return digestBytes(pass.secret).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Does the pass prove it was minted from its own secret? */
+function passOk(pass) {
+  const sep = [0];
+  const expect = digestBytes([...pass.secret, ...sep, ...pass.id, ...sep,
+    ...natBytes(pass.limit)]);
+  return bytesEq(pass.sig, expect);
+}
+
+const natBytes = (n) => {
+  const out = [];
+  let x = n;
+  do { out.unshift(x % 256); x = Math.floor(x / 256); } while (x > 0);
+  return out;
+};
+
+/** The kzchat sender inside a line, if any (for the passless rate limit). */
+function senderOfLine(line) {
+  const parts = line.split(":");
+  if (ascii(hexDec(parts[0]) ?? []) !== "kzchat" || parts.length < 4) return null;
+  const sender = hexDec(parts[2]);
+  return sender ? ascii(sender) : null;
+}
+
+const PEER_LIMIT = 10;
+const PEER_WINDOW_MS = 10 * 60 * 1000;
 
 export default {
   async fetch(request, env) {
@@ -92,6 +190,38 @@ export class Room {
     console.log("ROOM_PERSIST", "lines=", this.lines.length, "base=", this.base);
   }
 
+  /**
+   * Admit one POST under the pass rules.  Pass spends live in DO
+   * storage (`pass:<id>` -> { spent, limit }), the passless rate
+   * limit in `peerPosts` (sender -> timestamps).  Same rules as the
+   * Node relay's PassStore: the twins agree on what a pass buys.
+   */
+  async admitPass(pass, lines, roomName) {
+    const now = Date.now();
+    if (pass && pass.limit > 0) {
+      const key = "pass:" + pass.id.map((b) => b.toString(16).padStart(2, "0")).join("");
+      const cur = (await this.state.storage.get(key)) ?? { spent: 0, limit: pass.limit };
+      if (cur.spent >= cur.limit) {
+        return { ok: false, status: 429, error: `pass spent (${cur.limit} post(s) allowed)` };
+      }
+      cur.spent += 1;
+      await this.state.storage.put(key, cur);
+      return { ok: true, remaining: cur.limit - cur.spent };
+    }
+    // No pass (or the owner's unlimited invite): per-sender rate limit.
+    const sender = lines.map(senderOfLine).find((s) => s != null) ?? "anonymous";
+    this.peerPosts ??= new Map();
+    const win = this.peerPosts.get(sender) ?? [];
+    const kept = win.filter((t) => t >= now - PEER_WINDOW_MS);
+    if (kept.length + lines.length > PEER_LIMIT) {
+      return { ok: false, status: 429,
+        error: `rate limit: ${PEER_LIMIT} posts per 10 min` };
+    }
+    for (let i = 0; i < lines.length; i++) kept.push(now);
+    this.peerPosts.set(sender, kept);
+    return { ok: true, remaining: PEER_LIMIT - kept.length };
+  }
+
   fetchFrom(cursor) {
     const end = this.base + this.lines.length;
     const from = Math.max(cursor, this.base);
@@ -130,6 +260,8 @@ export class Room {
   async fetch(request) {
     await this.loaded;
     const url = new URL(request.url);
+    const m = url.pathname.match(/^\/(?:room|ws)\/([^/]+)$/);
+    const roomName = m ? decodeURIComponent(m[1]) : "";
     const started = Date.now();
 
     if (url.pathname.startsWith("/ws/")) {
@@ -148,11 +280,26 @@ export class Room {
         console.log("ROOM_POST", "413 line too long");
         return json({ ok: false, error: "line too long" }, 413);
       }
+      // Pass + rate limiting (mirrors the Node relay's PassStore).
+      const rawPass = request.headers.get("x-kant-pass") ?? request.headers.get("x-kant-invite");
+      let pass = null;
+      if (rawPass != null) {
+        pass = parsePassCode(rawPass);
+        if (!pass || passRoom(pass) !== roomName || (pass.limit > 0 && !passOk(pass))) {
+          console.log("ROOM_POST", "401 bad pass");
+          return json({ ok: false, error: "bad pass" }, 401);
+        }
+      }
+      const verdict = await this.admitPass(pass, lines, roomName);
+      if (!verdict.ok) {
+        console.log("ROOM_POST", verdict.status, verdict.error);
+        return json({ ok: false, error: verdict.error }, verdict.status);
+      }
       const cursor = this.append(lines);
       await this.persist();
       const ms = Date.now() - started;
       console.log("ROOM_POST", "cursor=", cursor, "accepted=", lines.length, "ms=", ms);
-      return json({ ok: true, cursor, accepted: lines.length });
+      return json({ ok: true, cursor, accepted: lines.length, passRemaining: verdict.remaining });
     }
 
     if (request.method === "GET") {

@@ -31,6 +31,9 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { PassStore } from "./pass-store.mjs";
+import { pastePass, passOk, passRoom } from "../web/kant-pass.mjs";
+import { parseMsg } from "../web/kant-net.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -57,6 +60,9 @@ export const CONFIG = {
   roomTtlMs: Number(args.get("room-ttl") ?? 6 * 60 * 60 * 1000),
   logFile: args.get("log") ?? process.env.KANT_LOG ?? "",
   quiet: args.get("quiet") === "1" || process.env.KANT_QUIET === "1" || !isMain,
+  passDb: args.get("pass-db") ?? process.env.KANT_PASS_DB ?? "/var/lib/kant-zk/passes.sqlite",
+  peerLimit: Number(args.get("peer-limit") ?? 10),
+  peerWindowMs: Number(args.get("peer-window") ?? 10 * 60 * 1000),
   version: "1.0.0",
 };
 
@@ -65,6 +71,31 @@ export const CONFIG = {
 /** An eight-character one-way handle, as `Kant.Diagnostics.ref`. */
 export const roomRef = (room) =>
   crypto.createHash("sha256").update(String(room)).digest("hex").slice(0, 8);
+
+/**
+ * Read the pass (or owner invite) out of a POST's headers.  Returns
+ * the parsed pass (limit 0 for the owner's unlimited invite), `null`
+ * when no header was sent, or `false` when a header was sent but is
+ * bad (wrong room, bad signature, unparseable).
+ */
+function readPassHeader(req, room, log) {
+  const raw = req.headers["x-kant-pass"] ?? req.headers["x-kant-invite"];
+  if (raw == null) return null;
+  const pass = pastePass(String(raw));
+  if (!pass) return false;
+  if (passRoom(pass) !== room) return false;
+  if (pass.limit > 0 && !passOk(pass, pass.secret)) return false;
+  return pass;
+}
+
+/** The kzchat sender id inside a line, if the line is a chat message. */
+function senderOf(lines) {
+  for (const l of lines) {
+    const m = parseMsg(l);
+    if (m && m.sender) return m.sender;
+  }
+  return null;
+}
 
 /** One line per request: `time level area text | detail`.  Writes to the
  *  file named by `--log` (appending) and, unless `--quiet`, to stdout. */
@@ -173,7 +204,7 @@ const MIME = {
 const cors = (cfg) => ({
   "access-control-allow-origin": cfg.origin,
   "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "content-type",
+  "access-control-allow-headers": "content-type, x-kant-pass, x-kant-invite",
   "access-control-max-age": "86400",
 });
 
@@ -235,7 +266,9 @@ function serveStatic(cfg, res, urlPath) {
   attempt(0);
 }
 
-export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLogger(cfg)) {
+export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLogger(cfg),
+  passes = new PassStore(cfg.passDb, {
+    peerLimit: cfg.peerLimit, peerWindowMs: cfg.peerWindowMs })) {
   const server = http.createServer(async (req, res) => {
     const started = Date.now();
     const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
@@ -273,9 +306,26 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
           sendJson(res, cfg, 413, { ok: false, error: "line too long" });
           return;
         }
+        // Pass + rate limiting.  A POST may carry a kzpass in
+        // `x-kant-pass` (limited invite) or a kzinvite in
+        // `x-kant-invite` (owner's unlimited invite).  Without either,
+        // the per-sender rate limit applies.
+        const pass = readPassHeader(req, room, log);
+        if (pass === false) {
+          sendJson(res, cfg, 401, { ok: false, error: "bad pass" });
+          return;
+        }
+        const sender = senderOf(lines) ?? `ip:${req.socket.remoteAddress ?? "?"}`;
+        const verdict = passes.admit({ pass, sender, room, lines: lines.length });
+        if (!verdict.ok) {
+          log.warn("relay", "a post was refused", `${roomRef(room)}: ${verdict.error}`);
+          sendJson(res, cfg, verdict.status, { ok: false, error: verdict.error });
+          return;
+        }
         const cursor = rooms.post(room, lines);
-        log.info("relay", `posted ${lines.length} lines`, `${roomRef(room)} cursor=${cursor}`);
-        sendJson(res, cfg, 200, { ok: true, cursor, accepted: lines.length });
+        log.info("relay", `posted ${lines.length} lines`, `${roomRef(room)} cursor=${cursor} pass=${pass ? pass.limit : "peer"}`);
+        sendJson(res, cfg, 200, { ok: true, cursor, accepted: lines.length,
+          passRemaining: verdict.remaining });
         return;
       }
       if (req.method === "GET") {

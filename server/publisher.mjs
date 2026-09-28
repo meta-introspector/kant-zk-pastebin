@@ -218,13 +218,23 @@ async function pagesDeploy(out) {
   const token = existsSync(`${process.env.HOME}/.cloudflare`)
     ? readFileSync(`${process.env.HOME}/.cloudflare`, "utf8").trim() : "";
   const env = { ...process.env, CLOUDFLARE_API_TOKEN: token };
+  // The service PATH carries neither npx nor node; the nix profile has both.
+  const profileBin = "/home/mdupont/.nix-profile/bin";
+  if (existsSync(profileBin) && !env.PATH.includes(profileBin)) {
+    env.PATH = `${profileBin}:${env.PATH ?? ""}`;
+  }
   // Stage the whole site: web/ root + the snapshot under archive/.
   const webDir = pathJoin(import.meta.dirname, "..", "web");
   const stage = pathJoin(out, "..", "kant-pages-stage");
   rmSync(stage, { recursive: true, force: true });
   cpSync(webDir, stage, { recursive: true });
   cpSync(out, pathJoin(stage, "archive"), { recursive: true });
-  execFileSync("npx", ["wrangler", "pages", "deploy", stage,
+  // The service PATH has no npx — prefer an explicit override, then the
+  // nix profile path, then the bare name for manual runs.
+  const profileNpx = "/home/mdupont/.nix-profile/bin/npx";
+  const npx = process.env.NPX_BIN
+    ?? (existsSync(profileNpx) ? profileNpx : "npx");
+  execFileSync(npx, ["wrangler", "pages", "deploy", stage,
     "--project-name", "kant-zk-pastebin", "--branch", "main", "--commit-dirty=true"],
     { env, stdio: "inherit", cwd: process.cwd() });
 }
