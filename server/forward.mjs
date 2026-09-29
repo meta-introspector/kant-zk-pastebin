@@ -118,28 +118,62 @@ const roomOfInvite = (link) => {
   return witness(hexDecode(fields[1]));
 };
 
-async function runBridge(room, fromRelay, toRelay, stateDir) {
-  const statePath = `${stateDir}/kant-forward-${room.slice(0, 8)}.json`;
-  info(`room ${room.slice(0, 8)}…`, `${fromRelay} -> ${toRelay}`);
-  const fwd = new Bridge({ from: fromRelay, to: toRelay, room, statePath, interval });
-  info(`carrying the backlog`);
-  await fwd.carry().catch((e) => error("backlog carry failed", e.message ?? e));
-  if (once) return;
+async function pump(fwd, label) {
   for (;;) {
     try {
       const out = await fwd.src.poll(fwd.room, { wait: 10 });
-      const lines = out.lines ?? [];
+      let lines = out.lines ?? [];
+      // Loop guard: never re-post a line this bridge put on the source.
+      if (fwd.pushed?.size) lines = lines.filter((l) => !fwd.pushed.has(l));
       if (lines.length) {
         await fwd.dst.post(fwd.room, lines);
         fwd.state.carried += lines.length;
+        for (const l of lines) fwd.other?.pushed?.add(l);
         fwd.save();
-        info(`fwd ${room.slice(0, 8)}…: carried ${lines.length} line(s)`, `total ${fwd.state.carried}`);
+        info(`${label}: carried ${lines.length} line(s)`, `total ${fwd.state.carried}`);
       }
     } catch (e) {
-      error(`fwd ${room.slice(0, 8)}… poll cycle failed`, e.message ?? e);
-      await new Promise((r) => setTimeout(r, interval * 1000));
+      error(`${label} poll cycle failed`, e.message ?? e);
+      await new Promise((r) => setTimeout(r, fwd.interval * 1000));
     }
   }
+}
+
+async function runBridge(room, fromRelay, toRelay, stateDir, { both = false } = {}) {
+  const r8 = room.slice(0, 8);
+  const mk = (from2, to2, tag) => {
+    const b = new Bridge({
+      from: from2, to: to2, room,
+      statePath: `${stateDir}/kant-forward-${r8}-${tag}.json`,
+      interval,
+    });
+    b.pushed = new Set(); // lines this side has posted to its destination
+    return b;
+  };
+  const fwd = mk(fromRelay, toRelay, both ? "ab" : "fwd");
+  info(`room ${r8}…`, both ? `${fromRelay} <-> ${toRelay}` : `${fromRelay} -> ${toRelay}`);
+  if (both) {
+    const back = mk(toRelay, fromRelay, "ba");
+    fwd.other = back; back.other = fwd;
+    // Seed both sides' push-sets from the initial carry so backfill
+    // doesn't bounce: after carry, anything on a side is "known".
+    info(`carrying the backlog (both directions)`);
+    await fwd.carry().catch((e) => error("backlog carry fwd failed", e.message ?? e));
+    await back.carry().catch((e) => error("backlog carry back failed", e.message ?? e));
+    // Snapshot current contents into pushed sets so polls don't re-bounce.
+    for (const [b, other] of [[fwd, back], [back, fwd]]) {
+      try {
+        for (const l of (await b.src.poll(b.room, { wait: 0 })).lines ?? []) other.pushed.add(l);
+      } catch { /* best effort */ }
+    }
+    if (once) return;
+    await Promise.all([pump(fwd, `fwd ${r8}…`), pump(back, `back ${r8}…`)]);
+    return;
+  }
+  info(`carrying the backlog`);
+  await fwd.carry().catch((e) => error("backlog carry failed", e.message ?? e));
+  if (once) return;
+  await pump(fwd, `fwd ${r8}…`);
 }
 
 if (roomsDir) {
@@ -163,7 +197,7 @@ if (roomsDir) {
       running.set(r8, true);
       const pairs = cfg.forward?.length ? cfg.forward : [{ from: defaultFrom, to: defaultTo }];
       for (const p of pairs) {
-        runBridge(room, p.from, p.to, stateDir).catch((e) => {
+        runBridge(room, p.from, p.to, stateDir, { both: Boolean(p.both ?? cfg.both ?? arg("both", false)) }).catch((e) => {
           error(`bridge ${r8}… died`, e.message ?? e);
           running.delete(r8); // allow rescan to restart it
         });
@@ -177,15 +211,16 @@ if (roomsDir) {
   if (once) process.exit(0);
 } else {
   if (!invite || !from || !to) {
-    console.error(`usage: node server/forward.mjs --invite '<link>' --from <relay> --to <relay>
-       node server/forward.mjs --rooms <dir> [--default-from <relay>] [--default-to <relay>]`);
+    console.error(`usage: node server/forward.mjs --invite '<link>' --from <relay> --to <relay> [--both]
+       node server/forward.mjs --rooms <dir> [--default-from <relay>] [--default-to <relay>] [--both]`);
     process.exit(2);
   }
   const room = roomOfInvite(invite);
+  const both = Boolean(arg("both", false));
   if (once) {
-    await runBridge(room, from, to, "/tmp").catch((e) => { error("once carry failed", e.message ?? e); process.exit(1); });
+    await runBridge(room, from, to, "/tmp", { both }).catch((e) => { error("once carry failed", e.message ?? e); process.exit(1); });
     process.exit(0);
   }
-  runBridge(room, from, to, "/tmp").catch((e) => { error("fwd loop died", e.message ?? e); process.exit(1); });
+  runBridge(room, from, to, "/tmp", { both }).catch((e) => { error("fwd loop died", e.message ?? e); process.exit(1); });
   setInterval(() => {}, 1 << 30);
 }
