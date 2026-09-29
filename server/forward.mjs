@@ -103,49 +103,89 @@ class Bridge {
 // ----------------------------------------------------------------- main
 
 const invite = arg("invite", null);
+const roomsDir = arg("rooms", null);
 const from = arg("from", null);
 const to = arg("to", null);
-if (!invite || !from || !to) {
-  console.error(`usage: node server/forward.mjs --invite '<link>' --from <relay> --to <relay>`);
-  process.exit(2);
-}
-
-const { witness, hexDecode } = await import("../web/kantzk.mjs");
-const frag = String(invite).match(/#(.+)$/)?.[1];
-const fields = frag.slice(frag.indexOf(":") + 1).split(":");
-const room = witness(hexDecode(fields[1]));
-const statePath = arg("state", `/tmp/kant-forward-${room.slice(0, 8)}.json`);
-info(`room ${room.slice(0, 8)}…`, `${from} -> ${to}`);
-
+const interval = Number(arg("interval", 10)) || 10;
 const once = arg("once", false);
 
-const fwd = new Bridge({ from, to, room, statePath, interval: arg("interval", 10) });
+const { witness, hexDecode } = await import("../web/kantzk.mjs");
 
-// First carry the backlog once, then loop: long-poll the source, post
-// whatever arrives, and (in --both mode) the same the other way.
-info(`carrying the backlog`);
-await fwd.carry().catch((e) => error("backlog carry failed", e.message ?? e));
+// The room name from an invite link fragment:
+const roomOfInvite = (link) => {
+  const frag = String(link).match(/#(.+)$/)?.[1];
+  const fields = frag.slice(frag.indexOf(":") + 1).split(":");
+  return witness(hexDecode(fields[1]));
+};
 
-async function loop(bridge, label) {
+async function runBridge(room, fromRelay, toRelay, stateDir) {
+  const statePath = `${stateDir}/kant-forward-${room.slice(0, 8)}.json`;
+  info(`room ${room.slice(0, 8)}…`, `${fromRelay} -> ${toRelay}`);
+  const fwd = new Bridge({ from: fromRelay, to: toRelay, room, statePath, interval });
+  info(`carrying the backlog`);
+  await fwd.carry().catch((e) => error("backlog carry failed", e.message ?? e));
+  if (once) return;
   for (;;) {
     try {
-      const out = await bridge.src.poll(bridge.room, { wait: 10 });
+      const out = await fwd.src.poll(fwd.room, { wait: 10 });
       const lines = out.lines ?? [];
       if (lines.length) {
-        await bridge.dst.post(bridge.room, lines);
-        bridge.state.carried += lines.length;
-        bridge.save();
-        info(`${label}: carried ${lines.length} line(s)`, `total ${bridge.state.carried}`);
+        await fwd.dst.post(fwd.room, lines);
+        fwd.state.carried += lines.length;
+        fwd.save();
+        info(`fwd ${room.slice(0, 8)}…: carried ${lines.length} line(s)`, `total ${fwd.state.carried}`);
       }
     } catch (e) {
-      error(`${label} poll cycle failed`, e.message ?? e);
-      await new Promise((r) => setTimeout(r, bridge.interval * 1000));
+      error(`fwd ${room.slice(0, 8)}… poll cycle failed`, e.message ?? e);
+      await new Promise((r) => setTimeout(r, interval * 1000));
     }
   }
 }
-if (once) {
-  await fwd.carry().catch((e) => { error("once carry failed", e.message ?? e); process.exit(1); });
+
+if (roomsDir) {
+  // Self-maintaining mode: scan the rooms dir, keep one bridge per room.
+  // Each room config can add `"forward": [{ "from": "...", "to": "..." }, ...]`;
+  // absent, the default is local relay -> CF twin.
+  const { readdirSync, readFileSync, mkdirSync } = await import("node:fs");
+  const defaultFrom = arg("default-from", "https://solana.solfunmeme.com/relay");
+  const defaultTo = arg("default-to", "https://kant-zk-relay.jmikedupont2.workers.dev");
+  const stateDir = arg("state-dir", "/var/lib/kant-zk/forward");
+  mkdirSync(stateDir, { recursive: true });
+  const running = new Map(); // room8 -> true
+  const scan = () => {
+    for (const f of readdirSync(roomsDir).filter((f) => f.endsWith(".json"))) {
+      let cfg;
+      try { cfg = JSON.parse(readFileSync(`${roomsDir}/${f}`, "utf8")); } catch { continue; }
+      if (!cfg.invite) continue;
+      const room = roomOfInvite(cfg.invite);
+      const r8 = room.slice(0, 8);
+      if (running.has(r8)) continue;
+      running.set(r8, true);
+      const pairs = cfg.forward?.length ? cfg.forward : [{ from: defaultFrom, to: defaultTo }];
+      for (const p of pairs) {
+        runBridge(room, p.from, p.to, stateDir).catch((e) => {
+          error(`bridge ${r8}… died`, e.message ?? e);
+          running.delete(r8); // allow rescan to restart it
+        });
+      }
+      info(`watching room ${r8}… (${f})`, `${pairs.length} bridge(s)`);
+    }
+  };
+  scan();
+  if (!once) setInterval(scan, 15000);
+  setInterval(() => {}, 1 << 30);
+  if (once) process.exit(0);
 } else {
-  loop(fwd, "fwd").catch((e) => { error("fwd loop died", e.message ?? e); process.exit(1); });
+  if (!invite || !from || !to) {
+    console.error(`usage: node server/forward.mjs --invite '<link>' --from <relay> --to <relay>
+       node server/forward.mjs --rooms <dir> [--default-from <relay>] [--default-to <relay>]`);
+    process.exit(2);
+  }
+  const room = roomOfInvite(invite);
+  if (once) {
+    await runBridge(room, from, to, "/tmp").catch((e) => { error("once carry failed", e.message ?? e); process.exit(1); });
+    process.exit(0);
+  }
+  runBridge(room, from, to, "/tmp").catch((e) => { error("fwd loop died", e.message ?? e); process.exit(1); });
   setInterval(() => {}, 1 << 30);
 }

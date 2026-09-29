@@ -28,6 +28,7 @@
 //       --out /var/lib/kant-zk/snapshot \
 //       [--interval 300] [--once] \
 //       [--pages-deploy]   # also `wrangler pages deploy` the snapshot
+//       [--worker-deploy]  # also `wrangler deploy` the relay worker (hash-gated)
 //
 // With --pages-deploy the whole site is staged (web/ as the root, the
 // snapshot under archive/) and pushed to the CF Pages project
@@ -239,6 +240,32 @@ async function pagesDeploy(out) {
     { env, stdio: "inherit", cwd: process.cwd() });
 }
 
+async function workerDeploy() {
+  const { createHash } = await import("node:crypto");
+  const serverDir = pathJoin(import.meta.dirname);
+  const hashIn = ["worker.js", "wrangler.toml"].map((f) =>
+    readFileSync(pathJoin(serverDir, f), "utf8")).join("\0");
+  const hash = createHash("sha256").update(hashIn).digest("hex");
+  const hashPath = pathJoin(out, "..", ".worker-deploy-sha256");
+  if (existsSync(hashPath) && readFileSync(hashPath, "utf8").trim() === hash) {
+    info("worker unchanged, skipping deploy");
+    return;
+  }
+  const { execFileSync } = await import("node:child_process");
+  const token = existsSync(`${process.env.HOME}/.cloudflare`)
+    ? readFileSync(`${process.env.HOME}/.cloudflare`, "utf8").trim() : "";
+  const env = { ...process.env, CLOUDFLARE_API_TOKEN: token };
+  const profileBin = "/home/mdupont/.nix-profile/bin";
+  if (existsSync(profileBin) && !env.PATH.includes(profileBin)) {
+    env.PATH = `${profileBin}:${env.PATH ?? ""}`;
+  }
+  const profileNpx = "/home/mdupont/.nix-profile/bin/npx";
+  const npx = process.env.NPX_BIN
+    ?? (existsSync(profileNpx) ? profileNpx : "npx");
+  execFileSync(npx, ["wrangler", "deploy"], { env, stdio: "inherit", cwd: serverDir });
+  writeFileSync(hashPath, hash + "\n");
+}
+
 // ----------------------------------------------------------------- main
 
 const spoolDir = arg("spool", "/var/spool/uucp/pastebin");
@@ -246,6 +273,7 @@ const out = arg("out", "/var/lib/kant-zk/snapshot");
 const interval = Math.max(10, Number(arg("interval", 300)) || 300);
 const once = arg("once", false);
 const deployPages = arg("pages-deploy", false);
+const deployWorker = arg("worker-deploy", false);
 const roomsOnly = arg("rooms-only", true); // default: only kant-zk room threads
 
 const spool = pasteSpool(spoolDir);
@@ -259,6 +287,10 @@ async function cycle() {
     if (deployPages) {
       await pagesDeploy(out);
       info("pushed snapshot to Cloudflare Pages");
+    }
+    if (deployWorker) {
+      await workerDeploy();
+      info("deployed relay worker to Cloudflare");
     }
   } catch (e) {
     error("snapshot cycle failed", e.message ?? e);
