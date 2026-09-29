@@ -76,6 +76,10 @@ const say = (msg, cls = "") => {
   $("log").prepend(d);
 };
 
+// A pass or invite link carries its code in the fragment (#kzpass… /
+// #kzinvite…).  Whoever opens such a link has already been given the
+// room — make them join it instead of staring at an empty box.
+
 let kernel = null;
 let node = null;      // KantNode
 let pass = null;      // parsed kzpass / kzinvite
@@ -89,8 +93,9 @@ const effectiveRelay = (inv) => {
   return inv.relay && inv.relay.startsWith("http") ? inv.relay : cf;
 };
 
-$("join").onclick = async () => {
-  const raw = $("joinbox").value.trim();
+$("join").onclick = () => openRoom($("joinbox").value.trim());
+
+async function openRoom(raw) {
   if (!raw) return;
   let inv = null;
   if (raw.includes("#")) {
@@ -116,7 +121,13 @@ $("join").onclick = async () => {
   say(`opened room ${node.room.slice(0, 8)}…` +
     (inv.limit > 0 ? ` with a ${inv.limit}-post pass` : " (unlimited invite)"), "ok");
   if ($("poll").checked) startPoll();
-};
+}
+
+// Auto-join when the page is opened via a pass or invite link.
+if (location.hash.length > 10) {
+  $("joinbox").value = location.href;
+  openRoom(location.href);
+}
 
 function startPoll() {
   stopPoll();
