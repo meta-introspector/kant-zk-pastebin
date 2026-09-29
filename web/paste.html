@@ -157,7 +157,10 @@ $("post").onclick = async () => {
   const text = $("text").value;
   if (!text.trim()) return;
   const headers = {};
-  if (pass) headers["x-kant-pass"] = P.copyPass(pass);
+  // Only a real pass (limit > 0) goes in the header.  A plain invite
+  // joins with the room secret itself — copyPass on it would throw
+  // (an invite has no pass id/sig fields).
+  if (pass && pass.limit > 0) headers["x-kant-pass"] = P.copyPass(pass);
   try {
     // say() builds the kzchat line; the extra header carries the pass.
     const line = N.printMsg(N.sayText(node.room, node.self, node.seq + 1, text));

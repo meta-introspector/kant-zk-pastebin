@@ -56,8 +56,10 @@ export function passOk(pass, secret) {
 /** The room a pass opens (same as the invite's). */
 export const passRoom = (p) => roomOf(p.secret);
 
-/** The printed code. */
-export const copyPass = (p) => envelopeEncode(ofPass(p));
+/** The printed code.  A pass holder (limit > 0) gets a kzpass; a bare
+ *  invite (limit 0) gets its own kzinvite code — never a crash. */
+export const copyPass = (p) =>
+  envelopeEncode(p.limit > 0 ? ofPass(p) : ofInvite(p));
 
 /** The same pass as a link (`#kzpass…` fragment). */
 export const passUrl = (base, p) => shareUrl(base, ofPass(p));
