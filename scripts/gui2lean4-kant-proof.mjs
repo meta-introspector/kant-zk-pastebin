@@ -124,8 +124,8 @@ console.log("share pass (5 posts):", shareLink.slice(0, 100) + "…");
 
 // verify the pass works before sharing (dry-run signature + room check):
 const parsed = P.pastePass(P.copyPass(pass));
-const sigOk = P.passOk(parsed);
-const roomOk = P.passRoom(parsed) === N.roomOf(ownerInv.secret);
+const sigOk = P.passOk(parsed, cfInv.secret);
+const roomOk = P.passRoom(parsed) === N.roomOf(cfInv.secret);
 console.log("pass signature valid:", sigOk, "| room matches:", roomOk);
 
 await send("Page.stopScreencast");
