@@ -69,7 +69,10 @@ globalThis.document = {
   getElementById: (id) => elements.get(id) ?? null,
   createElement: (tag) => new El("", tag),
   execCommand: () => true,
+  addEventListener: () => {},
+  querySelector: (sel) => (sel === ".guide" ? guideBox : null),
 };
+const guideBox = new El("", "div");
 globalThis.location = {
   origin: "https://example.test",
   pathname: "/kant/",
@@ -91,7 +94,7 @@ const opened = [];
 const local = new Map();
 // A run left behind by an earlier visit, as a real browser would hold it.
 local.set("kant-diag-run",
-  "6b7a6c6f67::05:01:09:616e206561726c6965722072756e:");
+  "6b7a6c6f67:01:05:01:09:616e206561726c6965722072756e:");
 globalThis.localStorage = {
   getItem: (k) => (local.has(k) ? local.get(k) : null),
   setItem: (k, v) => local.set(k, v),
@@ -248,8 +251,10 @@ try {
   const SL = await import("./kant-sharelog.mjs");
   const K = await import("./kantzk.mjs");
   ok("the verdict is on the page", $("verdict").innerHTML.length > 0);
-  ok("the verdict names the same-machine failure",
-    /only-this-browser|no-transport|no-room/.test($("verdict").innerHTML));
+  ok("the verdict names a real failure",
+    // kant.config names a relay, so with it down the verdict is
+    // relay-down; with no relay configured it is only-this-browser.
+    /only-this-browser|no-transport|no-room|relay-down/.test($("verdict").innerHTML));
   ok("the run is shown", $("diagtail").textContent.includes("ms"));
   ok("the probe of this origin is in it",
     /probe|relay/.test($("diagtail").textContent));

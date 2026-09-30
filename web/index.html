@@ -60,6 +60,7 @@
   <p id="prompt">…</p>
   <div class="steps" id="steps"></div>
   <button class="ghost" id="again">Say that again</button>
+  <button class="ghost" id="btn-exitdemo" title="leave the guided walkthrough; the guide stops talking and the dots go">Exit demo</button>
 </div>
 
 <!-- ------------------------------------------------------------ welcome -->
@@ -306,6 +307,9 @@ function render() {
   $("prompt").textContent = F.promptFor(ui);
   const done = [ui.progress.gotIn, ui.progress.sharedIt, ui.progress.saidHello];
   $("steps").textContent = done.map((d) => (d ? "●" : "○")).join(" ");
+  // The guide box is the demo: once it is exited, only a restart brings it back.
+  document.querySelector(".guide").style.display = ui.demo ? "" : "none";
+  $("btn-exitdemo").textContent = ui.demo ? "Exit demo" : "Restart demo";
 
   if (node && node.secret) drawShare();
   renderChat();
@@ -333,6 +337,15 @@ $("hush").onclick = () => {
   if (!ui.hushed) speak(F.promptFor(ui));
 };
 $("again").onclick = () => { spokenFor = ""; speak(F.promptFor(ui)); };
+
+// Leaving the demo is one tap, and it sticks: the choice is remembered per
+// browser, so a returning user lands in the plain room UI, not the tour.
+$("btn-exitdemo").onclick = () => {
+  const leaving = ui.demo;
+  dispatch({ type: leaving ? "exitDemo" : "restartDemo" });
+  try { localStorage.setItem("kant-demo", leaving ? "off" : "on"); } catch { /* private mode */ }
+  spokenFor = "";
+};
 
 // ----------------------------------------------------------- the room
 
@@ -727,9 +740,15 @@ function renderDiag() {
     `${bad ? '<span class="warn">' : ""}${K.escapeHtml(D.explain(r.verdict))}${bad ? "</span>" : ""}` +
     `\nroom ${K.escapeHtml(r.room || "(none)")} · relay ${K.escapeHtml(r.relay || "(none)")}` +
     ` · ${LOG.total} events${LOG.dropped ? ` (${LOG.dropped} dropped)` : ""}`;
-  const tail = LOG.events.slice(-40).map((e) =>
+  // The first lines of a run (the acknowledgment of the previous one) stay
+  // readable however long the session grows: the tail is the last 40
+  // events, with the head kept above it when they no longer overlap.
+  const all = LOG.events.map((e) =>
     `${String(e.ms).padStart(6)}ms ${e.level.padEnd(5)} ${e.area.padEnd(6)} ${e.text}` +
     `${e.detail ? `  |  ${e.detail}` : ""}`).join("\n");
+  const tail = LOG.events.length > 40
+    ? all.split("\n").slice(0, 2).concat(["…"], all.split("\n").slice(-38)).join("\n")
+    : all;
   $("diagtail").textContent = tail;
 }
 
@@ -813,6 +832,10 @@ $("btn-diagpage").onclick = () => {
   LOG.info("config", loaded.ok === false ? "kant.config could not be read" : "kant.config read",
     loaded.ok === false ? "using the defaults" : cfg.origin);
   relayBase = await S.loadRelay();
+  // A browser that has already left the guided tour does not get it again.
+  try {
+    if (localStorage.getItem("kant-demo") === "off") dispatch({ type: "exitDemo" });
+  } catch { /* storage unavailable: the demo plays */ }
   await refreshTransport();
   $("relay").value = relayBase;
   $("caption").value = cfg.caption;

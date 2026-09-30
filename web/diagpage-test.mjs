@@ -166,7 +166,7 @@ try {
   ok("the checks write their own run", $("rows").innerHTML.includes("checks started here"));
   ok("...and reach a verdict", $("verdict").innerHTML.length > 0);
   ok("...naming what is missing",
-    /no-transport|only-this-browser|room-mismatch|no-room/.test($("verdict").innerHTML));
+    /no-transport|only-this-browser|room-mismatch|no-room|relay-down/.test($("verdict").innerHTML));
   ok("...having probed this origin", $("rows").innerHTML.includes("example.test"));
 
   // The code inspector: the two blocks that were reported as "not connecting".

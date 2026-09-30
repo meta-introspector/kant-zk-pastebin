@@ -149,6 +149,7 @@ export const start = () => ({
   camera: false,
   inRoom: false,
   hushed: false,
+  demo: true,
   progress: { gotIn: false, sharedIt: false, saidHello: false },
 });
 
@@ -188,6 +189,16 @@ export function step(s, ev) {
       return withProgress(s, { saidHello: s.progress.saidHello || s.inRoom });
     case "leave":
       return { ...s, screen: Screen.welcome, camera: false, inRoom: false };
+    case "exitDemo":
+      // The guided walkthrough is a demo: leaving it means the guide stops
+      // talking, the progress dots go, and the app is just the room UI.
+      return {
+        ...s,
+        demo: false,
+        progress: { gotIn: true, sharedIt: true, saidHello: true },
+      };
+    case "restartDemo":
+      return { ...s, demo: true, progress: { gotIn: false, sharedIt: false, saidHello: false } };
     case "hush":
       return { ...s, hushed: true };
     case "unhush":
@@ -229,6 +240,7 @@ export const doneWords =
 
 /** The line the guide would say in this state. */
 export function promptFor(s) {
+  if (!s.demo) return "";
   const t = nextTask(s.progress);
   return t === null ? doneWords : prompt(t);
 }
