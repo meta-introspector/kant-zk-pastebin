@@ -12,7 +12,7 @@ if [ -n "$PASTEBIN_UPSTREAM" ]; then
 fi
 
 # Use the system-manager all-services config which includes pastebin + nora + svg2anim
-# + ipld-car-shmem (shmem-dedup, tantivy-indexer, letta-ipld-memory) structures.
+# + ipld-car-shmem (shmem-dedup-dedup, tantivy-indexer, letta-ipld-memory) structures.
 FLAKE="${PASTEBIN_FLAKE:-git+file:///home/mdupont/projects/system-manager?ref=main#systemConfigs.all-services}"
 
 LOG_DIR="${PASTEBIN_DIR}/logs"
@@ -49,8 +49,10 @@ Commands:
   deploy    Nix build pastebin, cargo build check, git commit, build + activate
             kant-pastebin-only system-manager config (pastebin + nora + svg2anim),
             restart services, diagnose
+            Also deploy Cloudflare worker using sops and wrangler
   restart   Restart pastebin + svg2anim-worker services, then diagnose
   switch    Build + activate all-services system-manager config with sudo
+            Also deploy Cloudflare worker using sops and wrangler
 
 Options:
   --sudo    Force sudo even if already root
@@ -115,6 +117,19 @@ deploy() {
   run_sudo systemctl restart nora-dir.service >> "$LOG_FILE" 2>&1 || log "WARNING: nora-dir.service restart failed"
   run_sudo systemctl restart nora.service >> "$LOG_FILE" 2>&1 || log "WARNING: nora.service restart failed"
 
+  # Deploy Cloudflare worker using sops and wrangler
+  log "Step 6: Deploying Cloudflare worker using sops and wrangler"
+  if [ -x "$PASTEBIN_DIR/deploy-cloudflare-worker.sh" ]; then
+    if ! "$PASTEBIN_DIR/deploy-cloudflare-worker.sh" deploy >> "$LOG_FILE" 2>&1; then
+      log_err "Cloudflare worker deployment failed"
+      exit 1
+    fi
+    log "Cloudflare worker deployment OK"
+  else
+    log_err "deploy-cloudflare-worker.sh not found or not executable"
+    exit 1
+  fi
+
   log "=== Deploy complete ==="
   "$PASTEBIN_DIR/diagnose.sh" | tee -a "$LOG_FILE"
 }
@@ -127,37 +142,50 @@ restart_pastebin() {
 
 switch_system_manager() {
   cd "$PASTEBIN_DIR"
-
+  
   echo "=== Switch: build + activate all-services system-manager config ==="
   echo "Flake: $FLAKE"
-
+  
   echo "Building pastebin package..."
   nix build .#kant-pastebin --no-link >> "$LOG_FILE" 2>&1 || true
-
+  
   echo "Updating pastebin-src in system-manager flake.lock..."
   cd "$SYSTEM_MANAGER_DIR"
   nix flake update pastebin-src >> "$LOG_FILE" 2>&1 || true
-
+  
   echo "Building system-manager config..."
   STORE_PATH="$(nix build --impure "$FLAKE" --no-link --json 2>>"$LOG_FILE" | jq -r '.[0].outputs.out')"
   echo "Built: $STORE_PATH"
-
+  
   if [ ! -x "$STORE_PATH/bin/activate" ]; then
     echo "ERROR: activation script not found at $STORE_PATH/bin/activate" >&2
     exit 1
   fi
-
+  
   echo "Activating (requires sudo)..."
   run_sudo "$STORE_PATH/bin/activate"
-
+  
   echo "Reloading systemd..."
   run_sudo systemctl daemon-reload
-
+  
   echo "Restarting services..."
   run_sudo systemctl restart kant-pastebin.service 2>/dev/null || true
   run_sudo systemctl restart nora.service 2>/dev/null || true
   run_sudo systemctl restart svg2anim-worker.service 2>/dev/null || true
-
+  
+  # Deploy Cloudflare worker using sops and wrangler
+  echo "Deploying Cloudflare worker using sops and wrangler..."
+  if [ -x "$PASTEBIN_DIR/deploy-cloudflare-worker.sh" ]; then
+    if ! "$PASTEBIN_DIR/deploy-cloudflare-worker.sh" deploy >> "$LOG_FILE" 2>&1; then
+      log_err "Cloudflare worker deployment failed"
+      exit 1
+    fi
+    echo "Cloudflare worker deployment OK"
+  else
+    echo "ERROR: deploy-cloudflare-worker.sh not found or not executable" >&2
+    exit 1
+  fi
+  
   echo ""
   echo "=== Verifying ==="
   for svc in kant-pastebin nora nginx svg2anim-worker; do
@@ -167,6 +195,14 @@ switch_system_manager() {
       echo "  ⚠️  $svc.service not active"
     fi
   done
+  
+  # Verify Cloudflare worker health
+  echo "Verifying Cloudflare worker health..."
+  if "$PASTEBIN_DIR/deploy-cloudflare-worker.sh" health >> "$LOG_FILE" 2>&1; then
+    echo "  ✅ Cloudflare worker healthy"
+  else
+    echo "  ⚠️  Cloudflare worker health check failed"
+  fi
 }
 
 case "${1:-deploy}" in
