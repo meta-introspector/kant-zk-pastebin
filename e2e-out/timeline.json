@@ -1,0 +1,56 @@
+{
+  "base": "http://127.0.0.1:8787",
+  "timeline": [
+    {
+      "step": "relay healthy",
+      "ms": 1790781146197,
+      "ok": true,
+      "name": "kant-zk-relay",
+      "version": "1.0.0",
+      "rooms": 3,
+      "lines": 1,
+      "sockets": 0
+    },
+    {
+      "step": "A opened a room",
+      "ms": 1790781148777
+    },
+    {
+      "step": "invite link",
+      "ms": 1790781148779,
+      "link": "http://127.0.0.1:8787/#6b7a696e76697465:687474703a2f2f3132372e302e302e313a38373837:d15f7028d9c4422964b24eef55c5b773ad1ea255c978898f54471ed4916a6b6f:706565722d756b357870"
+    },
+    {
+      "step": "B joined the room",
+      "ms": 1790781149034
+    },
+    {
+      "step": "chat read",
+      "ms": 1790781152149,
+      "aSeesB": true,
+      "bSeesA": true
+    }
+  ],
+  "checks": [
+    [
+      "relay healthy",
+      true
+    ],
+    [
+      "A opened a room",
+      true
+    ],
+    [
+      "B joined by link",
+      true
+    ],
+    [
+      "A sees B's line",
+      true
+    ],
+    [
+      "B sees A's line",
+      true
+    ]
+  ]
+}
