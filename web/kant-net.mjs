@@ -353,6 +353,11 @@ export class RelayClient {
   /** Every request goes through here, so every request is logged: the URL,
    *  the status, and the error if it never got that far. */
   async request(url, init, what) {
+    // A service worker that caches GETs would freeze a long poll at the
+    // first empty answer: bust the cache so the request always reaches the
+    // relay, whatever the page's worker does.
+    if (!init) init = { cache: "no-cache" };
+    else if (!init.cache) init = { ...init, cache: "no-cache" };
     this.log.info("relay", `${what}…`, url);
     let r;
     try {

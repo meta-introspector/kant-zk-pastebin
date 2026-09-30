@@ -10,7 +10,7 @@
 // credits itself — the ledger (Kant/Credits.lean) is authoritative and lives in
 // the page.
 
-const SHELL_CACHE = "kantzk-shell-v9";
+const SHELL_CACHE = "kantzk-shell-v10";
 const PIN_CACHE = "kantzk-pins-v1";
 
 // kant-kernel-embedded.mjs is part of the shell, not an optional extra: it is
@@ -55,6 +55,17 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+
+  // The relay API is never cacheable: a long poll that comes back empty is
+  // stored under its URL (`?cursor=N&wait=S`), and the next poll of the same
+  // cursor is served from the cache — instantly, and forever stale.  That
+  // is how a room-creating tab went blind while a fresh private window
+  // (no service worker) kept working.  Same-origin only; a cross-origin
+  // relay never passes through here anyway.
+  if (url.origin === self.location.origin &&
+      (url.pathname === "/health" || /^\/room\/|^\/ws\//.test(url.pathname))) {
+    return; // do not respondWith: let the request go to the network
+  }
 
   if (url.origin === self.location.origin && url.pathname.includes("/pin/")) {
     const witness = url.pathname.slice(url.pathname.indexOf("/pin/") + 5);
