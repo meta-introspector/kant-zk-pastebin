@@ -65,7 +65,10 @@ const opts = {
   transport: "fetch",
   printCurl: false,
   origin: null,
-  config: new URL("../web/kant.config", import.meta.url).pathname,
+  // Config lookup order: $KANT_CONFIG, next to the running file (bundled
+  // CLI), the repository checkout (../web/), then built-in defaults.  The
+  // bundled single-file build keeps this working wherever the file lands.
+  config: null,
   name: null,
   relay: null,
   wait: 0,
@@ -89,13 +92,24 @@ for (let i = 0; i < argv.length; i += 1) {
     case "--spool": opts.spool = take(); break;
     case "--backend": opts.backend = take(); break;
     case "-h": case "--help": rest.push("help"); break;
+    case "-V": case "--version":
+      console.log(process.env.KANT_CLI_VERSION ?? "0.0.0-dev");
+      process.exit(0);
+      break;
     default: rest.push(tok);
   }
 }
 
 const cfg = (() => {
-  const base = existsSync(opts.config)
-    ? (parseConfig(readFileSync(opts.config, "utf8")) ?? DEFAULT_CONFIG)
+  const candidates = [
+    process.env.KANT_CONFIG,
+    new URL("kant.config", import.meta.url).pathname,
+    new URL("../kant.config", import.meta.url).pathname,
+    new URL("../web/kant.config", import.meta.url).pathname,
+  ].filter(Boolean);
+  const hit = candidates.find((p) => existsSync(p));
+  const base = hit
+    ? (parseConfig(readFileSync(hit, "utf8")) ?? DEFAULT_CONFIG)
     : DEFAULT_CONFIG;
   return opts.origin ? { ...base, origin: opts.origin } : base;
 })();

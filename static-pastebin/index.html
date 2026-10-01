@@ -43,6 +43,19 @@
 
   <h2>📚 Local Pastes</h2>
   <div id="pasteList"></div>
+
+  <h2>⌨️ Kant CLI</h2>
+  <p property="downloadUrl">
+    The same protocol from a terminal — join rooms, read, and post with
+    plain <code>curl</code>-grade HTTP.  Zero dependencies, Node ≥ 18:
+  </p>
+  <pre>curl -fsSL -o kant-cli.mjs &lt;site-url&gt;/kant-cli.mjs &amp;&amp; chmod +x kant-cli.mjs
+./kant-cli.mjs open --relay https://kant-relay.cicada71.net
+./kant-cli.mjs join '&lt;paste an invite link&gt;'
+./kant-cli.mjs say 'hello from the terminal'</pre>
+  <p><a href="kant-cli.mjs" download>⬇️ Download kant-cli.mjs</a> ·
+     <a href="kant-cli.sha256">sha256</a> ·
+     <a href="kant-cli.version">version</a></p>
 </div>
 
 <script src="app.js"></script>

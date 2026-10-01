@@ -22,8 +22,8 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as C from "./kant-cli.mjs";
-import * as N from "./kant-net.mjs";
+import * as C from "../web/kant-cli.mjs";
+import * as N from "../web/kant-net.mjs";
 
 let checks = 0;
 const fail = [];

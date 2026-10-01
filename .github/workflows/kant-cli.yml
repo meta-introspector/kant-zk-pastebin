@@ -1,0 +1,87 @@
+name: Build and publish kant CLI
+
+# Builds the bundled single-file CLI (dist/kant-cli.mjs) on every push that
+# touches it, attaches it as a workflow artifact, and publishes it to a
+# GitHub Release when a v* tag is pushed.  The Pages workflow hosts the same
+# bundle on the site itself.
+
+on:
+  push:
+    branches: [main, master, feature/wip]
+    paths:
+      - "scripts/kant-cli.mjs"
+      - "scripts/build-cli.mjs"
+      - "web/kant-cli.mjs"
+      - "web/kant-net.mjs"
+      - "web/kantzk.mjs"
+      - "web/kant-flow.mjs"
+      - "web/kant-uucp.mjs"
+      - "web/kant-pastebin.mjs"
+      - "web/kant-share.mjs"
+      - "web/kant-site.mjs"
+      - "web/kant-carddebug.mjs"
+      - ".github/workflows/kant-cli.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # CLI tests first: a failing test must not ship a bundle.
+      - name: Run CLI tests
+        run: node scripts/cli-test.mjs
+
+      - name: Install esbuild
+        run: npm i --no-save esbuild
+
+      - name: Bundle CLI
+        env:
+          KANT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.1.0-{0}', github.sha) }}
+        run: node scripts/build-cli.mjs
+
+      - name: Smoke test the bundle
+        run: |
+          chmod +x dist/kant-cli.mjs
+          ./dist/kant-cli.mjs --version
+          ./dist/kant-cli.mjs --help | head -5
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kant-cli-${{ github.sha }}
+          path: |
+            dist/kant-cli.mjs
+            dist/kant-cli.sha256
+            dist/kant-cli.version
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kant-cli-${{ github.sha }}
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/kant-cli.mjs
+            dist/kant-cli.sha256
+            dist/kant-cli.version
+          generate_release_notes: true
