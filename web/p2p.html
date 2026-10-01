@@ -1,0 +1,167 @@
+<!doctype html>
+<!-- p2p experiment webapp: relay room + IPFS CIDs + wasm experiments.
+     Served by relay.mjs --static web at /p2p.html (BASE_PATH aware). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kant p2p — ipfs over relay</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: ui-monospace, monospace; margin: 0 auto; max-width: 60rem; padding: 1rem; background: #0d1117; color: #c9d1d9; }
+  h1 { font-size: 1.1rem; } a { color: #58a6ff; }
+  fieldset { border: 1px solid #30363d; border-radius: 6px; margin: 0 0 1rem; }
+  legend { padding: 0 .4rem; color: #8b949e; }
+  input, button { font: inherit; background: #161b22; color: inherit; border: 1px solid #30363d; border-radius: 4px; padding: .25rem .5rem; }
+  button { cursor: pointer; } button:hover { border-color: #8b949e; }
+  #log { white-space: pre-wrap; word-break: break-all; background: #010409; border: 1px solid #30363d; border-radius: 6px; padding: .5rem; height: 18rem; overflow-y: auto; font-size: .8rem; }
+  .row { margin: .3rem 0; } .ok { color: #3fb950; } .warn { color: #d29922; } .err { color: #f85149; } .dim { color: #8b949e; }
+  table { border-collapse: collapse; width: 100%; font-size: .8rem; }
+  td, th { border: 1px solid #30363d; padding: .2rem .4rem; text-align: left; }
+</style>
+</head>
+<body>
+<h1>kant p2p — share artifacts by CID, run wasm experiments</h1>
+
+<fieldset>
+  <legend>join</legend>
+  <div class="row">
+    <label>relay <input id="relay" size="28" placeholder="same-origin default"></label>
+    <label>room <input id="room" size="16" value="kant-lab"></label>
+    <label>peer <input id="peer" size="10" placeholder="anon"></label>
+    <button id="join">join</button>
+    <span id="status" class="dim"></span>
+  </div>
+  <div class="row dim">ipfs: <span id="ipfs-status">probing…</span> · kernel: <span id="kernel-status">not loaded</span></div>
+</fieldset>
+
+<fieldset>
+  <legend>publish an artifact (≤ 256 KiB → CIDv1 raw, pinned if kubo is up)</legend>
+  <div class="row"><input type="file" id="file"></div>
+  <div class="row"><label>or text <input id="text" size="40" placeholder="type something"></label>
+    <button id="pub-text">publish text</button> <span id="pub-status"></span></div>
+</fieldset>
+
+<fieldset>
+  <legend>artifacts in the room</legend>
+  <table id="arts"><thead><tr><th>name</th><th>cid</th><th>size</th><th>via</th><th></th></tr></thead><tbody></tbody></table>
+  <div class="row">
+    <button id="exp-merge" title="merge two published CIDs in the proved kernel">experiment: merge first two CIDs</button>
+    <button id="exp-digest">experiment: room digest</button>
+    <span id="exp-status"></span>
+  </div>
+</fieldset>
+
+<fieldset><legend>log</legend><div id="log"></div></fieldset>
+
+<script type="module">
+import { P2PApp } from "./kant-p2p.mjs";
+import { ipfsCat } from "./kant-ipfs.mjs";
+import { loadKernel } from "./kant-wasm.mjs";
+
+const $ = (id) => document.getElementById(id);
+const log = (msg, cls = "") => {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  $("log").prepend(d);
+};
+let app = null;
+
+// probe ipfs before join so the UI knows which transport to expect
+ipfsCat("bafkqaaa").then((r) => {
+  $("ipfs-status").textContent = r ? "gateway reachable" : "no gateway — artifacts will ride the room";
+}).catch(() => { $("ipfs-status").textContent = "no gateway — artifacts will ride the room"; });
+
+loadKernel().then((k) => {
+  $("kernel-status").textContent = `proved kernel ok (${k.source ?? "wasm"})`;
+}).catch((e) => { $("kernel-status").textContent = `kernel unavailable: ${e.message}`; });
+
+$("join").onclick = async () => {
+  try {
+    // default: the prefix this page was served under (works direct, under the
+    // /p2p-relay/ edge prefix, and from any other mount point)
+    const here = location.pathname.replace(/p2p\.html.*$/, "").replace(/\/$/, "");
+    const base = $("relay").value.trim() || (location.origin + here);
+    app = new P2PApp({ relayBase: base, room: $("room").value.trim() || "kant-lab", peer: $("peer").value.trim() || "anon" });
+    app.on("peer", (p) => log(`peer present: ${p.peer}`, "ok"));
+    app.on("artifact", async (rec) => {
+      addRow(rec);
+      log(`artifact ${rec.name} cid=${rec.cid.slice(0, 12)}… via=${rec.pinned ? "ipfs" : "room"}`, "ok");
+    });
+    app.on("experiment", (r) => log(`experiment ${r.kind} by ${r.peer}: ${JSON.stringify(r.result).slice(0, 120)}`, "dim"));
+    await app.start();
+    window.app = app; // exposed for gui2proof harnesses and console debugging
+    $("status").innerHTML = `<span class="ok">joined ${base} room=${app.room} as ${app.id}</span>`;
+    log("joined; polling…", "ok");
+  } catch (e) { $("status").innerHTML = `<span class="err">${e.message}</span>`; }
+};
+
+function addRow(rec) {
+  const tb = $("arts").querySelector("tbody");
+  if ([...tb.children].some((tr) => tr.dataset.cid === rec.cid)) return;
+  const tr = document.createElement("tr");
+  tr.dataset.cid = rec.cid;
+  tr.innerHTML = `<td>${rec.name ?? "?"}</td><td><a href="#" data-cid="${rec.cid}">${rec.cid.slice(0, 16)}…</a></td>` +
+    `<td>${rec.size ?? "?"}</td><td>${rec.pinned ? "ipfs" : "room"}</td>` +
+    `<td><button data-act="get">fetch</button> <button data-act="pin">repin</button></td>`;
+  tr.querySelector("a").onclick = (e) => { e.preventDefault(); $("text").value = rec.cid; };
+  tr.querySelector('[data-act="get"]').onclick = () => doGet(rec);
+  tr.querySelector('[data-act="pin"]').onclick = () => doPin(rec);
+  tb.prepend(tr);
+}
+
+async function doGet(rec) {
+  try {
+    const { bytes, via } = await app.fetch(rec);
+    const text = new TextDecoder().decode(bytes);
+    log(`fetched ${rec.name} (${bytes.length}B) via ${via}: ${text.slice(0, 80)}`, "ok");
+    if (bytes.every((b) => b === 10 || (b >= 32 && b < 127))) $("text").value = text;
+  } catch (e) { log(`fetch failed: ${e.message}`, "err"); }
+}
+
+async function doPin(rec) {
+  try { log(await app.repin(rec) ? `repinned ${rec.name} → kubo` : "repin failed (no kubo?)", "warn"); }
+  catch (e) { log(`repin failed: ${e.message}`, "err"); }
+}
+
+async function publish(bytes, name) {
+  if (!app) return $("pub-status").innerHTML = '<span class="err">join first</span>';
+  try {
+    const rec = await app.publish(name, bytes);
+    $("pub-status").innerHTML = `<span class="ok">cid ${rec.cid.slice(0, 16)}… via ${rec.via}</span>`;
+    addRow(rec);
+  } catch (e) { $("pub-status").innerHTML = `<span class="err">${e.message}</span>`; }
+}
+
+$("file").onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  publish(bytes, f.name);
+};
+$("pub-text").onclick = () => {
+  const t = $("text").value; if (!t) return;
+  publish(new TextEncoder().encode(t), `text-${Date.now().toString(36)}.txt`);
+};
+
+$("exp-merge").onclick = async () => {
+  if (!app) return;
+  try {
+    const cids = [...app.seen.keys()].slice(0, 2);
+    if (cids.length < 2) return $("exp-status").innerHTML = '<span class="warn">need two published artifacts</span>';
+    const r = await app.experiment("merge-cids", { a: cids[0], b: cids[1] });
+    if (r.result.error) throw new Error(r.result.error);
+    $("exp-status").textContent = `merged = ${r.result.merged}`;
+  } catch (e) { $("exp-status").innerHTML = `<span class="err">${e.message}</span>`; }
+};
+$("exp-digest").onclick = async () => {
+  if (!app) return;
+  try {
+    const r = await app.experiment("room-digest", {});
+    if (r.result.error) throw new Error(r.result.error);
+    $("exp-status").textContent = `digest over ${r.result.count} CIDs = ${r.result.digest}`;
+  } catch (e) { $("exp-status").innerHTML = `<span class="err">${e.message}</span>`; }
+};
+</script>
+</body>
+</html>
