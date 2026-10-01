@@ -93,7 +93,8 @@ eq("...and on the same relay",
 const relayPath = join(root, "server", "relay.mjs");
 function startRelay(port) {
   const proc = spawn(process.execPath,
-    [relayPath, "--port", String(port), "--static", join(root, "web")],
+    [relayPath, "--port", String(port), "--static", join(root, "web"),
+      "--pass-db", join(tmpdir(), `kant-cli-passes-${Date.now()}.sqlite`)],
     { stdio: ["ignore", "pipe", "pipe"] });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);

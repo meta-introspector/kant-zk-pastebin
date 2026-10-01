@@ -29,6 +29,7 @@
 
 import http from "node:http";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { PassStore } from "./pass-store.mjs";
@@ -340,8 +341,21 @@ function serveStatic(cfg, res, urlPath) {
   attempt(0);
 }
 
+/** The pass-db default: /var/lib/kant-zk when it is usable, a writable
+ *  os.tmpdir() path when it is not (CI, sandboxes, unprivileged runs). */
+function defaultPassDb() {
+  const preferred = "/var/lib/kant-zk/passes.sqlite";
+  try {
+    fs.mkdirSync(path.dirname(preferred), { recursive: true });
+    fs.accessSync(path.dirname(preferred), fs.constants.W_OK);
+    return preferred;
+  } catch {
+    return path.join(os.tmpdir(), "kant-zk-passes.sqlite");
+  }
+}
+
 export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLogger(cfg),
-  passes = new PassStore(cfg.passDb, {
+  passes = new PassStore(cfg.passDb ?? defaultPassDb(), {
     peerLimit: cfg.peerLimit, peerWindowMs: cfg.peerWindowMs })) {
   const blocks = new Blocks(cfg);
   // The archive: every room line and every block pin, appended to one
