@@ -154,8 +154,12 @@ export class P2PApp {
     switch (kind) {
       case "merge-cids": {
         const k = await this.kernelOnce();
-        const merged = k.mergeCids(BigInt(args.a), BigInt(args.b));
-        result = { merged: merged.toString() };
+        // inputs may be u64 strings or CID strings — CIDs are witness-hashed
+        // to u64 (fnv1a, the same digest the room uses for room names)
+        const toU64 = (s) => /^\d+$/.test(String(s)) ? BigInt(s) : BigInt(fnv1a(utf8(String(s))));
+        const a = toU64(args.a), b = toU64(args.b);
+        const merged = k.mergeCids(a, b);
+        result = { merged: merged.toString(), a: a.toString(), b: b.toString() };
         break;
       }
       case "cid-of-bytes": {

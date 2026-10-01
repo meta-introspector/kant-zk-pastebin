@@ -48,6 +48,7 @@ if (args.includes("--ffmpeg")) {
 const deadline = (ms, what) => {
   const t = Date.now() + ms;
   return {
+    t,
     tick: async () => { if (Date.now() > t) throw new Error(`timeout: ${what}`); await sleep(200); },
   };
 };
@@ -79,8 +80,18 @@ try {
   await pageB.fill("#peer", "bob");
   await pageA.click("#join");
   await pageB.click("#join");
-  const joined = deadline(15_000, "join status");
-  while (!(await pageA.locator("#status .ok").count())) await joined.tick();
+  const joined = deadline(20_000, "join status");
+  const joinOk = async (page) => (await page.locator("#status .ok").count()) > 0;
+  let retried = false;
+  while (!(await joinOk(pageA)) || !(await joinOk(pageB))) {
+    if (Date.now() > joined.t - 10_000 && !retried) {
+      // one retry for slow first-load (kernel wasm, module graph)
+      if (!(await joinOk(pageA))) await pageA.click("#join").catch(() => {});
+      if (!(await joinOk(pageB))) await pageB.click("#join").catch(() => {});
+      retried = true;
+    }
+    await joined.tick();
+  }
   note(`both joined room ${ROOM}`);
   await pageA.screenshot({ path: `${OUT}/02-joined.png` });
   await pageB.screenshot({ path: `${OUT}/02-b-joined.png` });
@@ -110,7 +121,26 @@ try {
   note("bob fetched and CID-verified the artifact");
   await pageB.screenshot({ path: `${OUT}/04-b-fetched.png` });
 
+  // 4b. bob publishes too — the room now carries artifacts from both peers,
+  // and alice's table should show both CIDs (bidirectional coverage)
+  await pageB.fill("#text", `bob's artifact ${new Date().toISOString()}`);
+  await pageB.click("#pub-text");
+  const pubB = deadline(15_000, "bob publish status");
+  while (!(await pageB.locator("#pub-status .ok").count())) await pubB.tick();
+  const twoRows = deadline(20_000, "two artifact rows on alice");
+  while ((await pageA.locator("#arts tbody tr").count()) < 2) await twoRows.tick();
+  note("alice sees artifacts from both peers");
+  await pageA.screenshot({ path: `${OUT}/04b-two-artifacts.png` });
+
   // 5. alice runs the proved-kernel experiment over the published CIDs
+  // (kernel loads lazily inside kernelOnce; drive it through the same path
+  // the button uses, polling until the wasm has actually arrived)
+  const kern = deadline(30_000, "kernel load");
+  while (!(await pageA.evaluate(() => !!window.app?.kernel).catch(() => false))) {
+    await pageA.evaluate(() => window.app?.kernelOnce()).catch(() => {});
+    await kern.tick();
+  }
+  note(`kernel loaded: ${await pageA.evaluate(() => window.app.kernel.source)}`);
   await pageA.click("#exp-merge");
   const expOk = deadline(15_000, "merge-cids result");
   let merged = "";
@@ -119,24 +149,30 @@ try {
     if (/merged = \d+/.test(t)) { merged = t.trim(); break; }
     await sleep(300);
   }
-  if (!merged) { console.error("experiment did not produce a merged value"); exit(1); }
+  if (!merged) {
+    const st = await pageA.locator("#exp-status").innerText().catch(() => "<unreadable>");
+    const seen = await pageA.evaluate(() => (window.app ? window.app.seen.size : -1)).catch(() => -2);
+    const kernel = await pageA.evaluate(() => (window.app?.kernel ? window.app.kernel.source : "not-loaded")).catch(() => "?");
+    console.error(`experiment: no result. status='${st.trim()}' seen=${seen} kernel=${kernel}`);
+    exit(1);
+  }
   note(`experiment: ${merged}`);
   await pageA.screenshot({ path: `${OUT}/05-experiment.png` });
 
   // 6. room digest agreement between the two peers (same published set)
-  await pageA.click("#exp-digest");
-  await sleep(1500);
-  await pageB.click("#exp-digest");
   const digests = [];
-  for (const p of [pageA, pageB]) {
-    const t = await p.locator("#exp-status").innerText();
+  for (const [i, p] of [pageA, pageB].entries()) {
+    await p.click("#exp-digest");
+    const dg = deadline(15_000, `digest ${i}`);
+    let t = "";
+    while (!/CIDs = \d+/.test(t)) { await dg.tick(); t = await p.locator("#exp-status").innerText(); }
     digests.push(t);
   }
   note(`digests: A=${digests[0].trim()} B=${digests[1].trim()}`);
   await pageA.screenshot({ path: `${OUT}/06-digests.png` });
 
-  const da = /digest = (\d+)/.exec(digests[0])?.[1];
-  const dbb = /digest = (\d+)/.exec(digests[1])?.[1];
+  const da = /CIDs = (\d+)/.exec(digests[0])?.[1];
+  const dbb = /CIDs = (\d+)/.exec(digests[1])?.[1];
   if (!da || da !== dbb) { console.error(`digest mismatch: ${digests}`); exit(1); }
   note("room digests agree — both peers hold the same artifact set");
 

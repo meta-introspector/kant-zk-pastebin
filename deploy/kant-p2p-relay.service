@@ -1,0 +1,16 @@
+[Unit]
+Description=kant p2p webapp relay (buffy worktree) — rooms + static p2p app on :8796
+After=network.target
+
+[Service]
+Type=simple
+User=mdupont
+WorkingDirectory=/home/mdupont/projects/worktrees/buffy-p2p-wasm-20261001
+ExecStart=/nix/store/785jidgnryzj566s25s3rb262d4g5znb-nodejs-24.14.1/bin/node server/relay.mjs --port 8796 --host 127.0.0.1 --static web
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

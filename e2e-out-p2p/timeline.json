@@ -1,0 +1,52 @@
+{
+  "room": "gui2proof-f0n6ne",
+  "base": "https://solana.solfunmeme.com/p2p-relay",
+  "timeline": [
+    {
+      "step": "edge relay healthy",
+      "ms": 1790876634086,
+      "ok": true,
+      "name": "kant-zk-relay",
+      "version": "1.0.0",
+      "rooms": 13,
+      "lines": 50,
+      "sockets": 0
+    },
+    {
+      "step": "both browsers loaded p2p.html",
+      "ms": 1790876636324
+    },
+    {
+      "step": "both joined room gui2proof-f0n6ne",
+      "ms": 1790876636726
+    },
+    {
+      "step": "alice published: cid bafkreib7z3e4mqc… via room",
+      "ms": 1790876637010
+    },
+    {
+      "step": "bob fetched and CID-verified the artifact",
+      "ms": 1790876637421
+    },
+    {
+      "step": "alice sees artifacts from both peers",
+      "ms": 1790876637689
+    },
+    {
+      "step": "kernel loaded: https://solana.solfunmeme.com/p2p-relay/kant_kernel.wasm",
+      "ms": 1790876637996
+    },
+    {
+      "step": "experiment: merged = 15731439230876154891",
+      "ms": 1790876638307
+    },
+    {
+      "step": "digests: A=digest over 2 CIDs = 5954203058990503942 B=digest over 2 CIDs = 5954203058990503942",
+      "ms": 1790876638772
+    },
+    {
+      "step": "room digests agree — both peers hold the same artifact set",
+      "ms": 1790876638804
+    }
+  ]
+}

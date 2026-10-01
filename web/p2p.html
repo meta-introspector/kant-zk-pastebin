@@ -91,6 +91,7 @@ $("join").onclick = async () => {
     });
     app.on("experiment", (r) => log(`experiment ${r.kind} by ${r.peer}: ${JSON.stringify(r.result).slice(0, 120)}`, "dim"));
     await app.start();
+    window.app = app; // exposed for gui2proof harnesses and console debugging
     $("status").innerHTML = `<span class="ok">joined ${base} room=${app.room} as ${app.id}</span>`;
     log("joined; polling…", "ok");
   } catch (e) { $("status").innerHTML = `<span class="err">${e.message}</span>`; }
@@ -145,15 +146,21 @@ $("pub-text").onclick = () => {
 
 $("exp-merge").onclick = async () => {
   if (!app) return;
-  const cids = [...app.seen.keys()].slice(0, 2);
-  if (cids.length < 2) return $("exp-status").innerHTML = '<span class="warn">need two published artifacts</span>';
-  const r = await app.experiment("merge-cids", { a: cids[0], b: cids[1] });
-  $("exp-status").textContent = `merged = ${r.result.merged}`;
+  try {
+    const cids = [...app.seen.keys()].slice(0, 2);
+    if (cids.length < 2) return $("exp-status").innerHTML = '<span class="warn">need two published artifacts</span>';
+    const r = await app.experiment("merge-cids", { a: cids[0], b: cids[1] });
+    if (r.result.error) throw new Error(r.result.error);
+    $("exp-status").textContent = `merged = ${r.result.merged}`;
+  } catch (e) { $("exp-status").innerHTML = `<span class="err">${e.message}</span>`; }
 };
 $("exp-digest").onclick = async () => {
   if (!app) return;
-  const r = await app.experiment("room-digest", {});
-  $("exp-status").textContent = `digest over ${r.result.count} CIDs = ${r.result.digest}`;
+  try {
+    const r = await app.experiment("room-digest", {});
+    if (r.result.error) throw new Error(r.result.error);
+    $("exp-status").textContent = `digest over ${r.result.count} CIDs = ${r.result.digest}`;
+  } catch (e) { $("exp-status").innerHTML = `<span class="err">${e.message}</span>`; }
 };
 </script>
 </body>
