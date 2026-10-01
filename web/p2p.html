@@ -79,7 +79,10 @@ loadKernel().then((k) => {
 
 $("join").onclick = async () => {
   try {
-    const base = $("relay").value.trim() || location.origin;
+    // default: the prefix this page was served under (works direct, under the
+    // /p2p-relay/ edge prefix, and from any other mount point)
+    const here = location.pathname.replace(/p2p\.html.*$/, "").replace(/\/$/, "");
+    const base = $("relay").value.trim() || (location.origin + here);
     app = new P2PApp({ relayBase: base, room: $("room").value.trim() || "kant-lab", peer: $("peer").value.trim() || "anon" });
     app.on("peer", (p) => log(`peer present: ${p.peer}`, "ok"));
     app.on("artifact", async (rec) => {
