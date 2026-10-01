@@ -50,6 +50,9 @@ jobs:
           cp static-pastebin/index.html dist/
           cp static-pastebin/app.js dist/
           cp static-pastebin/style.css dist/
+          # the Rust wasm core rides with the CLI download section
+          cp web/pastebin_wasm.js dist/
+          cp web/pastebin_wasm_bg.wasm dist/
           chmod +x dist/kant-cli.mjs
 
       - name: Upload artifact
