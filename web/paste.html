@@ -89,7 +89,7 @@ let cursor = 0;
 const effectiveRelay = (inv) => {
   // Prefer the relay the invite names; fall back to the CF twin so the
   // page works even when the named relay is down.
-  const cf = "https://kant-zk-relay.jmikedupont2.workers.dev";
+  const cf = "https://kant-relay-v1.purple-fire-b881.workers.dev";
   return inv.relay && inv.relay.startsWith("http") ? inv.relay : cf;
 };
 
