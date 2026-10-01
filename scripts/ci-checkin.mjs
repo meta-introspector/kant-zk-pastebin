@@ -10,6 +10,13 @@
 //   KANT_CI_NAME   sender id, e.g. gh-runner     (default ci-agent)
 //   MSG (or argv)  the check-in text
 //
+// When KANT_FLEET_RELAY is also set, a machine-readable build record is
+// additionally posted as a plain JSON line to KANT_FLEET_ROOM (default
+// twitterstorm-fleet-builds) — the same named-room protocol the tracker
+// fleet mesh (scripts/peer-relay-discovery.ts) already speaks, so sinks
+// can record builds into sqlite and mesh-sync them.  Never put secrets
+// in the record: the room is public and append-only.
+//
 // Fail-soft on purpose: a chat outage must never fail a build.  The only
 // hard errors are missing configuration (exit 2 before anything is sent).
 //
@@ -52,7 +59,44 @@ const run = async () => {
   console.log(`checked in at cursor ${answer.cursor ?? "?"} in room ${C.clientRoom(client)}`);
 };
 
-run().catch((err) => {
+// The machine-readable record for the fleet room (plain JSON, named room,
+// no kz envelope — matches what PeerRelayClient.discover() parses).  No
+// credential-shaped keys, ever (docs/SECRET-HAZARDS.md rule: the room is
+// public and append-only).
+async function fleetPost() {
+  const fleetRelay = (process.env.KANT_FLEET_RELAY ?? "").replace(/\/+$/, "");
+  if (!fleetRelay) return;
+  const room = process.env.KANT_FLEET_ROOM ?? "twitterstorm-fleet-builds";
+  const record = {
+    kind: "build",
+    repo: process.env.KANT_BUILD_REPO ?? "",
+    workflow: process.env.KANT_BUILD_WORKFLOW ?? "",
+    status: process.env.KANT_BUILD_STATUS ?? "",
+    runId: process.env.KANT_BUILD_RUN_ID ?? self,
+    commit: (process.env.KANT_BUILD_COMMIT ?? "").slice(0, 120),
+    url: process.env.KANT_BUILD_URL ?? "",
+    at: Date.now(),
+    sender: self,
+  };
+  try {
+    const res = await fetch(`${fleetRelay}/room/${encodeURIComponent(room)}`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: `${JSON.stringify(record)}\n`,
+    });
+    if (!res.ok) throw new Error(`fleet relay ${res.status}`);
+    const answer = await res.json().catch(() => ({}));
+    console.log(`fleet record posted to ${room} (cursor ${answer.cursor ?? "?"})`);
+  } catch (err) {
+    console.error(`fleet post failed (ignored): ${err.message}`);
+  }
+}
+
+// Chat line first, then the fleet record — each guarded, neither can
+// prevent the other, and the process always exits 0.
+try {
+  await run();
+} catch (err) {
   console.error(`ci-checkin failed (ignored): ${err.message}`);
-  process.exit(0);
-});
+}
+await fleetPost();

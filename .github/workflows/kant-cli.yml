@@ -80,6 +80,14 @@ jobs:
           KANT_CI_RELAY: ${{ vars.KANT_CI_RELAY }}
           KANT_CI_SECRET: ${{ secrets.KANT_CI_SECRET }}
           KANT_CI_NAME: gh-${{ github.run_id }}
+          # Fleet mesh record (machine-readable, sqlite-syncable):
+          KANT_FLEET_RELAY: ${{ vars.KANT_CI_RELAY }}
+          KANT_BUILD_REPO: ${{ github.repository }}
+          KANT_BUILD_WORKFLOW: ${{ github.workflow }}
+          KANT_BUILD_STATUS: ${{ job.status }}
+          KANT_BUILD_RUN_ID: ${{ github.run_id }}
+          KANT_BUILD_COMMIT: ${{ github.event.head_commit.message }}
+          KANT_BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           MSG: >-
             build ${{ github.repository }} ${{ github.workflow }}
             ${{ job.status }} — ${{ github.event.head_commit.message }}

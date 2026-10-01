@@ -76,6 +76,14 @@ key in the `KANT_CI_SECRET` Actions secret and the relay in the
 `KANT_CI_RELAY` variable, so every build of this repo checks in with the
 room: run id, status, commit subject, log link.
 
+With `KANT_FLEET_RELAY` set, a second, machine-readable record (plain JSON:
+`kind/repo/workflow/status/runId/commit/url/at/sender`) is posted to the
+named room `KANT_FLEET_ROOM` (default `twitterstorm-fleet-builds`) — the
+same named-room protocol the tracker fleet mesh uses
+(`tracker/scripts/peer-relay-discovery.ts`), so any sink can record builds
+into sqlite and mesh-sync them. The room is public and append-only: never
+put credential-shaped fields in the record.
+
 ## Test, build, publish
 
 ```bash
