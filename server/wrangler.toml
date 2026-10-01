@@ -1,0 +1,21 @@
+name = "kant-zk-relay-wasm"
+main = "worker.js"
+account_id = "2c5da35f915a13c131bead97f3f7bc75"
+compatibility_date = "2025-01-01"
+
+# One Durable Object per room: the append-only log of
+# `RequestProject/Kant/Relay.lean`.  Same protocol as the Node relay in
+# relay.mjs (the systemd twin), so clients cannot tell the twins apart.
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+# Serve the browser client (p2p.html + the Rust wasm core) from the same
+# origin, so the page and its relay share a host and no CORS is needed.
+[assets]
+directory = "../web"
+binding = "ASSETS"
