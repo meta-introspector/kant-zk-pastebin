@@ -1,0 +1,26 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const deploy_project: (a: number, b: number, c: number, d: number, e: number, f: number) => any;
+export const fetch_project: (a: number, b: number) => any;
+export const fetch_project_list: () => any;
+export const generate_deploy_config: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+export const get_api_base_url: () => [number, number];
+export const get_api_key: () => [number, number];
+export const get_cloudflare_account_id: () => [number, number];
+export const get_cloudflare_default_domain: () => [number, number];
+export const get_deploy_instructions: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+export const init_panic_hook: () => void;
+export const set_api_key: (a: number, b: number) => void;
+export const validate_project_id: (a: number, b: number) => number;
+export const wasm_bindgen__convert__closures_____invoke__h18d997961a3959e1: (a: number, b: number, c: any, d: any) => void;
+export const wasm_bindgen__convert__closures_____invoke__h691694ef7169a20c: (a: number, b: number, c: any) => [number, number];
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_destroy_closure: (a: number, b: number) => void;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_start: () => void;
