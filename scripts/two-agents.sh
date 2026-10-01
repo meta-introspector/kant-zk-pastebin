@@ -20,6 +20,7 @@ BASE="http://127.0.0.1:${PORT}"
 DIR=$(mktemp -d)
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 K="node ${ROOT}/scripts/kant-cli.mjs"
+PASSDB="${DIR}/passes.sqlite"          # hermetic: never touch live state
 
 cleanup() {
   [ -n "${RELAY:-}" ] && kill "${RELAY}" 2>/dev/null || true
@@ -30,7 +31,7 @@ trap cleanup EXIT
 say() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
 
 say "0. a relay, and the static site, on this machine"
-node "${ROOT}/server/relay.mjs" --port "${PORT}" --static "${ROOT}/web" --quiet &
+node "${ROOT}/server/relay.mjs" --port "${PORT}" --static "${ROOT}/web" --pass-db "${PASSDB}" --quiet &
 RELAY=$!
 i=0
 until curl -sS "${BASE}/health" >/dev/null 2>&1; do

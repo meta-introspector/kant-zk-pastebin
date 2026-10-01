@@ -341,22 +341,22 @@ function serveStatic(cfg, res, urlPath) {
   attempt(0);
 }
 
-/** The pass-db default: /var/lib/kant-zk when it is usable, a writable
- *  os.tmpdir() path when it is not (CI, sandboxes, unprivileged runs). */
-function defaultPassDb() {
-  const preferred = "/var/lib/kant-zk/passes.sqlite";
+/** The pass store: at the configured path when that is usable, else a
+ *  writable os.tmpdir() fallback (CI, sandboxes, unprivileged runs). */
+function makePassStore(cfg) {
+  const opts = { peerLimit: cfg.peerLimit, peerWindowMs: cfg.peerWindowMs };
   try {
-    fs.mkdirSync(path.dirname(preferred), { recursive: true });
-    fs.accessSync(path.dirname(preferred), fs.constants.W_OK);
-    return preferred;
-  } catch {
-    return path.join(os.tmpdir(), "kant-zk-passes.sqlite");
+    return new PassStore(cfg.passDb ?? "/var/lib/kant-zk/passes.sqlite", opts);
+  } catch (err) {
+    if (process.env.KANT_PASS_DB || String(args.get("pass-db") ?? "")) throw err;
+    const fallback = path.join(os.tmpdir(), "kant-zk-passes.sqlite");
+    console.error(`pass-db ${cfg.passDb} unusable (${err.code ?? err}), using ${fallback}`);
+    return new PassStore(fallback, opts);
   }
 }
 
 export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLogger(cfg),
-  passes = new PassStore(cfg.passDb ?? defaultPassDb(), {
-    peerLimit: cfg.peerLimit, peerWindowMs: cfg.peerWindowMs })) {
+  passes = makePassStore(cfg)) {
   const blocks = new Blocks(cfg);
   // The archive: every room line and every block pin, appended to one
   // ndjson file per room handle, so a reader can replay a room that the
