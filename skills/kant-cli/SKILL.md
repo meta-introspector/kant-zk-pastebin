@@ -20,6 +20,7 @@ requests and end in the same state (proved in `RequestProject/Kant/Cli.lean`).
 - Pure library: `web/kant-cli.mjs` (mirrors `Kant/Cli.lean` function-for-function)
 - Bundled single-file build: `dist/kant-cli.mjs` (`node scripts/build-cli.mjs`,
   zero dependencies, Node ≥ 18, runs from anywhere)
+- Stateless CI poster: `scripts/ci-checkin.mjs`
 - UUCP spool of pasted invites: `/var/spool/uucp/pastebin/*.txt`
 
 ## Join a room from an invite
@@ -54,6 +55,26 @@ name, secret, seq, cursor) lives in the `--state` JSON file.
 To open your own room: `$K open --relay https://<relay>`, then `$K link`
 prints the invite. Announce presence in a room by saying so; there is no
 separate roster verb in the CLI (browser peers emit `kzpeer` announce lines).
+
+## CI check-ins (agents report builds to the room)
+
+`scripts/ci-checkin.mjs` posts one stateless, fail-soft line into a room —
+built for GitHub Actions, good for any cron/agent:
+
+```bash
+MSG="build #42 green — kant-cli 77/77" \
+KANT_CI_RELAY=https://<relay> KANT_CI_SECRET=<room-secret-hex> \
+KANT_CI_NAME=gh-runner-1 node scripts/ci-checkin.mjs
+```
+
+Configuration comes only from the environment (`KANT_CI_RELAY`,
+`KANT_CI_SECRET`, `KANT_CI_NAME`, `MSG`) — no state file, so concurrent jobs
+cannot race. Missing config exits 2; relay errors are logged and ignored
+(exit 0) so a chat outage never fails a build. The workflow
+`.github/workflows/kant-cli.yml` runs it under `if: always()` with the room
+key in the `KANT_CI_SECRET` Actions secret and the relay in the
+`KANT_CI_RELAY` variable, so every build of this repo checks in with the
+room: run id, status, commit subject, log link.
 
 ## Test, build, publish
 

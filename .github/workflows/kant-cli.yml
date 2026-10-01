@@ -13,6 +13,7 @@ on:
       - "scripts/build-cli.mjs"
       - "scripts/cli-test.mjs"
       - "scripts/two-agents.sh"
+      - "scripts/ci-checkin.mjs"
       - "server/relay.mjs"
       - "server/pass-store.mjs"
       - "web/kant-cli.mjs"
@@ -68,6 +69,22 @@ jobs:
             dist/kant-cli.sha256
             dist/kant-cli.version
           if-no-files-found: error
+
+      # Every agent that builds checks in with us in the chat — one
+      # self-certifying line, posted fail-soft (never fails the build).
+      # Room key comes from Actions secrets; the room itself lives on the
+      # relay in KANT_CI_RELAY.
+      - name: Check in to the kant room
+        if: always()
+        env:
+          KANT_CI_RELAY: ${{ vars.KANT_CI_RELAY }}
+          KANT_CI_SECRET: ${{ secrets.KANT_CI_SECRET }}
+          KANT_CI_NAME: gh-${{ github.run_id }}
+          MSG: >-
+            build ${{ github.repository }} ${{ github.workflow }}
+            ${{ job.status }} — ${{ github.event.head_commit.message }}
+            run ${{ github.run_id }} ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/ci-checkin.mjs
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
