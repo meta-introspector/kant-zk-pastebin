@@ -1,0 +1,323 @@
+# Kant Pastebin — Pipelight orchestration
+# Run: pipelight run build-and-deploy
+# Run: pipelight run build-pastebin
+# Run: pipelight run check-status
+# Auto-triggers: pre-push on main for deploy, full-deploy
+
+[[pipelines]]
+name = "build-pastebin"
+#triggers = [
+#  { branches = ["main"], actions = ["pre-push", "manual"] },
+#]
+
+[[pipelines.steps]]
+name = "build-rust-package"
+commands = [
+  "echo '=== Building kant-pastebin Rust package ==='",
+  "cd /home/mdupont/pastebin && nix build .#kant-pastebin --no-link --print-build-logs",
+  "echo '  -> Build complete'"
+]
+
+[[pipelines.steps]]
+name = "build-system-config"
+commands = [
+  "echo '=== Building system-manager configuration ==='",
+  "cd /home/mdupont/pastebin && nix build .#systemConfigs.kant-pastebin --no-link --print-build-logs",
+  "echo '  -> System config ready'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "deploy"
+triggers = [{ actions = ["manual"] }]
+#triggers = [
+#  { branches = ["main"], actions = ["pre-push", "manual"] },
+#]
+
+[[pipelines.steps]]
+name = "build-pastebin"
+commands = [
+  "echo '=== Step 1: Build pastebin package ==='",
+  "cd /home/mdupont/pastebin && nix build .#kant-pastebin --no-link --print-build-logs",
+  "echo '  -> Build complete'"
+]
+
+[[pipelines.steps]]
+name = "deploy-system-manager"
+commands = [
+  "echo '=== Step 2: Apply system-manager configuration ==='",
+  "cd /home/mdupont/pastebin && nix run github:numtide/system-manager -- switch --flake .#kant-pastebin",
+  "echo '  -> System config applied'"
+]
+
+[[pipelines.steps]]
+name = "verify"
+commands = [
+  "echo '=== Step 3: Verify ==='",
+  "echo '  - Service: '$(systemctl --user is-active kant-pastebin 2>/dev/null || echo 'inactive')",
+  "echo '  - HTTP: '$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/ 2>/dev/null || echo 'unreachable')",
+  "echo '  - Endpoint: https://solana.solfunmeme.com/pastebin/'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "graph-analysis"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "analyze-dasl-harness-graphs"
+commands = [
+  "echo '=== Graph Analysis: DASL harness dependency graphs ==='",
+  "/home/mdupont/pastebin/bin/dasl-graph-analysis.sh 2>&1",
+  "echo '  -> Graph analysis complete'"
+]
+
+[[pipelines.steps]]
+name = "analyze-global-graph"
+commands = [
+  "echo '=== Global Dependency Graph (all ~/projects/ Rust workspaces) ==='",
+  "CARGO_VM=/home/mdupont/projects/cargo-clean/tools/cargo-vendormod",
+  "nix build \"$CARGO_VM#global-graph\" --no-link --print-build-logs 2>&1 | tail -10",
+  "echo '  -> Global graph complete'"
+]
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "check-status"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "service-status"
+commands = [
+  "echo '=== Kant Pastebin Status ==='",
+  "echo '--- systemd service ---'",
+  "systemctl --user status kant-pastebin 2>&1 || echo '(not running as user service)'",
+  "systemctl status kant-pastebin 2>&1 || echo '(not running as system service)'",
+  "echo ''",
+  "echo '--- HTTP check ---'",
+  "curl -s -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8090/ 2>/dev/null || echo 'unreachable'",
+  "echo ''",
+  "echo '--- Recent journal ---'",
+  "journalctl --user -u kant-pastebin -n 20 --no-pager 2>&1 || journalctl -u kant-pastebin -n 20 --no-pager 2>&1 || echo '(no journal)'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "reindex-docs"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "run-index-docs"
+commands = [
+  "echo '=== Re-indexing DOCS ==='",
+  "cd /home/mdupont/pastebin && nix run .#kant-pastebin -- --reindex 2>&1 || nix shell .#kant-pastebin -c multi-reindex 2>&1",
+  "echo '  -> Indexing complete'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "full-deploy"
+triggers = [{ actions = ["manual"] }]
+#triggers = [
+#  { branches = ["main"], actions = ["pre-push", "manual"] },
+#]
+
+[[pipelines.steps]]
+name = "build"
+commands = [
+  "echo '=== Build all packages ==='",
+  "cd /home/mdupont/pastebin && nix build .#kant-pastebin .#index-docs --no-link --print-build-logs",
+  "echo '  -> All packages built'"
+]
+
+[[pipelines.steps]]
+name = "deploy-system"
+commands = [
+  "echo '=== Deploy via system-manager ==='",
+  "cd /home/mdupont/pastebin && nix run github:numtide/system-manager -- switch --flake .#kant-pastebin",
+  "echo '  -> System deployed'"
+]
+
+[[pipelines.steps]]
+name = "verify"
+commands = [
+  "echo '=== Verification ==='",
+  "echo '  Service: '$(systemctl --user is-active kant-pastebin 2>/dev/null || systemctl is-active kant-pastebin 2>/dev/null || echo 'checking...')",
+  "echo '  HTTP: '$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/ 2>/dev/null || echo 'unreachable')",
+  "echo '  Deployment complete at https://solana.solfunmeme.com/pastebin/'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "dasl-ci"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "run-dasl-ci-pipeline"
+commands = [
+  "echo '=== DASL CI Pipeline (via nix) ==='",
+  "cd /home/mdupont/dasl/dasl-testing && /home/mdupont/pastebin/bin/dasl-ci.sh 2>&1",
+  "echo '  -> Build complete'"
+]
+
+[[pipelines.steps]]
+name = "show-ci-status"
+commands = [
+  "echo '=== CI Status ==='",
+  "cat /mnt/data1/nora/ci-results/status.json 2>/dev/null | python3 -m json.tool 2>/dev/null || echo 'No status.json yet'",
+  "echo '  Dashboard: https://solana.solfunmeme.com/nora/dashboard/'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "deploy-nora"
+triggers = [{ actions = ["manual"] }]
+#triggers = [
+#  { branches = ["main"], actions = ["manual"] },
+#]
+
+[[pipelines.steps]]
+name = "build-nora-config"
+commands = [
+  "echo '=== Building nora system-manager configuration ==='",
+  "cd /home/mdupont/pastebin && nix build .#systemConfigs.nora --no-link --print-build-logs",
+  "echo '  -> Nora system config built'"
+]
+
+[[pipelines.steps]]
+name = "activate-nora"
+commands = [
+  "echo '=== Activating nora CI policy ==='",
+  "sudo $(nix build .#systemConfigs.nora --no-link --print-out-paths)/bin/activate",
+  "echo '  -> Nora CI pipeline activated'"
+]
+
+[[pipelines.steps]]
+name = "verify-nora-ci"
+commands = [
+  "echo '=== Verification ==='",
+  "systemctl status nora-ci-pipeline --no-pager 2>&1 | head -15",
+  "systemctl is-active nora 2>&1 && echo '  nora: active' || echo '  nora: inactive'",
+  "echo '  CI pipeline: '$(systemctl is-active nora-ci-pipeline.timer 2>/dev/null || echo 'inactive')",
+  "echo '  Dashboard: https://solana.solfunmeme.com/nora/ci-results/'"
+]
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "git2nora"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "list-publishable"
+commands = [
+  "echo '=== Scanning pastebin spool for publishable crates ==='",
+  "SPOOL_DIR=$(systemctl show kant-pastebin -p Environment 2>/dev/null | tr ' ' '\\n' | grep UUCP_SPOOL | cut -d= -f2 || echo '/mnt/data1/spool/uucp/pastebin')",
+  "echo 'Spool: $SPOOL_DIR'",
+  "ls \"$SPOOL_DIR\"/*.txt 2>/dev/null | while read f; do",
+  "  NAME=$(basename \"$f\")",
+  "  if grep -q '\\[package\\]' \"$f\" 2>/dev/null && grep -q 'name\\s*=' \"$f\" 2>/dev/null && grep -q 'version\\s*=' \"$f\" 2>/dev/null; then",
+  "    TITLE=$(grep '^Title:' \"$f\" 2>/dev/null | head -1 | cut -d: -f2- | xargs || echo \"$NAME\")",
+  "    echo \"  📦 $TITLE → $NAME\"",
+  "  fi",
+  "done",
+  "echo '  -> Done scanning'"
+]
+
+[[pipelines.steps]]
+name = "publish-spool-to-nora"
+commands = [
+  "echo '=== Publishing pastebin spool crates to nora ==='",
+  "SPOOL_DIR=$(systemctl show kant-pastebin -p Environment 2>/dev/null | tr ' ' '\\n' | grep UUCP_SPOOL | cut -d= -f2 || echo '/mnt/data1/spool/uucp/pastebin')",
+  "ls \"$SPOOL_DIR\"/*.txt 2>/dev/null | while read f; do",
+  "  NAME=$(basename \"$f\")",
+  "  if grep -q '\\[package\\]' \"$f\" 2>/dev/null && grep -q 'name\\s*=' \"$f\" 2>/dev/null && grep -q 'version\\s*=' \"$f\" 2>/dev/null; then",
+  "    PASTE_ID=$(echo \"$NAME\" | sed 's/\\.txt$//')",
+  "    echo \"Publishing $PASTE_ID...\"",
+  "    curl -s -X POST \"http://127.0.0.1:8090/plugin/git2nora/$PASTE_ID\" \\",
+  "      -H 'Content-Type: application/json' \\",
+  "      -d '{\"action\":\"publish\"}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('status','?'), d.get('output','')[:80])\"",
+  "    echo ''",
+  "  fi",
+  "done",
+  "echo '  -> Batch publish complete'"
+]
+
+[[pipelines.steps]]
+name = "verify-nora-crates"
+commands = [
+  "echo '=== Verifying published crates on nora ==='",
+  "curl -s http://127.0.0.1:4000/cargo/api/v1/crates 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); print(f'  Total crates in nora: {len(d.get(\\\"crates\\\",[]))}'); [print(f'    - {c[\\\"name\\\"]} v{c[\\\"max_version\\\"]}') for c in d.get('crates',[])[:10]]\" 2>/dev/null || echo '  (nora response not JSON — may need different cargo endpoint)'",
+  "echo '  Done'"
+]
+
+
+# ---------------------------------------------------------------------------
+
+[[pipelines]]
+name = "publish-dasl-crates"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "publish-ipld-core"
+commands = [
+  "echo '=== Publishing ipld-core (libipld-core 0.4.3) to nora ==='",
+  "cd /home/mdupont/dasl/rust/ipld-core && cargo publish --registry nora --allow-dirty 2>&1",
+  "echo '  -> ipld-core published'"
+]
+
+[[pipelines.steps]]
+name = "publish-serde-ipld-dagcbor"
+commands = [
+  "echo '=== Publishing serde_ipld_dagcbor 0.6.4 to nora ==='",
+  "cd /home/mdupont/dasl/rust/serde_ipld_dagcbor && cargo publish --registry nora --allow-dirty 2>&1",
+  "echo '  -> serde_ipld_dagcbor published'"
+]
+
+[[pipelines.steps]]
+name = "publish-dasl"
+commands = [
+  "echo '=== Publishing dasl 0.2.0 to nora ==='",
+  "cd /home/mdupont/dasl/rust/n0_dasl && cargo publish --registry nora --allow-dirty 2>&1",
+  "echo '  -> dasl published'"
+]
+
+[[pipelines.steps]]
+name = "verify-crates-in-nora"
+commands = [
+  "echo '=== Verifying crates in nora ==='",
+  "curl -s http://127.0.0.1:4000/cargo/api/v1/crates/libipld-core 2>&1 | head -20",
+  "curl -s http://127.0.0.1:4000/cargo/api/v1/crates/serde_ipld_dagcbor 2>&1 | head -20",
+  "curl -s http://127.0.0.1:4000/cargo/api/v1/crates/dasl 2>&1 | head -20",
+  "echo '  -> Verification complete'"
+]
+
+# GOAP enrich — regenerate+reconcile state, then readiness report
+# per ~/gitplan.org: pipelight orchestrates build→publish→deploy; this is the plan-refresh step
+[[pipelines]]
+name = "goap-enrich"
+triggers = [{ actions = ["manual"] }]
+
+[[pipelines.steps]]
+name = "goap-state-regen"
+commands = [
+  "python3 /home/mdupont/dasl-planning/scripts/goap-state-regen.py --write",
+]
+
+[[pipelines.steps]]
+name = "goap-plan-readiness"
+commands = [
+  "python3 /home/mdupont/dasl-planning/scripts/goap-plan-readiness.py",
+]
+
+[[pipelines.steps]]
+name = "goap-state-to-shmem"
+commands = [
+  "bash /home/mdupont/dasl-planning/scripts/goap/readiness-to-shmem.sh",
+]

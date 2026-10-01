@@ -1,0 +1,185 @@
+# Kant Pastebin — Deploy Runbook
+
+> Operational guide for deploying, diagnosing, and recovering the Kant Pastebin + Nora services.
+
+## Architecture
+
+```
+Internet → nginx (443) → /pastebin/ → kant-pastebin (:8090)
+                          /nora/      → nora (:4000)
+                                       /pastebin/beta/ → kant-pastebin-beta (:8150)
+```
+
+| Component | Port | Service | Binary |
+|-----------|------|---------|--------|
+| Main pastebin | 8090 | `kant-pastebin.service` | `nix store .../kant-pastebin-0.1.0/bin/kant-pastebin` |
+| Nora registry | 4000 | `nora.service` | `nix store .../nora/bin/nora serve` |
+| SVG2Anim worker | — | `svg2anim-worker.service` | Background worker |
+| Beta pastebin | 8150 | `kant-pastebin-beta.service` | (separate instance) |
+| Legacy beta | 8081 | `kant-pastebin-beta` (PID 1250) | Old process, no unit file |
+
+## CRITICAL: System-Manager Coexistence Rule
+
+**All coexisting services must be in the SAME system-manager config.**
+System-manager removes any unit files not in the currently activating config.
+Separate configs for coexisting services = mutual destruction.
+
+The `pastebin-system.nix` includes pastebin + nora + svg2anim together in
+`kant-pastebin-only` config. Never deploy separate configs for these services.
+
+## Quick Commands
+
+```bash
+# Build the application binary from the flake
+nix build .#kant-pastebin --print-out-paths
+
+# Build system-manager config, activate it, restart the service, and diagnose
+./deploy.sh
+
+# Restart only the installed service, then diagnose
+./deploy.sh restart
+
+# Full diagnostic report without rebuilding
+./diagnose.sh
+```
+
+## Deploy
+
+`deploy.sh` resolves the physical repository directory with `pwd -P` and defaults to that path. Do not deploy from the old home symlink path or from `/home/mdupont/pastebin/target/release`.
+
+The deploy flow does:
+
+1. `nix build "$PASTEBIN_FLAKE" --no-link --json`
+   - default `PASTEBIN_FLAKE` is `$PASTEBIN_DIR#systemConfigs.kant-pastebin-only`
+2. Runs the generated `activate` script from the nix store
+3. `sudo systemctl daemon-reload`
+4. `sudo systemctl restart kant-pastebin.service`
+5. Runs `./diagnose.sh` for post-deploy verification
+
+If nix-daemon was killed by OOM during a build, restart it before retrying:
+
+```bash
+sudo -n systemctl start nix-daemon.service
+```
+
+## Diagnose (Option 4)
+
+The diagnose command checks 8 areas:
+
+1. **Service status** — active/inactive, PID, uptime for both main and beta
+2. **Port bindings** — 8090, 8081, 8150 (is anything listening?)
+3. **Nginx proxy mapping** — which URL path maps to which backend
+4. **HTTP health checks** — curl on all ports + public endpoint
+5. **Last deploy info** — unit file, binary path, timestamps
+6. **Recent journal logs** — last 30 lines from journald
+7. **System-manager activation** — result symlink, build time
+8. **Data paths** — existence and size of working dirs
+
+### Common Failure Patterns
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| HTTP 502 from public | Nothing on :8090 | `sudo systemctl restart kant-pastebin` |
+| Exit code 203/EXEC | Binary garbage collected | Rebuild with `./deploy.sh` |
+| Service not found | Unit file deleted | Rebuild and apply with `./deploy.sh` |
+| `pastebin-wasm/static` errors | WASM dir missing | Non-fatal, cosmetic only |
+| Port 8090 empty, 8081 active | Old beta running, main dead | Deploy main service |
+| `kant-pastebin.service` "command vanished" | Nix store binary GC'd after deploy; unit file points to old store path | Rebuild and re-apply through `./deploy.sh`; ensure system-manager config includes the pastebin service |
+| Nora registry unreachable (port 4000) | Nora service not running or crashed | Check `systemctl status nora.service`; restart with `sudo systemctl restart nora.service` |
+
+## Recovery from Garbage Collection
+
+If the nix store binary was GC'd, rebuild and re-apply through the repo deploy script:
+
+```bash
+./deploy.sh
+```
+
+For a manual binary check:
+
+```bash
+nix build .#kant-pastebin --no-link --print-out-paths
+```
+
+## Deploy Script (`deploy.sh`) Notes
+
+### Timeouts Removed
+The `--max-time 5` timeout on the Nora registry health check curl was removed. The health check now waits indefinitely, which is necessary because the Nora registry may take time to respond.
+
+### Logging Enhancements
+The deploy script includes enhanced logging:
+- `log_err()` function for error-level messages
+- Binary path verification before service restart
+- Systemd unit file contents logged after activation
+- Service status checks after each restart
+- Full build output captured in log files
+
+### Common Failure Patterns
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `kant-pastebin.service` "command vanished" | Nix store binary GC'd after deploy; unit file points to old store path | Rebuild and re-apply through `./deploy.sh`; ensure system-manager config includes the pastebin service |
+| Nora registry unreachable (port 4000) | Nora service not running or crashed | Check `systemctl status nora.service`; restart with `sudo systemctl restart nora.service` |
+
+If the nix store binary was GC'd, rebuild and re-apply through the repo deploy script:
+
+```bash
+./deploy.sh
+```
+
+For a manual binary check:
+
+```bash
+nix build .#kant-pastebin --no-link --print-out-paths
+```
+
+## Environment Variables
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `BIND_ADDR` | `127.0.0.1:8090` | Listen address |
+| `BASE_PATH` | `/pastebin` | URL prefix |
+| `BASE_URL` | `https://solana.solfunmeme.com` | Public origin |
+| `UUCP_SPOOL` | `/mnt/data1/spool/uucp/pastebin` | UUCP store |
+| `PIPELIGHT_CMD` | nix store path | Pipelight binary for tile rendering |
+| `TILES_DIR` | colon-separated nix paths | Tile plugin libraries |
+| `RUST_LOG` | `info` | Log level |
+
+## Incident History
+
+### 2026-06-01: Bad Gateway (502)
+
+- **Cause**: Unit file deleted from `/etc/systemd/system/` on May 30 during system-manager activation. Old binary was garbage collected.
+- **Symptoms**: HTTP 502 on `/pastebin/`, nothing listening on :8090
+- **Fix**: Rebuilt the system-manager config, re-applied the unit file, restarted service
+- **Prevention**: Added `diagnose.sh` to `deploy.sh` for quick triage
+
+### 2026-08-05: Nora services removed by pastebin deploy
+
+- **Cause**: Pastebin `deploy.sh` activated `kant-pastebin-only` config which only defined pastebin + svg2anim. System-manager removed nora's unit files during activation.
+- **Symptoms**: `nora.service` inactive after pastebin deploys. Deploy log showed `Removing symlink: /etc/systemd/system/nora.service`.
+- **Fix**: Merged nora services into `pastebin-system.nix`. Both deploy scripts now use `kant-pastebin-only` config which includes all three services.
+- **Prevention**: Document coexistence rule in skills, memory, and runbook. Never deploy separate system-manager configs for coexisting services.
+
+### 2026-06-20: Large Post Split/Share Hardening
+
+- **Cause**: Post split loaded the full raw paste into the browser, returned every chunk body as JSON, and rendered chunk previews in the DOM. This could hang the server/browser for ~10MB posts.
+- **Symptoms**: Split page stalled or returned oversized responses; Share failed in browsers without `navigator.share`.
+- **Fix**: Added server-side `POST /api/split-paste`, made `split-download` and `split-upload` accept `paste_id`, limited split previews to metadata plus a small excerpt, and added `sharePost()` fallback URL copying.
+- **Prevention**: Post split page now keeps raw content server-side, exposes chunk-size and boundary dropdowns, and downloads a ZIP containing only `part_*.txt` files.
+
+### 2026-06-21: allm Aggregate Rename and Local Branch Deployment
+
+- **Cause**: Older archive aggregate pastes were generated with generic `allm.txt` / `_allm_...` names and headers, so their index entries lacked useful titles and descriptions.
+- **Symptoms**: 126 existing aggregate pastes were candidates for metadata cleanup; an initial rewrite also dropped malformed/legacy `index.jsonl` lines.
+- **Fix**: Added `kant-pastebin rename-allm-pastes`, which derives titles/descriptions from `Source archive:`, updates paste headers and index entries, and preserves malformed/legacy index lines by storing raw records.
+- **Deployment note**: Deploy from the repo checkout with `./deploy.sh` using the current local branch (`git+file://${PASTEBIN_DIR}?ref=${PASTEBIN_BRANCH}#systemConfigs.kant-pastebin-only`). Do not deploy from `/home/mdupont/pastebin/target/release`.
+- **Operational note**: The allm tool updates titles/descriptions by default and preserves URLs. Use `--rename-files` only when physical filenames and paste IDs should change too.
+- **Prevention**: Keep `make rename-allm-pastes` as preview and `make rename-allm-pastes-apply` as apply. Confirm index validity after any metadata migration.
+
+### 2026-08-05: Deploy script timeouts and missing logging
+
+- **Cause**: `deploy.sh` had `--max-time 5` on the Nora registry health check curl, causing it to fail when the registry was slow. The script also lacked detailed logging for diagnosing build failures and service restart issues.
+- **Symptoms**: Health check fails silently; deploy log doesn't show binary path or unit file details; hard to diagnose "command vanished" errors.
+- **Fix**: Removed `--max-time 5` from curl health check. Added `log_err()`, `log_cmd()` helpers, binary path verification, unit file contents logging, and service status checks after restart.
+- **Prevention**: All deploy steps now log their output. Binary path and unit file are verified before service restart.

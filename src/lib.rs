@@ -1,12 +1,19 @@
 // Modules
-pub mod model;
-pub mod view;
 pub mod api;
+pub mod archive;
+pub mod dasl;
+pub mod git_mount;
 pub mod handlers;
-pub mod storage;
 pub mod ipfs;
-pub mod tagging;
+pub mod mcp_server;
+pub mod model;
+pub mod nix_skill;
 pub mod plugin;
 pub mod plugins;
-pub mod dasl;
-pub mod sheaf;
+pub mod rename;
+pub mod share;
+pub mod splitter;
+pub mod storage;
+pub mod summary;
+pub mod tagging;
+pub mod view;

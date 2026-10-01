@@ -2,160 +2,122 @@
   description = "Kant Pastebin - UUCP + zkTLS";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
-    rust-ipfs = {
-      url = "github:dariusc93/rust-ipfs";
+    nixpkgs.url = "git+file:///mnt/data1/git/github.com/NixOS/nixpkgs.git?ref=omaster";
+    flake-utils.url = "git+file:///mnt/data1/git/github.com/numtide/flake-utils.git?ref=omain";
+    crane.url = "path:/mnt/data1/time-2026/05-may/19/crane";
+    nora-cargo = {
+      url = "path:/mnt/data1/nora/storage/cargo";
+      flake = false;
+    };
+    system-manager.url = "git+file:///mnt/data1/git/github.com/numtide/system-manager.git?ref=omain";
+    nora-src.url = "git+file:///mnt/data1/git/github.com/getnora-io/nora.git";
+    kant-zk-pastebin-src = {
+      url = "git+file:///home/mdupont/git/github.com/mdupont/kant-zk-pastebin.git";
       flake = false;
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-ipfs }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs = { self, nixpkgs, flake-utils, system-manager, crane, nora-cargo, nora-src, kant-zk-pastebin-src }:
+    (flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
-        kubo = pkgs.kubo;
-      in
-      {
-        packages = {
-          kant-pastebin = pkgs.rustPlatform.buildRustPackage {
-            pname = "kant-pastebin";
-            version = "0.1.0";
-            src = pkgs.runCommand "source-with-submodules" {} ''
-              cp -r ${self} $out
-              chmod -R u+w $out
-              mkdir -p $out/vendor
-              cp -r ${rust-ipfs} $out/vendor/rust-ipfs
-            '';
-            cargoLock.lockFile = ./Cargo.lock;
-            nativeBuildInputs = [ pkgs.pkg-config ];
-            buildInputs = [ pkgs.openssl ];
-          };
+        lib = nixpkgs.lib;
+        pkgs = import nixpkgs { inherit system; };
 
-          index-docs = pkgs.writeShellScriptBin "kant-index-docs" ''
-            PASTEBIN_URL="http://127.0.0.1:8090/paste"
-            DOCS_DIR="$HOME/DOCS"
-            SPOOL_DIR="$HOME/spool"
+        craneLibOrig = crane.mkLib pkgs;
+        craneLib = craneLibOrig.appendCrateRegistries [
+          (craneLibOrig.registryFromDownloadUrl {
+            indexUrl = "https://solana.solfunmeme.com/nora/cargo/index/";
+            dl = "file://${nora-cargo}/{crate}/{version}/{crate}-{version}.crate";
+            registryPrefix = "sparse+";
+          })
+        ];
+        src = self;
 
-            index_file() {
-                local file="$1"
-                local title=$(basename "$file")
-                local size=$(stat -c%s "$file" 2>/dev/null || echo 0)
-                
-                if [ "$size" -gt 1048576 ]; then return; fi
-                
-                local content=$(cat "$file" 2>/dev/null || echo "")
-                if [ -z "$content" ] || [ ''${#content} -lt 10 ]; then return; fi
-                
-                local keywords=$(echo "$title" | tr '._-' '\n' | grep -E '^[a-zA-Z0-9]+$' | sort -u | head -10 | ${pkgs.jq}/bin/jq -R . | ${pkgs.jq}/bin/jq -s .)
-                
-                echo "Indexing: $title"
-                
-                local payload=$(${pkgs.jq}/bin/jq -n \
-                    --arg t "$title" \
-                    --arg c "$content" \
-                    --argjson k "$keywords" \
-                    '{title:$t,content:$c,keywords:$k}')
-                
-                ${pkgs.curl}/bin/curl -s -X POST "$PASTEBIN_URL" \
-                    -H "Content-Type: application/json" \
-                    -d "$payload" | ${pkgs.jq}/bin/jq -r '.id // empty'
-            }
+        noraCargoPackage = p: pkgs.runCommand "cargo-package-${p.name}-${p.version}" {
+          nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
+          crate = "${nora-cargo}/${p.name}/${p.version}/${p.name}-${p.version}.crate";
+        } ''
+          mkdir -p "$out"
+          tar -xzf "$crate" -C "$out" --strip-components=1 --no-same-owner
+          echo "{\"files\":{},\"package\":\"${p.checksum}\"}" > "$out/.cargo-checksum.json"
+        '';
 
-            echo "🔍 Indexing ~/DOCS..."
-            ${pkgs.findutils}/bin/find "$DOCS_DIR" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.org" \) 2>/dev/null | while read f; do
-                index_file "$f"
-            done
+        rawVendorDeps = craneLib.vendorCargoDeps {
+          inherit src;
+          overrideVendorCargoPackage = p: drv:
+            if lib.strings.hasPrefix "sparse+https://solana.solfunmeme.com/nora/cargo/index/" (p.source or "")
+            then noraCargoPackage p
+            else drv;
+        };
 
-            echo "🔍 Indexing ~/spool..."
-            ${pkgs.findutils}/bin/find "$SPOOL_DIR" -maxdepth 2 -type f \( -name "*.md" -o -name "*.txt" \) 2>/dev/null | head -30 | while read f; do
-                index_file "$f"
-            done
+        # Merge all vendor subdirs into one so cargo finds ALL packages
+        # (crates-io + nora) in a single directory
+        cargoVendorDir = pkgs.runCommand "unified-vendor-deps" {} ''
+          mkdir -p "$out/registry"
+          for d in ${rawVendorDeps}/*/; do
+            cp -rn "$d"* "$out/registry/" 2>/dev/null || true
+          done
+          chmod -R u+w "$out/registry"
+          cat > "$out/config.toml" << EOF
+[source.unified]
+directory = "$out/registry"
+[source.crates-io]
+registry = "https://github.com/rust-lang/crates.io-index"
+replace-with = "unified"
+[source.nora]
+registry = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
+replace-with = "unified"
+EOF
+        '';
 
-            echo "✅ Indexing complete!"
+        commonArgs = {
+          inherit src cargoVendorDir;
+          strictDeps = true;
+          doCheck = false;
+          cargoExtraArgs = "--offline";
+          nativeBuildInputs = with pkgs; [ pkg-config ];
+          buildInputs = with pkgs; [ openssl ];
+          doInstallCargoArtifacts = false;
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out/bin"
+            BIN=$(find target -name "kant-pastebin" -type f -executable | head -1)
+            if [ -z "$BIN" ]; then
+              BIN=$(find target -name "kant-pastebin*" -type f -executable | head -1)
+            fi
+            cp "$BIN" "$out/bin/kant-pastebin"
+            CLI=$(find target -name "svg2tile-cli" -type f -executable | head -1)
+            if [ -n "$CLI" ]; then
+              cp "$CLI" "$out/bin/svg2tile-cli"
+            fi
+            runHook postInstall
           '';
-
-          default = self.packages.${system}.kant-pastebin;
-          
-          systemd-service = pkgs.writeTextFile {
-            name = "kant-pastebin.service";
-            text = ''
-              [Unit]
-              Description=Kant Pastebin - UUCP + zkTLS + IPFS
-              After=network.target
-
-              [Service]
-              Type=simple
-              WorkingDirectory=/mnt/data1/kant/pastebin
-              ExecStart=${self.packages.${system}.kant-pastebin}/bin/kant-pastebin
-              Restart=always
-              RestartSec=10
-              Environment="BIND_ADDR=127.0.0.1:8090"
-              Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
-              Environment="RUST_LOG=info"
-              Environment="BASE_URL=https://solana.solfunmeme.com"
-              Environment="BASE_PATH=/pastebin"
-              Environment="PATH=${kubo}/bin"
-
-              [Install]
-              WantedBy=default.target
-            '';
-          };
-
-          index-docs-service = pkgs.writeTextFile {
-            name = "kant-index-docs.service";
-            text = ''
-              [Unit]
-              Description=Index DOCS and spool to Kant Pastebin
-              After=kant-pastebin.service
-
-              [Service]
-              Type=oneshot
-              ExecStart=${self.packages.${system}.index-docs}/bin/kant-index-docs
-              StandardOutput=journal
-              StandardError=journal
-
-              [Install]
-              WantedBy=default.target
-            '';
-          };
-
-          index-docs-timer = pkgs.writeTextFile {
-            name = "kant-index-docs.timer";
-            text = ''
-              [Unit]
-              Description=Index DOCS and spool daily
-              Requires=kant-index-docs.service
-
-              [Timer]
-              OnCalendar=daily
-              Persistent=true
-
-              [Install]
-              WantedBy=timers.target
-            '';
-          };
         };
 
-        apps = {
-          kant-pastebin = {
-            type = "app";
-            program = "${self.packages.${system}.kant-pastebin}/bin/kant-pastebin";
-          };
-          default = self.apps.${system}.kant-pastebin;
-        };
+        cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+          cargoExtraArgs = "--offline";
+        });
 
+        kant-pastebin = craneLib.cargoBuild (commonArgs // {
+          inherit cargoArtifacts;
+          pnameSuffix = "";
+          meta = with pkgs.lib; {
+            description = "Kant Pastebin — UUCP + zkTLS with IPFS";
+            license = licenses.mit;
+            platforms = platforms.linux;
+          };
+        });
+      in {
+        packages = { inherit kant-pastebin; default = kant-pastebin; };
+        apps.default = { type = "app"; program = "${kant-pastebin}/bin/kant-pastebin"; };
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            cargo
-            rustc
-            rust-analyzer
-            rustfmt
-            clippy
-            pkg-config
-            openssl
-          ];
+          buildInputs = with pkgs; [ rustc cargo rustfmt clippy openssl.dev pkg-config ];
         };
       }
-    );
+    )) // {
+      systemConfigs.kant-pastebin-only = system-manager.lib.makeSystemConfig {
+        modules = [ ./pastebin-system.nix { nixpkgs.hostPlatform = "x86_64-linux"; } ];
+        specialArgs = { pastebin-src = self; nora-src = nora-src; kant-zk-pastebin-src = kant-zk-pastebin-src; };
+      };
+    };
 }

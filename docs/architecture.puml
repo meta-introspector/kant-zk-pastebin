@@ -1,0 +1,78 @@
+@startuml DASL Tile Architecture
+!theme vibrant
+
+title DAG-CBOR + DASL Tile Architecture
+
+' ── Layers ────────────────────────────────────────────────────────────
+package "Layer 1: Spec & Coverage" {
+  [IPLD Schema Schema] as SCHEMA
+  [Coverage Sheaf] as SHEAF
+  [Perf Traces] as PERF
+  [Source Code] as SOURCE
+}
+
+package "Layer 2: Tile Framework" {
+  [dasl-tiles-rust] as TILE_FW
+  interface "Tile trait" as TILE
+  interface "TileType" as TTYPE
+}
+
+package "Layer 3: Tile Implementations" {
+  [MIDI Player Tile] as MIDI
+  [PlantUML Tile] as PUML
+  [Flamegraph Tile] as FLAME
+  [Tulip Graph Tile] as TULIP
+  [Graphviz Tile] as DOT
+  [METIS Partition Tile] as METIS
+  [MiniZinc Solver Tile] as MINI
+  [Lean4 Prover Tile] as LEAN
+}
+
+package "Layer 4: Pastebin Service" {
+  [Plugin Registry] as PLUGIN
+  [CAR File Index] as CAR
+  [HTTP Router] as HTTP
+}
+
+package "Layer 5: Data Sources" {
+  database "locate DB\n30k MIDI\n19k PlantUML\n..." as LOCATE
+  file "File System" as FS
+}
+
+' ── Connections ──────────────────────────────────────────────────────
+SCHEMA --> SHEAF : annotates
+SHEAF --> PERF : glues stalks
+PERF --> SOURCE : maps symbols
+SHEAF --> TILE_FW : drives tiles
+
+TILE_FW --> TILE
+TILE_FW --> TTYPE
+
+TILE <|.. MIDI : implements
+TILE <|.. PUML : implements
+TILE <|.. FLAME : implements
+TILE <|.. TULIP : implements
+TILE <|.. DOT : implements
+TILE <|.. METIS : implements
+TILE <|.. MINI : implements
+TILE <|.. LEAN : implements
+
+MIDI --> PLUGIN : registered as
+PUML --> PLUGIN : registered as
+FLAME --> PLUGIN : registered as
+TULIP --> PLUGIN : registered as
+DOT --> PLUGIN : registered as
+METIS --> PLUGIN : registered as
+MINI --> PLUGIN : registered as
+LEAN --> PLUGIN : registered as
+
+PLUGIN --> HTTP : serves
+CAR --> HTTP : serves
+LOCATE --> CAR : indexes
+FS --> LOCATE : scanned
+
+' ── User ─────────────────────────────────────────────────────────────
+actor User as USER
+USER --> HTTP : browses
+
+@enduml

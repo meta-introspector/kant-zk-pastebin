@@ -1,0 +1,17 @@
+[package]
+name = "zos-circuit-tile"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Local path deps within the combined source (workspace members)
+zos-circuit-optimizer = { path = "deps/zos-circuit-optimizer" }
+erdfa-dasl = { path = "deps/erdfa-dasl" }
+zkperf-macros = { path = "deps/zkperf-macros" }
+zkperf-witness = { path = "deps/zkperf-witness" }

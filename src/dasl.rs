@@ -1,6 +1,6 @@
 // DASL 0xDA51 CID System - Monster symmetry content addressing
 // 15 supersingular primes × orbifold harmonics × 10-fold/8-fold sliding
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 const DA51_PREFIX: u64 = 0xDA51;
 
@@ -19,14 +19,14 @@ pub const BOTT_NAMES: [&str; 8] = ["R", "C", "H", "H⊕H", "H(2)", "C(4)", "R(8)
 
 /// Bott periodicity CID coordinates: (l mod 71, m mod 59, n mod 47)
 pub const BOTT_COORDS: [(u64, u64, u64); 8] = [
-    (0, 0, 0),     // R
-    (9, 7, 6),     // C
-    (18, 14, 12),  // H
-    (27, 21, 18),  // H⊕H
-    (36, 28, 24),  // H(2)
-    (45, 35, 30),  // C(4)
-    (54, 42, 36),  // R(8)
-    (63, 49, 42),  // R(8)⊕R(8)
+    (0, 0, 0),    // R
+    (9, 7, 6),    // C
+    (18, 14, 12), // H
+    (27, 21, 18), // H⊕H
+    (36, 28, 24), // H(2)
+    (45, 35, 30), // C(4)
+    (54, 42, 36), // R(8)
+    (63, 49, 42), // R(8)⊕R(8)
 ];
 
 // === 10-fold Way (Altland-Zirnbauer / Clifford algebras) ===
@@ -34,13 +34,31 @@ pub const TENFOLD_NAMES: [&str; 11] = [
     "A", "AIII", "AI", "BDI", "D", "DIII", "AII", "CII", "C", "CI", "AI'",
 ];
 pub const TENFOLD_SIGNATURES: [(u8, u8); 11] = [
-    (10,0),(9,1),(8,2),(7,3),(6,4),(5,5),(4,6),(3,7),(2,8),(1,9),(0,10),
+    (10, 0),
+    (9, 1),
+    (8, 2),
+    (7, 3),
+    (6, 4),
+    (5, 5),
+    (4, 6),
+    (3, 7),
+    (2, 8),
+    (1, 9),
+    (0, 10),
 ];
 
 /// 10-fold CID coordinates: (l mod 71, m mod 59, n mod 47)
 pub const TENFOLD_COORDS: [(u64, u64, u64); 11] = [
-    (0, 11, 37), (1, 15, 37), (2, 19, 37), (3, 23, 37), (4, 27, 37),
-    (5, 31, 37), (6, 35, 37), (7, 39, 37), (8, 43, 37), (9, 47, 37),
+    (0, 11, 37),
+    (1, 15, 37),
+    (2, 19, 37),
+    (3, 23, 37),
+    (4, 27, 37),
+    (5, 31, 37),
+    (6, 35, 37),
+    (7, 39, 37),
+    (8, 43, 37),
+    (9, 47, 37),
     (10, 51, 37),
 ];
 
@@ -79,12 +97,7 @@ pub fn nested_cid(data: &[u8]) -> u64 {
     let hecke = hash[1] as u64 % 59;
     let bott = hash[2] as u64 % 47;
     let hash20 = ((hash[3] as u64) << 12) | ((hash[4] as u64) << 4) | ((hash[5] as u64) >> 4);
-    (DA51_PREFIX << 48)
-        | (3u64 << 44)
-        | (shard << 36)
-        | (hecke << 28)
-        | (bott << 20)
-        | hash20
+    (DA51_PREFIX << 48) | (3u64 << 44) | (shard << 36) | (hecke << 28) | (bott << 20) | hash20
 }
 
 /// Type 4: Harmonic Path (10-fold ↔ 8-fold bridge)
@@ -136,8 +149,16 @@ pub fn dual_47(coords: (u64, u64, u64), steps: u64) -> (u64, u64, u64) {
 /// Harmonic bridge: slide between 10-fold and 8-fold CID spaces
 /// LCM(10, 8) = 40, GCD(10, 8) = 2
 pub fn harmonic_slide(tenfold_idx: usize, bott_idx: usize) -> (u64, u64, u64) {
-    let t = if tenfold_idx < 11 { TENFOLD_COORDS[tenfold_idx] } else { (0, 0, 0) };
-    let b = if bott_idx < 8 { BOTT_COORDS[bott_idx] } else { (0, 0, 0) };
+    let t = if tenfold_idx < 11 {
+        TENFOLD_COORDS[tenfold_idx]
+    } else {
+        (0, 0, 0)
+    };
+    let b = if bott_idx < 8 {
+        BOTT_COORDS[bott_idx]
+    } else {
+        (0, 0, 0)
+    };
     ((t.0 + b.0) % 71, (t.1 + b.1) % 59, (t.2 + b.2) % 47)
 }
 
@@ -155,7 +176,9 @@ pub fn dasl_hex(cid: u64) -> String {
 
 /// Decode any DASL CID into (type, raw_data_48bits)
 pub fn decode(cid: u64) -> Option<(u8, u64)> {
-    if (cid >> 48) != DA51_PREFIX { return None; }
+    if (cid >> 48) != DA51_PREFIX {
+        return None;
+    }
     let typ = ((cid >> 44) & 0xF) as u8;
     let data = cid & 0x0FFFFFFFFFFF;
     Some((typ, data))
@@ -179,7 +202,13 @@ pub fn all_cids(data: &[u8]) -> Vec<(String, String)> {
         ("orbifold".into(), format!("({},{},{})", l, m, n)),
         ("bott".into(), BOTT_NAMES[bott_idx].into()),
         ("tenfold".into(), TENFOLD_NAMES[tenfold_idx].into()),
-        ("harmonic".into(), format!("({},{},{})", slide.0, slide.1, slide.2)),
-        ("shard_prime".into(), MONSTER_PRIMES[(data[0] as usize) % 15].to_string()),
+        (
+            "harmonic".into(),
+            format!("({},{},{})", slide.0, slide.1, slide.2),
+        ),
+        (
+            "shard_prime".into(),
+            MONSTER_PRIMES[(data[0] as usize) % 15].to_string(),
+        ),
     ]
 }

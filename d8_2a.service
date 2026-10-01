@@ -1,0 +1,13 @@
+[Unit]
+Description=D8 2A eBPF Monitor - CBOR Tag 42 Detection
+Documentation=file:///home/mdupont/DOCS/d8_2a_ebpf/README.md
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/mdupont/.local/bin/d8_2a_monitor/start.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
