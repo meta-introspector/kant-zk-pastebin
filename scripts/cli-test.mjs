@@ -253,6 +253,11 @@ try {
       encoding: "utf8", cwd: root, env: { ...process.env, PORT: String(demoPort) },
     });
     eq("scripts/two-agents.sh runs to the end", demo.status, 0);
+    if (demo.status !== 0) {
+      console.error("---- two-agents.sh output (status " + demo.status + ") ----");
+      console.error(demo.stdout);
+      console.error(demo.stderr);
+    }
     ok("...with both agents in one room",
       /both agents are in room [0-9a-f]{64}/.test(demo.stdout));
     ok("...and the same conversation on both sides",
