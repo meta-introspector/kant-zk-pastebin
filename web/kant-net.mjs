@@ -358,14 +358,32 @@ export class RelayClient {
     // relay, whatever the page's worker does.
     if (!init) init = { cache: "no-cache" };
     else if (!init.cache) init = { ...init, cache: "no-cache" };
+    
+    // Extract wait parameter from URL to set appropriate timeout
+    const waitMatch = url.match(/[?&]wait=(\d+)/);
+    const waitSeconds = waitMatch ? Math.min(Number(waitMatch[1]), 60) : 0;
+    
+    // Set timeout to wait time + 5 seconds buffer for network latency
+    const timeoutMs = waitSeconds > 0 ? (waitSeconds + 5) * 1000 : 30000;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
     this.log.info("relay", `${what}…`, url);
     let r;
     try {
-      r = await this.fetchImpl(url, init);
+      r = await this.fetchImpl(url, { ...init, signal: controller.signal });
     } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        this.log.error("relay", `${what} timed out after ${timeoutMs}ms`, url);
+        throw new Error(`relay ${what} timed out`);
+      }
       this.log.error("relay", `${what} could not reach the relay`, `${url} — ${e.message ?? e}`);
       throw e;
     }
+    clearTimeout(timeoutId);
+    
     if (!r.ok) {
       this.log.error("relay", `${what} was refused (${r.status})`, url);
       throw new Error(`relay ${what} failed: ${r.status}`);
@@ -871,11 +889,14 @@ export class KantNode {
         if (failures <= 3 || failures % 5 === 0) {
           this.log.error("relay", `polling failed (${failures} in a row)`, e);
         }
-        await sleep(Math.min(interval * failures, 15000));
+        // Exponential backoff with jitter to avoid thundering herd
+        const backoff = Math.min(interval * Math.pow(2, Math.min(failures, 6)), 30000);
+        await sleep(backoff + Math.random() * 1000);
+        continue; // Skip the post-poll sleep on failure
       }
       // Always yield, even when the relay answers at once: a long poll that
       // returns immediately must not turn into a spin.
-      await sleep(wait ? 25 : interval);
+      await sleep(wait ? 100 : interval); // Reduced delay for long-poll mode
     }
   }
 
