@@ -24,7 +24,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24 to match CI; the CLI itself targets node18 at runtime.
+          node-version: 24
 
       - name: Setup Pages
         uses: meta-introspector/configure-pages@v4

@@ -34,7 +34,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24: server/pass-store.mjs uses the native node:sqlite module.
+          node-version: 24
 
       # CLI tests first: a failing test must not ship a bundle.
       - name: Run CLI tests
