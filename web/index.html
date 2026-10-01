@@ -145,6 +145,11 @@
     <input id="say" placeholder="say something" />
     <button id="btn-send">Send</button>
   </div>
+  <div class="row" style="margin-top:6px">
+    <input type="file" id="dropfile" title="drop a file into the room — encrypted in your browser, pinned by its digest" />
+    <button id="btn-drop">Drop file</button>
+  </div>
+  <div id="files" class="meta"></div>
   <button class="ghost" id="btn-shareroom">Show the link and code</button>
   <button class="ghost" id="btn-leave">Leave the room</button>
   <div class="meta" id="chatstatus"></div>
@@ -223,6 +228,7 @@
 <script type="module">
 import * as K from "./kantzk.mjs";
 import * as N from "./kant-net.mjs";
+import * as FL from "./kant-file.mjs";
 import * as S from "./kant-site.mjs";
 import * as F from "./kant-flow.mjs";
 import * as D from "./kant-diag.mjs";
@@ -318,6 +324,7 @@ function render() {
 
   if (node && node.secret) drawShare();
   renderChat();
+  renderFiles();
   const key = `${ui.screen}|${task}`;
   if (key !== spokenFor) { spokenFor = key; speak(F.promptFor(ui)); }
 }
@@ -360,7 +367,7 @@ function newNode() {
     relay: D.effectiveRelay(reach),
     log: LOG,
     reach,
-    onChange: () => { renderChat(); },
+    onChange: () => { renderChat(); renderFiles(); },
   });
 }
 
@@ -368,7 +375,7 @@ function attach(fresh) {
   if (node) node.stop();
   node = fresh;
   node.connect();
-  node.onChange = () => renderChat();
+  node.onChange = () => { renderChat(); renderFiles(); };
   node.announceSelf()
     .then(() => node.dialKnownPeers())
     .catch((e) => LOG.error("app", "could not announce into the room", e));
@@ -439,6 +446,39 @@ function renderChat() {
     : "(nothing said yet)";
   $("chat").scrollTop = $("chat").scrollHeight;
   $("chatstatus").textContent = transportLine();
+}
+
+/** The files dropped in the room, ours and others'.  A click fetches
+ *  every chunk by its digest from the relay, decrypts with the room
+ *  secret, and saves the file — the relay never saw a plaintext byte. */
+function renderFiles() {
+  const box = $("files");
+  if (!box) return;
+  if (!node) { box.textContent = ""; return; }
+  const files = node.files ?? [];
+  box.innerHTML = files.length
+    ? "dropped: " + files.map((f, i) =>
+        `<a href="#" data-f="${i}">${K.escapeHtml(f.name)}</a>` +
+        ` <span>(${f.size}B, ${f.cids.length} chunk${f.cids.length > 1 ? "s" : ""})</span>`
+      ).join(" · ")
+    : "";
+  for (const a of box.querySelectorAll("a[data-f]")) {
+    a.onclick = async (ev) => {
+      ev.preventDefault();
+      const f = files[Number(a.dataset.f)];
+      try {
+        const bytes = await FL.decryptFile(node.secret, f, async (cid) =>
+          new Uint8Array(await (await fetch(
+            `${node.relayBase}/room/${encodeURIComponent(f.room)}/block/${cid}`)).arrayBuffer()));
+        const url = URL.createObjectURL(new Blob([bytes], { type: f.mime }));
+        const link = document.createElement("a");
+        link.href = url; link.download = f.name; link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } catch (e) {
+        LOG.error("app", "a file could not be fetched or decrypted", e.message);
+      }
+    };
+  }
 }
 
 // -------------------------------------------------------------- the taps
@@ -551,6 +591,34 @@ $("btn-send").onclick = async () => {
   dispatch({ type: "say" });
 };
 $("say").onkeydown = (e) => { if (e.key === "Enter") $("btn-send").click(); };
+
+// Drop a file: encrypt it in this browser with a key only the room
+// knows, pin every ciphertext chunk on the relay under its digest, then
+// announce the manifest as an ordinary self-certifying room line.
+$("btn-drop").onclick = async () => {
+  if (!node || !node.secret) { LOG.warn("app", "no room to drop into", ""); return; }
+  const picked = $("dropfile").files[0];
+  if (!picked) { LOG.warn("app", "no file picked", ""); return; }
+  const data = new Uint8Array(await picked.arrayBuffer());
+  LOG.info("app", `dropping ${picked.name} (${data.length}B)`, "encrypting…");
+  try {
+    const enc = await FL.encryptFile(node.secret, picked.name, picked.type || "application/octet-stream", data);
+    for (let i = 0; i < enc.cids.length; i += 1) {
+      const r = await fetch(
+        `${node.relayBase}/room/${encodeURIComponent(node.room)}/block/${enc.cids[i]}`,
+        { method: "POST", body: enc.chunks[i] });
+      if (!r.ok) throw new Error(`the relay refused chunk ${i} (${r.status})`);
+    }
+    node.seq += 1;
+    const m = FL.manifest(node.room, node.self, node.seq,
+      enc.name, enc.mime, enc.size, enc.nonce, enc.cids);
+    await node.publish(FL.printManifest(m));
+    LOG.info("app", `dropped ${picked.name}`, `${enc.cids.length} chunk(s) pinned`);
+  } catch (e) {
+    LOG.error("app", "the file could not be dropped", e.message);
+  }
+  $("dropfile").value = "";
+};
 
 $("btn-leave").onclick = () => {
   if (node) node.stop();

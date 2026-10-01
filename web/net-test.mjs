@@ -195,7 +195,11 @@ check("peers are discovered from a poll", () => {
 
 console.log("the real relay (server/relay.mjs)");
 
-const cfg = { ...CONFIG, port: 0, host: "127.0.0.1", staticDir: "" };
+// A throwaway pass DB: the anonymous rate limit (10 lines / 10 min per
+// sender) is per-DB, and a shared default DB makes back-to-back runs
+// fail with 429s from the previous run's spending.
+const cfg = { ...CONFIG, port: 0, host: "127.0.0.1", staticDir: "",
+  passDb: `/tmp/kant-net-test-${process.pid}/passes.sqlite` };
 const server = createServer(cfg, new Rooms(cfg));
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}`;
