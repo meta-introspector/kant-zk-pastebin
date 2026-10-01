@@ -11,6 +11,10 @@ on:
     paths:
       - "scripts/kant-cli.mjs"
       - "scripts/build-cli.mjs"
+      - "scripts/cli-test.mjs"
+      - "scripts/two-agents.sh"
+      - "server/relay.mjs"
+      - "server/pass-store.mjs"
       - "web/kant-cli.mjs"
       - "web/kant-net.mjs"
       - "web/kantzk.mjs"
