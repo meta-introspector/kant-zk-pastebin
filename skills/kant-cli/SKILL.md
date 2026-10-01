@@ -84,6 +84,29 @@ same named-room protocol the tracker fleet mesh uses
 into sqlite and mesh-sync them. The room is public and append-only: never
 put credential-shaped fields in the record.
 
+## The Rust wasm core (file sharing in rooms)
+
+The pastebin core is compiled Rust: `pastebin-wasm/` → `web/pastebin_wasm_bg.wasm`
+(bindgen 0.2.129, `--target web`). It computes CIDv1/raw/sha2-256, chunk plans,
+and the kzcid room-record codec (with a credential-field guard) — cross-checked
+byte-for-byte against the JS path and kubo (`scripts/wasm-crosscheck.mjs`).
+`web/kant-ipfs.mjs` prefers it and falls back to pure JS.
+
+```bash
+./scripts/build-pastebin-wasm.sh        # cargo wasm32 + bindgen + crosscheck
+node scripts/p2p-wasm-filetest.mjs      # e2e: two peers share a file via a room
+```
+
+## Deploy: the two twins (same protocol, either transport)
+
+* **systemd twin** — `kant-p2p-relay.service` runs `server/relay.mjs` on :8796
+  serving `web/` (p2p.html + wasm core); nginx exposes it at
+  `https://solana.solfunmeme.com/p2p-relay/`.
+* **Cloudflare twin** — `cd server && CLOUDFLARE_API_TOKEN=$(cat ~/.cloudflare) wrangler deploy`
+  → `https://kant-zk-relay-wasm.purple-fire-b881.workers.dev` (account
+  `2c5da35f…` — the kant account; the jmikedupont2 account is rate-limited).
+  Durable Object per room, assets = `web/`.
+
 ## Test, build, publish
 
 ```bash
