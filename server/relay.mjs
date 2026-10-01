@@ -34,6 +34,7 @@ import crypto from "node:crypto";
 import { PassStore } from "./pass-store.mjs";
 import { pastePass, passOk, passRoom } from "../web/kant-pass.mjs";
 import { parseMsg } from "../web/kant-net.mjs";
+import { witness } from "../web/kantzk.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -63,6 +64,11 @@ export const CONFIG = {
   passDb: args.get("pass-db") ?? process.env.KANT_PASS_DB ?? "/var/lib/kant-zk/passes.sqlite",
   peerLimit: Number(args.get("peer-limit") ?? 10),
   peerWindowMs: Number(args.get("peer-window") ?? 10 * 60 * 1000),
+  maxBlock: Number(args.get("max-block") ?? 1048576),
+  gasStoreBudget: Number(args.get("gas-store") ?? 64 * 1024 * 1024),
+  gasServeBudget: Number(args.get("gas-serve") ?? 256 * 1024 * 1024),
+  gasWindowMs: Number(args.get("gas-window") ?? 60 * 60 * 1000),
+  archiveDir: args.get("archive-dir") ?? process.env.KANT_ARCHIVE ?? "",
   version: "1.0.0",
 };
 
@@ -117,6 +123,76 @@ export function makeLogger(cfg = CONFIG) {
 }
 
 // ------------------------------------------------------------- the rooms
+
+// ------------------------------------------------------- blocks and gas
+
+/** Room-scoped, content-addressed block store with a gas ledger.
+ *
+ *  A block's name is the digest of its bytes (verified on write — a
+ *  writer can pin garbage under a name of its own, but never under the
+ *  name of honest bytes).  Blocks live under a room name: knowing the
+ *  room is the trust credential, exactly as it is for reading the room's
+ *  lines.
+ *
+ *  Gas is what keeps a room's pinning honest: every byte written and
+ *  every byte served is charged to the room's ledger, and the budget
+ *  refills every window.  A room that burns through its budget gets a
+ *  429 until the window turns over — the relay relays for its peers,
+ *  not for the whole internet. */
+export class Blocks {
+  constructor(cfg = CONFIG) {
+    this.cfg = cfg;
+    this.map = new Map(); // room -> { blocks: Map(cid -> bytes), gas: {stored, served, window} }
+  }
+
+  room(name) {
+    let r = this.map.get(name);
+    if (!r) {
+      r = { blocks: new Map(), gas: { stored: 0, served: 0, window: Date.now() } };
+      this.map.set(name, r);
+    }
+    return r;
+  }
+
+  /** The ledger, rolled over if the window has passed. */
+  gas(name) {
+    const r = this.room(name);
+    if (Date.now() - r.gas.window > this.cfg.gasWindowMs) {
+      r.gas.stored = 0; r.gas.served = 0; r.gas.window = Date.now();
+    }
+    return r.gas;
+  }
+
+  /** Pin bytes under their name.  Returns null on success, or
+   *  { status, error } describing the refusal. */
+  put(name, cid, bytes) {
+    if (witness(Array.from(bytes)) !== cid) {
+      return { status: 400, error: "cid is not the digest of the bytes" };
+    }
+    if (bytes.length > this.cfg.maxBlock) return { status: 413, error: "block too large" };
+    const g = this.gas(name);
+    if (g.stored + bytes.length > this.cfg.gasStoreBudget) {
+      return { status: 429, error: "the room is out of pinning gas until the window turns" };
+    }
+    const r = this.room(name);
+    if (!r.blocks.has(cid)) g.stored += bytes.length;
+    r.blocks.set(cid, Buffer.from(bytes));
+    return null;
+  }
+
+  /** Serve a block, charging the room for the bytes. */
+  get(name, cid) {
+    const r = this.map.get(name);
+    const bytes = r?.blocks.get(cid);
+    if (!bytes) return { status: 404, error: "no such block" };
+    const g = this.gas(name);
+    if (g.served + bytes.length > this.cfg.gasServeBudget) {
+      return { status: 429, error: "the room is out of serving gas until the window turns" };
+    }
+    g.served += bytes.length;
+    return bytes;
+  }
+}
 
 /** One append-only log per room (`Kant.Relay.Server`). */
 export class Rooms {
@@ -227,6 +303,22 @@ function readBody(req, limit) {
   });
 }
 
+/** The same reader, but the bytes stay bytes — a block's ciphertext is
+ *  binary and must not pass through utf-8 on its way to the store. */
+function readBodyRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > limit) { reject(new Error("too large")); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
 // Serving `web/` as the document root leaves the Lean-extracted kernel, which
 // lives in the sibling `dist/`, outside the tree: `/dist/kant_kernel.wasm` used
 // to 404, and the page reported that as a kernel validation failure. Requests
@@ -269,6 +361,20 @@ function serveStatic(cfg, res, urlPath) {
 export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLogger(cfg),
   passes = new PassStore(cfg.passDb, {
     peerLimit: cfg.peerLimit, peerWindowMs: cfg.peerWindowMs })) {
+  const blocks = new Blocks(cfg);
+  // The archive: every room line and every block pin, appended to one
+  // ndjson file per room handle, so a reader can replay a room that the
+  // relay itself has long since forgotten.  The room name is only ever
+  // recorded as its eight-character handle.
+  const archive = (room, kind, payload) => {
+    if (!cfg.archiveDir) return;
+    try {
+      fs.mkdirSync(cfg.archiveDir, { recursive: true });
+      fs.appendFileSync(
+        path.join(cfg.archiveDir, `${roomRef(room)}.ndjson`),
+        JSON.stringify({ t: new Date().toISOString(), kind, ...payload }) + "\n");
+    } catch (e) { log.warn("archive", "an entry was not written", e.message); }
+  };
   const server = http.createServer(async (req, res) => {
     const started = Date.now();
     const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
@@ -324,6 +430,7 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
         }
         const cursor = rooms.post(room, lines);
         log.info("relay", `posted ${lines.length} lines`, `${roomRef(room)} cursor=${cursor} pass=${pass ? pass.limit : "peer"}`);
+        for (const l of lines) archive(room, "line", { cursor, line: l });
         sendJson(res, cfg, 200, { ok: true, cursor, accepted: lines.length,
           passRemaining: verdict.remaining });
         return;
@@ -343,6 +450,51 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
         return;
       }
       log.warn("relay", "method not allowed", `${roomRef(room)} ${req.method}`);
+      sendJson(res, cfg, 405, { ok: false, error: "method not allowed" });
+      return;
+    }
+
+    // Content-addressed blocks, room-scoped: /room/<addr>/block/<cid>.
+    // Knowing the room is the trust credential, exactly as it is for the
+    // room's lines; every byte in and out is charged to the room's gas.
+    const b = url.pathname.match(/^\/room\/([^/]+)\/block\/([0-9a-f]{64})$/);
+    if (b) {
+      const room = decodeURIComponent(b[1]);
+      const cid = b[2];
+      if (req.method === "POST" || req.method === "PUT") {
+        let body;
+        try { body = await readBodyRaw(req, cfg.maxBlock + 1024); }
+        catch (e) {
+          log.warn("block", "a body was refused", `${roomRef(room)}: ${e.message}`);
+          sendJson(res, cfg, 413, { ok: false, error: "block too large" });
+          return;
+        }
+        const refused = blocks.put(room, cid, body);
+        if (refused) {
+          log.warn("block", "a pin was refused", `${roomRef(room)} ${cid.slice(0, 12)}: ${refused.error}`);
+          sendJson(res, cfg, refused.status, { ok: false, error: refused.error });
+          return;
+        }
+        const g = blocks.gas(room);
+        log.info("block", "a block was pinned", `${roomRef(room)} ${cid.slice(0, 12)} ${body.length}B`);
+        archive(room, "block", { cid, bytes: body.length });
+        sendJson(res, cfg, 200, { ok: true, cid, bytes: body.length,
+          gasStored: g.stored, gasStoredLeft: cfg.gasStoreBudget - g.stored });
+        return;
+      }
+      if (req.method === "GET") {
+        const out = blocks.get(room, cid);
+        if (out.status) {
+          log.warn("block", "a fetch was refused", `${roomRef(room)} ${cid.slice(0, 12)}: ${out.error}`);
+          sendJson(res, cfg, out.status, { ok: false, error: out.error });
+          return;
+        }
+        log.info("block", "a block was served", `${roomRef(room)} ${cid.slice(0, 12)} ${out.length}B`);
+        res.writeHead(200, { ...cors(cfg), "content-type": "application/octet-stream",
+          "content-length": out.length });
+        res.end(out);
+        return;
+      }
       sendJson(res, cfg, 405, { ok: false, error: "method not allowed" });
       return;
     }

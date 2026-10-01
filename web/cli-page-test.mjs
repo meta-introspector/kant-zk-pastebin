@@ -108,11 +108,14 @@ for (const id of [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1])) {
   elements.set(id, new El(id));
 }
 const $ = (id) => elements.get(id);
+const guideBox = new El("", "div");
 
 globalThis.document = {
   body: new El("", "body"),
   getElementById: (id) => elements.get(id) ?? null,
   createElement: (tag) => new El("", tag),
+  addEventListener: () => {},
+  querySelector: (sel) => (sel === ".guide" ? guideBox : null),
   execCommand: () => true,
 };
 // The browser is pointed at the link the terminal printed: same origin, and
