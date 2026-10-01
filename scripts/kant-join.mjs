@@ -47,7 +47,9 @@ const natBytes = (n) => { const o = []; do { o.unshift(n % 256); n = Math.floor(
 
 function kzchat(room, sender, seq, text) {
   const fields = [utf8(room), utf8(sender), natBytes(seq), utf8(text)];
-  return env("kzchat", [...fields, hexDecode(witness([fields[0], 0, fields[1], 0, fields[2], 0, fields[3]].flat()))]);
+  // the witness field is the ASCII of the hex witness (64 bytes), NOT the raw digest —
+  // ofMsg stores asciiBytes(msgWitness(m)); hexDecode here makes reference clients refuse the line.
+  return env("kzchat", [...fields, utf8(witness([fields[0], 0, fields[1], 0, fields[2], 0, fields[3]].flat()))]);
 }
 function kzinvite(relay, secret, peer) {
   return env("kzinvite", [utf8(relay), secret, utf8(peer)]);
@@ -92,6 +94,14 @@ const out = await g.json();
 console.log("GET ", g.status, `cursor=${out.cursor} lines=${out.lines?.length}`);
 for (const l of out.lines ?? []) {
   const f = l.split(":").map(hexDecode), tag = String.fromCharCode(...f[0]);
-  if (tag === "kzchat") console.log(`  [${String.fromCharCode(...f[2])}] ${new TextDecoder().decode(Uint8Array.from(f[4]))}`);
+  if (tag === "kzchat") {
+    // proof of source: re-verify the witness before trusting the line
+    let verdict = "";
+    if (f.length === 6) {
+      const re = utf8(witness([f[1], 0, f[2], 0, f[3], 0, f[4]].flat()));
+      if (re.join(",") !== (f[5] ?? []).join(",")) verdict = "  ✗ REFUSED (witness mismatch)";
+    } else verdict = "  ✗ REFUSED (malformed fields)";
+    console.log(`  [${String.fromCharCode(...f[2])}] ${new TextDecoder().decode(Uint8Array.from(f[4]))}${verdict}`);
+  }
   else console.log(`  <${tag} line>`);
 }
