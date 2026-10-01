@@ -1,0 +1,18 @@
+[package]
+name = "pastebin-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "kant pastebin core compiled to WebAssembly: CIDv1/raw/sha2-256 artifact addressing and kzcid room-record codec for the p2p chat client"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "=0.2.129"
+sha2 = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+opt-level = "s"
+lto = true

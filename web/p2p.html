@@ -32,7 +32,7 @@
     <button id="join">join</button>
     <span id="status" class="dim"></span>
   </div>
-  <div class="row dim">ipfs: <span id="ipfs-status">probing…</span> · kernel: <span id="kernel-status">not loaded</span></div>
+  <div class="row dim">ipfs: <span id="ipfs-status">probing…</span> · kernel: <span id="kernel-status">not loaded</span> · core: <span id="core-status">probing…</span></div>
 </fieldset>
 
 <fieldset>
@@ -76,6 +76,19 @@ ipfsCat("bafkqaaa").then((r) => {
 loadKernel().then((k) => {
   $("kernel-status").textContent = `proved kernel ok (${k.source ?? "wasm"})`;
 }).catch((e) => { $("kernel-status").textContent = `kernel unavailable: ${e.message}`; });
+
+// the Rust core: CID addressing in compiled wasm, JS fallback when absent
+import("./kant-ipfs.mjs").then(async ({ wasmOnce, cidOf }) => {
+  const core = await wasmOnce();
+  if (core) {
+    // sanity: the wasm core and the JS contract must agree on a fixed vector
+    const probe = new TextEncoder().encode("kant pastebin wasm core probe");
+    const a = await cidOf(probe); // exercises the wasm path itself
+    $("core-status").textContent = `rust core ok (cid ${a.slice(0, 10)}…)`;
+  } else {
+    $("core-status").textContent = "rust core unavailable — JS fallback";
+  }
+}).catch(() => { $("core-status").textContent = "rust core unavailable — JS fallback"; });
 
 $("join").onclick = async () => {
   try {

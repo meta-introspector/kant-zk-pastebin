@@ -22,6 +22,38 @@
 
 import { utf8, fromUtf8, hexDecode } from "./kantzk.mjs";
 
+// ── the Rust core (pastebin-wasm), preferred over the JS path ──────────
+//
+// `pastebin-wasm` (pastebin-wasm/src/lib.rs) computes the very same
+// CIDv1/raw/sha2-256 in compiled Rust — cross-checked byte-for-byte
+// against this module by scripts/wasm-crosscheck.mjs.  Loaded lazily;
+// when unavailable (old browser, blocked wasm) the pure-JS path below
+// keeps working.
+let wasmCore = null;
+let wasmTried = false;
+
+/** The wasm core, or `null` when it cannot load. */
+export async function wasmOnce() {
+  if (wasmTried) return wasmCore;
+  wasmTried = true;
+  try {
+    const mod = await import("./pastebin_wasm.js");
+    try {
+      await mod.default();
+    } catch {
+      // Node (and some sandboxes) cannot fetch the wasm over file:// URLs:
+      // hand the glue the bytes explicitly.  Browsers take the fetch path.
+      const { readFileSync } = await import("node:fs");
+      const bytes = readFileSync(new URL("./pastebin_wasm_bg.wasm", import.meta.url));
+      await mod.default({ module_or_path: bytes });
+    }
+    wasmCore = mod;
+  } catch {
+    wasmCore = null;
+  }
+  return wasmCore;
+}
+
 /** One kubo chunk; ≤ this size the client CID == the node CID. */
 export const MAX_ARTIFACT_BYTES = 262144;
 
@@ -56,6 +88,8 @@ export async function cidOf(bytes) {
   if (bytes.length > MAX_ARTIFACT_BYTES) {
     throw new Error(`artifact ${bytes.length}B > ${MAX_ARTIFACT_BYTES}B — chunk it or use kubo directly`);
   }
+  const core = await wasmOnce();
+  if (core) return core.wasm_cid_of_bytes(bytes);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   const cidBytes = new Uint8Array(2 + 2 + digest.length);
   cidBytes[0] = 0x01;              // CIDv1

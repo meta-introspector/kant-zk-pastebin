@@ -14,6 +14,9 @@ on:
       - "scripts/cli-test.mjs"
       - "scripts/two-agents.sh"
       - "scripts/ci-checkin.mjs"
+      - "scripts/wasm-crosscheck.mjs"
+      - "scripts/build-pastebin-wasm.sh"
+      - "pastebin-wasm/**"
       - "server/relay.mjs"
       - "server/pass-store.mjs"
       - "web/kant-cli.mjs"
@@ -49,6 +52,12 @@ jobs:
       - name: Install esbuild
         run: npm i --no-save esbuild
 
+      - name: Build the Rust core to wasm + crosscheck
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          ./scripts/build-pastebin-wasm.sh
+
       - name: Bundle CLI
         env:
           KANT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.1.0-{0}', github.sha) }}
@@ -68,6 +77,10 @@ jobs:
             dist/kant-cli.mjs
             dist/kant-cli.sha256
             dist/kant-cli.version
+            web/pastebin_wasm.js
+            web/pastebin_wasm_bg.wasm
+            web/pastebin_wasm.d.ts
+            web/pastebin_wasm_bg.wasm.d.ts
           if-no-files-found: error
 
       # Every agent that builds checks in with us in the chat — one
@@ -114,4 +127,6 @@ jobs:
             dist/kant-cli.mjs
             dist/kant-cli.sha256
             dist/kant-cli.version
+            web/pastebin_wasm.js
+            web/pastebin_wasm_bg.wasm
           generate_release_notes: true

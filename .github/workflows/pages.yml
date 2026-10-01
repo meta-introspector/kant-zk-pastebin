@@ -33,6 +33,12 @@ jobs:
       - name: Install esbuild
         run: npm i --no-save esbuild
 
+      - name: Build the Rust core to wasm
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          ./scripts/build-pastebin-wasm.sh
+
       - name: Bundle the kant CLI
         env:
           KANT_VERSION: 0.1.0-pages-${{ github.sha }}

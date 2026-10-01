@@ -108,19 +108,19 @@ export class P2PApp {
    * Publish an artifact: pin via kubo when reachable, else embed in the room
    * (verified end to end by CID on fetch). Announces the kzcid record.
    */
-  async publish(name, bytes, { note = "" } = {}) {
+  async publish(name, bytes, { note = "", rpcBase, gwBase } = {}) {
     if (bytes.length > MAX_ARTIFACT_BYTES) {
       throw new Error(`artifact ${bytes.length}B exceeds ${MAX_ARTIFACT_BYTES}B — chunk it`);
     }
-    const rec = await publishArtifact({ peer: this.id, name, bytes, note });
+    const rec = await publishArtifact({ peer: this.id, name, bytes, note, rpcBase, gwBase });
     await this.postRecord(rec);
     this.seen.set(rec.cid, rec);
     return rec;
   }
 
   /** Fetch an announced artifact (gateway first, embedded fallback), CID-verified. */
-  async fetch(rec) {
-    const out = await fetchArtifact(rec);
+  async fetch(rec, { gwBase } = {}) {
+    const out = await fetchArtifact(rec, { gwBase });
     if (!out) throw new Error(`artifact ${rec.cid} unreachable (no gateway, no embedded copy)`);
     return out;
   }
