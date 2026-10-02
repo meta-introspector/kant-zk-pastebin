@@ -7,6 +7,7 @@ result-*
 vendor/
 node_modules/
 test-results/
+data/browser-check/
 hf-deploy/
 chats/
 docs/
