@@ -764,7 +764,11 @@ async function copy(text) {
 async function refreshTransport() {
   reach = await D.resolveReachability({
     configured: relayBase,
-    origin: location.origin,
+    // The directory this page came from, not `location.origin`: a relay
+    // mounted at a sub-path answers /health under that prefix. See
+    // `D.servedBase` — probing the bare origin is why this deployment could
+    // not find the relay it was served by.
+    origin: D.servedBase(location.href),
     log: LOG,
   });
   const used = D.effectiveRelay(reach);
