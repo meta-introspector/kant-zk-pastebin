@@ -56,7 +56,7 @@
 
 <script type="module">
 import { P2PApp } from "./kant-p2p.mjs";
-import { ipfsCat } from "./kant-ipfs.mjs";
+import { ipfsCat, GATEWAY } from "./kant-ipfs.mjs";
 import { loadKernel } from "./kant-wasm.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -68,10 +68,30 @@ const log = (msg, cls = "") => {
 };
 let app = null;
 
-// probe ipfs before join so the UI knows which transport to expect
-ipfsCat("bafkqaaa").then((r) => {
-  $("ipfs-status").textContent = r ? "gateway reachable" : "no gateway — artifacts will ride the room";
-}).catch(() => { $("ipfs-status").textContent = "no gateway — artifacts will ride the room"; });
+// Probe a gateway before join so the UI knows which transport to expect.
+//
+// Two things were wrong here. The probe CID was "bafkqaaa", which is not a
+// CIDv1 at all, so a perfectly healthy gateway would 404 it and the probe
+// could never report reachable. And GATEWAY defaults to the operator's own
+// 127.0.0.1:8080 — on a deployed site that address is the *visitor's*
+// localhost, so every page load fired a doomed request and logged a CORS
+// error in everyone's console.
+//
+// So: use a CID every IPFS node already has (the empty raw block), and skip
+// the probe entirely unless a gateway is actually configured for this origin.
+const GATEWAY_PROBE_CID = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
+const gatewayIsLocal = /^(https?:\/\/)(127\.0\.0\.1|localhost|\[::1\])/.test(GATEWAY);
+const onLocalhost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const noGateway = "no gateway — artifacts will ride the room";
+
+if (gatewayIsLocal && !onLocalhost) {
+  // Deployed origin with no configured gateway: say so, do not dial localhost.
+  $("ipfs-status").textContent = `${noGateway} (set a gateway in kant-ipfs.mjs to fetch by CID)`;
+} else {
+  ipfsCat(GATEWAY_PROBE_CID).then((r) => {
+    $("ipfs-status").textContent = r ? "gateway reachable" : noGateway;
+  }).catch(() => { $("ipfs-status").textContent = noGateway; });
+}
 
 loadKernel().then((k) => {
   $("kernel-status").textContent = `proved kernel ok (${k.source ?? "wasm"})`;
