@@ -13,7 +13,8 @@
 //!    - Shard directory = next-to-last 2 characters of the key
 //!    - File = `~/.ipfs/blocks/{shard}/{key}.data`
 //! 3. The root CID (CIDv0, `Qm...`) is returned and stored in paste headers.
-//! 4. `ipfs cat <CID>` works immediately — kubo reads the blocks we wrote.
+//! 4. The service can proxy that CID via `/ipfs/{cid}`. A local `ipfs cat <CID>`
+//!    only works from a machine pointed at the same repo we wrote.
 //!
 //! ## Backends
 //!
@@ -61,13 +62,15 @@ fn ipfs_repo() -> Option<String> {
 /// Block path: `{repo}/blocks/{shard}/{key}.data`
 /// - `key` = base32upper(multihash)
 /// - `shard` = next-to-last 2 characters of `key` (go-ipfs sharding scheme)
-fn write_block(cid: &impl std::fmt::Display, block: &[u8]) {
-    let Some(repo) = ipfs_repo() else { return };
+fn write_block(cid: &impl std::fmt::Display, block: &[u8]) -> bool {
+    let Some(repo) = ipfs_repo() else {
+        return false;
+    };
     // Parse the CID string with our local Cid type to extract multihash bytes
     let cid_str = cid.to_string();
     let local_cid: Cid = match cid_str.parse() {
         Ok(c) => c,
-        Err(_) => return,
+        Err(_) => return false,
     };
     let mh_bytes = local_cid.hash().to_bytes();
     let key = data_encoding::BASE32_NOPAD.encode(&mh_bytes);
@@ -77,11 +80,39 @@ fn write_block(cid: &impl std::fmt::Display, block: &[u8]) {
         "AA"
     };
     let dir = format!("{}/blocks/{}", repo, shard);
-    std::fs::create_dir_all(&dir).ok();
+    if std::fs::create_dir_all(&dir).is_err() {
+        log::warn!("📦 IPFS: cannot create {}", dir);
+        return false;
+    }
     let path = format!("{}/{}.data", dir, key);
     if std::fs::write(&path, block).is_ok() {
         log::info!("📦 IPFS block: {}", path);
+        true
+    } else {
+        log::warn!("📦 IPFS: cannot write {}", path);
+        false
     }
+}
+
+/// Write every block, remembering the last one as the root.
+///
+/// The root is only set once each block is *on disk*. A DAG whose leaves
+/// failed to write is a CID that resolves to nothing, and a paste that
+/// advertises one is a paste nobody can fetch — so a failure anywhere means
+/// no CID at all.
+fn store_blocks<I, C, B>(blocks: I, root_cid: &mut Option<C>) -> bool
+where
+    I: IntoIterator<Item = (C, B)>,
+    C: std::fmt::Display,
+    B: AsRef<[u8]>,
+{
+    for (cid, block) in blocks {
+        if !write_block(&cid, block.as_ref()) {
+            return false;
+        }
+        *root_cid = Some(cid);
+    }
+    true
 }
 
 /// Add content to IPFS via pure Rust. Encodes as UnixFS dag-pb blocks using
@@ -91,24 +122,24 @@ fn write_block(cid: &impl std::fmt::Display, block: &[u8]) {
 /// For files under 256KB (default chunk size), produces a single leaf block.
 /// Larger files are chunked into a balanced Merkle DAG automatically.
 pub fn ipfs_add_bytes(data: &[u8]) -> Option<String> {
+    // No repo means nothing can be stored, so there is no CID to give out.
+    ipfs_repo()?;
+
     let mut adder = FileAdder::default();
     let mut root_cid = None;
 
     let (blocks, consumed) = adder.push(data);
-    for (cid, block) in blocks {
-        write_block(&cid, &block);
-        root_cid = Some(cid);
+    if !store_blocks(blocks, &mut root_cid) {
+        return None;
     }
     if consumed < data.len() {
         let (blocks, _) = adder.push(&data[consumed..]);
-        for (cid, block) in blocks {
-            write_block(&cid, &block);
-            root_cid = Some(cid);
+        if !store_blocks(blocks, &mut root_cid) {
+            return None;
         }
     }
-    for (cid, block) in adder.finish() {
-        write_block(&cid, &block);
-        root_cid = Some(cid);
+    if !store_blocks(adder.finish(), &mut root_cid) {
+        return None;
     }
 
     root_cid.map(|c| c.to_string())
@@ -231,5 +262,44 @@ impl ContentStore for DaslCborStore {
     fn add(&self, data: &[u8]) -> Option<String> {
         let (cbor, _) = wrap_dasl_cbor(data);
         ipfs_add_bytes(&cbor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A CID that does not parse is a failed write, not a silent skip: the
+    /// caller turns a `false` into "this paste gets no CID".
+    #[test]
+    fn write_block_refuses_an_unparseable_cid() {
+        assert!(!write_block(&"not-a-cid", b"payload"));
+    }
+
+    /// A block that cannot be stored leaves no root behind. Reporting the
+    /// root anyway is the bug: the CID would resolve to an empty DAG.
+    #[test]
+    fn store_blocks_stops_and_keeps_no_root_when_a_write_fails() {
+        let mut root: Option<String> = None;
+        let blocks: Vec<(String, &[u8])> = vec![
+            ("also-not-a-cid".to_string(), b"leaf".as_slice()),
+        ];
+        assert!(!store_blocks(blocks, &mut root));
+        assert!(root.is_none());
+    }
+
+    /// With no IPFS repo reachable, add returns None instead of a CID.
+    /// IPFS_PATH is pointed at a path that cannot exist, so this does not
+    /// depend on whatever the machine happens to have in ~/.ipfs.
+    #[test]
+    fn ipfs_add_bytes_returns_none_without_a_repo() {
+        let previous = std::env::var("IPFS_PATH").ok();
+        std::env::set_var("IPFS_PATH", "/nonexistent-kant-ipfs-repo-for-test");
+        let result = ipfs_add_bytes(b"payload");
+        match previous {
+            Some(v) => std::env::set_var("IPFS_PATH", v),
+            None => std::env::remove_var("IPFS_PATH"),
+        }
+        assert!(result.is_none());
     }
 }
