@@ -63,11 +63,13 @@ jobs:
           #   p2p.html -> kant-p2p.mjs
           #   kant-p2p.mjs  -> {kant-ipfs, kant-wasm, kant-net, kantzk}.mjs
           #   kant-net.mjs  -> kant-diag.mjs        (unguarded, hard dep)
+          #   kant-net.mjs  -> kant-file.mjs       (parseManifest, printManifest)
           #   kant-wasm.mjs -> {kant-kernel-embedded.mjs, kant_kernel.wasm}
           #   kant-ipfs.mjs -> pastebin_wasm.js     (the core, copied above)
           cp web/p2p.html dist/
           cp web/kant-p2p.mjs web/kant-ipfs.mjs web/kant-wasm.mjs dist/
           cp web/kant-net.mjs web/kantzk.mjs web/kant-diag.mjs dist/
+          cp web/kant-file.mjs dist/
           cp web/kant-kernel-embedded.mjs web/kant_kernel.wasm dist/
           # web/arist-wasm.mjs is deliberately not copied: it is optional
           # (kant-p2p.mjs guards the import) and pulls in the vendored
