@@ -8,6 +8,8 @@ proof and the recipe.
 * the shell demonstration: `scripts/two-agents.sh`
 * the specification, proved: `RequestProject/Kant/Cli.lean`
 * the checks: `node web/cli-test.mjs` (77) and `node web/cli-page-test.mjs` (10)
+* the whole round trip, checked by Lean: `node scripts/fileshare-capture.mjs`
+  (17) — see [CLI_FILESHARE_2026-10-02.md](../../docs/CLI_FILESHARE_2026-10-02.md)
 
 ## The situation
 
@@ -133,14 +135,39 @@ same link and checks that its transcript is the CLI's transcript.
 | `join <text>` | join the room named by a pasted message |
 | `load <url>` | load a URL: a room to join, or a conversation to take in |
 | `say <text>` | say something |
-| `read` | read the room and print the conversation |
+| `read` | read the room: chat with times, plus the files announced in it |
+| `drop <file>` | encrypt a file for the room and announce it; every chunk is pinned first |
+| `files` | the files announced in the room |
+| `fetch <n> [--out <path>]` | fetch and decrypt file n (default: its announced name, in the cwd) |
+| `quote <n> <text>` | reply to file n, quoting it back into the room |
 | `bag` | the conversation as one link, no relay needed |
 | `watch [--wait 25]` | keep reading |
 | `health` | is the relay there? |
 | `curl read \| say <text> \| health` | print the command instead of running it |
 
 Options: `--state <file>`, `--json`, `--transport fetch|curl`, `--print-curl`,
-`--origin <url>`, `--config <file>`, `--name <id>`, `--relay <url>`.
+`--origin <url>`, `--config <file>`, `--name <id>`, `--relay <url>`,
+`--out <path>`.
+
+## Files in a room
+
+```sh
+node scripts/kant-cli.mjs --state a.json drop ./report.pdf
+node scripts/kant-cli.mjs --state b.json files
+node scripts/kant-cli.mjs --state b.json fetch 0 --out ./got.pdf
+node scripts/kant-cli.mjs --state b.json quote 0 'the graph on page 4 is wrong'
+```
+
+Only ciphertext ever leaves the machine. `drop` pins every chunk under its own
+witness *before* posting the manifest that names them, because a manifest
+announcing a chunk that never landed is a file nobody can finish fetching. A
+quote names the file's witness, so it cannot be re-pointed at a different
+file.
+
+`read` prints a quoted line as `re: report.pdf - the text`, resolving the
+witness back to the file, and lists the files themselves - a dropped file is a
+line with no text to print, so omitting it makes a room where a file was just
+shared look empty. `--json` gains `at` (the sender's clock) and `files`.
 
 ## What is proved
 
