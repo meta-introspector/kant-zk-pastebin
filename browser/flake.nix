@@ -19,7 +19,10 @@
 {
   description = "Browser for the Kant GUI2Lean4 captures";
 
-  inputs.nixpkgs.url = "git+file:///mnt/data1/git/github.com/NixOS/nixpkgs.git?ref=nixos-unstable";
+  # A real remote, not a local mirror path: this flake is evaluated by CI too.
+  # Pinned by rev to the same nixpkgs the top-level flake uses, so the two
+  # cannot drift. A real remote, not a local mirror path: CI evaluates this too.
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5";
 
   outputs = { self, nixpkgs }:
     let
