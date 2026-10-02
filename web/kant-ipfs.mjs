@@ -59,9 +59,31 @@ export async function wasmOnce() {
 /** One kubo chunk; ≤ this size the client CID == the node CID. */
 export const MAX_ARTIFACT_BYTES = 262144;
 
-/** Default kubo RPC and gateway endpoints (override via p2papp settings). */
-export const KUBO_RPC = "http://127.0.0.1:5001";
-export const GATEWAY = "http://127.0.0.1:8080";
+/** Loopback fallbacks, used only when there is no page origin to be
+ *  relative to (node, a worker, a `file://` copy). */
+const LOOPBACK_RPC = "http://127.0.0.1:5001";
+// 8081, not kubo's usual 8080: on this host the daemon's gateway is 8081,
+// and 8080 belongs to something else that answers 404 for /ipfs/<cid>.
+const LOOPBACK_GATEWAY = "http://127.0.0.1:8081";
+
+/** The origin this page was served from, or null when there is none. */
+const pageOrigin = () => {
+  const o = globalThis.location?.origin;
+  return o && o !== "null" ? o : null;
+};
+
+/**
+ * Default kubo RPC and gateway endpoints (override via p2papp settings).
+ *
+ *  Served behind a reverse proxy these have to be same-origin paths. A
+ *  browser resolving "127.0.0.1:5001" reaches its own machine, not the
+ *  one running kubo -- which is why p2p.html has to skip its probe when
+ *  it sees a loopback gateway on a deployed origin. Naming the paths
+ *  lets one nginx location carry both and the browser stay same-origin,
+ *  which is also what keeps CORS out of it.
+ */
+export const KUBO_RPC = pageOrigin() ? `${pageOrigin()}/ipfs-rpc` : LOOPBACK_RPC;
+export const GATEWAY = pageOrigin() ? `${pageOrigin()}/ipfs-gw` : LOOPBACK_GATEWAY;
 
 // ── CIDv1 raw sha2-256 ──────────────────────────────────────────────────
 
