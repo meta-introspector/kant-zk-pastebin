@@ -10,14 +10,9 @@
       flake = false;
     };
     system-manager.url = "git+file:///mnt/data1/git/github.com/numtide/system-manager.git?ref=omain";
-    nora-src.url = "git+file:///mnt/data1/git/github.com/getnora-io/nora.git";
-    kant-zk-pastebin-src = {
-      url = "git+file:///home/mdupont/git/github.com/mdupont/kant-zk-pastebin.git";
-      flake = false;
-    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, system-manager, crane, nora-cargo, nora-src, kant-zk-pastebin-src }:
+  outputs = { self, nixpkgs, flake-utils, system-manager, crane, nora-cargo }:
     (flake-utils.lib.eachDefaultSystem (system:
       let
         lib = nixpkgs.lib;
@@ -74,7 +69,6 @@ EOF
           inherit src cargoVendorDir;
           strictDeps = true;
           doCheck = false;
-          cargoExtraArgs = "--offline";
           nativeBuildInputs = with pkgs; [ pkg-config ];
           buildInputs = with pkgs; [ openssl ];
           doInstallCargoArtifacts = false;
@@ -100,6 +94,7 @@ EOF
 
         kant-pastebin = craneLib.cargoBuild (commonArgs // {
           inherit cargoArtifacts;
+          cargoExtraArgs = "--offline";
           pnameSuffix = "";
           meta = with pkgs.lib; {
             description = "Kant Pastebin — UUCP + zkTLS with IPFS";
@@ -117,7 +112,7 @@ EOF
     )) // {
       systemConfigs.kant-pastebin-only = system-manager.lib.makeSystemConfig {
         modules = [ ./pastebin-system.nix { nixpkgs.hostPlatform = "x86_64-linux"; } ];
-        specialArgs = { pastebin-src = self; nora-src = nora-src; kant-zk-pastebin-src = kant-zk-pastebin-src; };
+        specialArgs = { pastebin-src = self; };
       };
     };
 }

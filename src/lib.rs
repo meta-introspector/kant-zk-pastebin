@@ -12,6 +12,7 @@ pub mod plugin;
 pub mod plugins;
 pub mod rename;
 pub mod share;
+pub mod mesh;
 pub mod splitter;
 pub mod storage;
 pub mod summary;

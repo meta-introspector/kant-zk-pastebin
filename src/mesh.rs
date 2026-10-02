@@ -1,0 +1,313 @@
+// mesh.rs — relay-to-relay mesh networking for Kant pastebin
+use crate::model::{MeshPeer, MeshMessage, MeshMessageKind, MeshPeerStatus, Identity, Avatar};
+use crate::storage::Storage;
+use actix_web::{web, HttpResponse, Result as ActixResult, http::header};
+use reqwest::Client;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::time::{interval, Duration};
+use tracing::{info, warn, error, debug};
+
+/// Configuration for mesh networking
+#[derive(Clone, Debug)]
+pub struct MeshConfig {
+    pub local_relay_id: String,
+    pub local_relay_url: String,
+    pub peer_relays: Vec<String>,
+    pub sync_interval_secs: u64,
+    pub max_peers: usize,
+    pub ping_interval_secs: u64,
+}
+
+impl Default for MeshConfig {
+    fn default() -> Self {
+        Self {
+            local_relay_id: "relay-local".to_string(),
+            local_relay_url: "http://127.0.0.1:8090".to_string(),
+            peer_relays: Vec::new(),
+            sync_interval_secs: 60,
+            max_peers: 50,
+            ping_interval_secs: 30,
+        }
+    }
+}
+
+/// Mesh networking state
+pub struct MeshState {
+    config: MeshConfig,
+    peers: Arc<Mutex<HashMap<String, MeshPeer>>>,
+    client: Client,
+    storage: Arc<Storage>,
+}
+
+impl MeshState {
+    pub fn new(config: MeshConfig, storage: Arc<Storage>) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .expect("HTTP client");
+
+        Self {
+            config,
+            peers: Arc::new(Mutex::new(HashMap::new())),
+            client,
+            storage,
+        }
+    }
+
+    /// Save user identity to storage
+    pub async fn save_identity(&self, identity: &Identity) -> anyhow::Result<()> {
+        self.storage.save_identity(identity).await
+    }
+
+    /// Load user identity from storage
+    pub async fn load_identity(&self, id: &str) -> Option<Identity> {
+        self.storage.load_identity(id).await
+    }
+
+    /// List all identities in storage
+    pub async fn list_identities(&self) -> Vec<Identity> {
+        self.storage.list_identities().await
+    }
+
+    /// Save avatar to storage
+    pub async fn save_avatar(&self, avatar: &Avatar) -> anyhow::Result<()> {
+        self.storage.save_avatar(avatar).await
+    }
+
+    /// Load avatar from storage
+    pub async fn load_avatar(&self, id: &str) -> Option<Avatar> {
+        self.storage.load_avatar(id).await
+    }
+
+    /// List all avatars for a given owner
+    pub async fn list_avatars(&self, owner: &str) -> Vec<Avatar> {
+        self.storage.list_avatars(owner).await
+    }
+
+    /// Start the mesh networking background tasks
+    pub fn start(self: Arc<Self>) {
+        let state = self.clone();
+        tokio::spawn(async move { state.peer_discovery_loop().await });
+
+        let state = self.clone();
+        tokio::spawn(async move { state.sync_loop().await });
+
+        let state = self.clone();
+        tokio::spawn(async move { state.ping_loop().await });
+    }
+
+    /// Peer discovery - connect to known relays and exchange peer lists
+    async fn peer_discovery_loop(&self) {
+        let mut interval = interval(Duration::from_secs(self.config.sync_interval_secs));
+        loop {
+            interval.tick().await;
+            if let Err(e) = self.discover_peers().await {
+                warn!("Peer discovery failed: {}", e);
+            }
+        }
+    }
+
+    /// Discover peers from known relays
+    async fn discover_peers(&self) -> anyhow::Result<()> {
+        let peer_relays = self.config.peer_relays.clone();
+        for relay_url in &peer_relays {
+            if let Ok(peers) = self.fetch_peers(relay_url).await {
+                let mut local_peers = self.peers.lock().unwrap();
+                for peer in peers {
+                    local_peers.insert(peer.id.clone(), peer);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Fetch peer list from a relay
+    async fn fetch_peers(&self, relay_url: &str) -> anyhow::Result<Vec<MeshPeer>> {
+        let url = format!("{}/api/mesh/peers", relay_url.trim_end_matches('/'));
+        let resp = self.client.get(&url).send().await?;
+        let peers: Vec<MeshPeer> = resp.json().await?;
+        Ok(peers)
+    }
+
+    /// Sync loop - periodically sync room state with peers
+    async fn sync_loop(&self) {
+        let mut interval = interval(Duration::from_secs(self.config.sync_interval_secs * 5));
+        loop {
+            interval.tick().await;
+            if let Err(e) = self.sync_rooms().await {
+                warn!("Room sync failed: {}", e);
+            }
+        }
+    }
+
+    /// Sync room state with all connected peers
+    async fn sync_rooms(&self) -> anyhow::Result<()> {
+        let peers: Vec<MeshPeer> = {
+            let local_peers = self.peers.lock().unwrap();
+            local_peers.values().cloned().collect()
+        };
+
+        for peer in peers {
+            if peer.status != MeshPeerStatus::Online {
+                continue;
+            }
+            self.sync_with_peer(&peer).await?;
+        }
+        Ok(())
+    }
+
+    /// Sync room state with a specific peer
+    async fn sync_with_peer(&self, peer: &MeshPeer) -> anyhow::Result<()> {
+        // In a full implementation, this would:
+        // 1. Compare room state hashes
+        // 2. Request missing messages
+        // 3. Push new messages
+        debug!("Syncing with peer: {}", peer.id);
+        Ok(())
+    }
+
+    /// Ping loop - keep connections alive
+    async fn ping_loop(&self) {
+        let mut interval = interval(Duration::from_secs(self.config.ping_interval_secs));
+        loop {
+            interval.tick().await;
+            self.ping_peers().await;
+        }
+    }
+
+    /// Ping all known peers
+    async fn ping_peers(&self) {
+        let peers: Vec<MeshPeer> = {
+            let local_peers = self.peers.lock().unwrap();
+            local_peers.values().cloned().collect()
+        };
+
+        for peer in peers {
+            if let Err(e) = self.ping_peer(&peer).await {
+                warn!("Ping to {} failed: {}", peer.id, e);
+                self.mark_peer_offline(&peer.id).await;
+            }
+        }
+    }
+
+    /// Ping a specific peer
+    async fn ping_peer(&self, peer: &MeshPeer) -> anyhow::Result<()> {
+        let url = format!("{}/api/mesh/ping", peer.relay.trim_end_matches('/'));
+        let msg = MeshMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            from: self.config.local_relay_id.clone(),
+            to: Some(peer.id.clone()),
+            kind: MeshMessageKind::RelayPing,
+            payload: serde_json::to_string(&self.config.local_relay_id)?,
+            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs(),
+        };
+        let resp = self.client.post(&url).json(&msg).send().await?;
+        resp.error_for_status()?;
+        Ok(())
+    }
+
+    /// Mark a peer as offline
+    async fn mark_peer_offline(&self, peer_id: &str) {
+        let mut peers = self.peers.lock().unwrap();
+        if let Some(peer) = peers.get_mut(peer_id) {
+            peer.status = MeshPeerStatus::Offline;
+        }
+    }
+
+    /// Register a new peer (from incoming connection)
+    pub fn register_peer(&self, peer: MeshPeer) {
+        let mut peers = self.peers.lock().unwrap();
+        if peers.len() < self.config.max_peers {
+            peers.insert(peer.id.clone(), peer);
+        }
+    }
+
+    /// Get all known peers
+    pub fn get_peers(&self) -> Vec<MeshPeer> {
+        let peers = self.peers.lock().unwrap();
+        peers.values().cloned().collect()
+    }
+
+    /// Handle incoming mesh message
+    pub async fn handle_message(&self, msg: MeshMessage) -> anyhow::Result<()> {
+        match msg.kind {
+            MeshMessageKind::IdentityAnnounce => {
+                // Parse identity from payload
+                let identity: Identity = serde_json::from_str(&msg.payload)?;
+                self.storage.save_identity(&identity).await?;
+                info!("Received identity announcement: {}", identity.id);
+            }
+            MeshMessageKind::RoomSync => {
+                // Sync room state
+                debug!("Room sync message from {}", msg.from);
+            }
+            MeshMessageKind::PasteSync => {
+                // Sync paste data
+                debug!("Paste sync message from {}", msg.from);
+            }
+            MeshMessageKind::AvatarSync => {
+                // Sync avatar data
+                let avatar: Avatar = serde_json::from_str(&msg.payload)?;
+                self.storage.save_avatar(&avatar).await?;
+                info!("Received avatar sync: {}", avatar.id);
+            }
+            MeshMessageKind::RelayPing => {
+                // Just respond with pong
+                info!("Ping from {}", msg.from);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// API handlers for mesh networking
+pub mod handlers {
+    use super::*;
+    use actix_web::{web, HttpResponse, Result as ActixResult};
+    use actix_web::error::ErrorInternalServerError;
+
+    /// GET /api/mesh/peers - List all known mesh peers
+    pub async fn list_peers(state: web::Data<Arc<MeshState>>) -> ActixResult<HttpResponse> {
+        let peers = state.get_peers();
+        Ok(HttpResponse::Ok().json(peers))
+    }
+
+    /// POST /api/mesh/ping - Receive a ping from another relay
+    pub async fn receive_ping(
+        state: web::Data<Arc<MeshState>>,
+        msg: web::Json<MeshMessage>,
+    ) -> ActixResult<HttpResponse> {
+        state
+            .handle_message(msg.into_inner())
+            .await
+            .map_err(ErrorInternalServerError)?;
+        Ok(HttpResponse::Ok().json(serde_json::json!({ "ok": true })))
+    }
+
+    /// POST /api/mesh/message - Receive a mesh message
+    pub async fn receive_message(
+        state: web::Data<Arc<MeshState>>,
+        msg: web::Json<MeshMessage>,
+    ) -> ActixResult<HttpResponse> {
+        state
+            .handle_message(msg.into_inner())
+            .await
+            .map_err(ErrorInternalServerError)?;
+        Ok(HttpResponse::Ok().json(serde_json::json!({ "ok": true })))
+    }
+
+    /// POST /api/mesh/announce - Announce this relay's identity
+    pub async fn announce(
+        state: web::Data<Arc<MeshState>>,
+        identity: web::Json<Identity>,
+    ) -> ActixResult<HttpResponse> {
+        let identity = identity.into_inner();
+        state
+            .storage
+            .save_identity(&identity)
+            .await
+            .map_err(ErrorInternalServerError)?;
+        Ok(HttpResponse::Ok().json(serde_json::json!({ "ok": true })))
+    }
+}

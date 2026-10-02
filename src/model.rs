@@ -249,3 +249,65 @@ pub struct SplitProfileRequest {
     pub split_mode: Option<SplitMode>,
     pub description: Option<String>,
 }
+
+/// An avatar, stored locally as a data URL and/or on IPFS for p2p sharing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Avatar {
+    pub id: String,
+    pub owner: String,
+    pub data_url: Option<String>, // base64 data URL for local storage
+    pub ipfs_cid: Option<String>, // IPFS CID for p2p sharing
+    pub mime_type: String,
+    pub size_bytes: usize,
+    pub created: u64,
+}
+
+/// A user identity / profile
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Identity {
+    pub id: String,
+    pub name: String,
+    pub display_name: Option<String>,
+    pub avatar_id: Option<String>,
+    pub bio: Option<String>,
+    pub relays: Vec<String>, // known relays for mesh networking
+    pub created: u64,
+    pub updated: u64,
+}
+
+/// A peer in the mesh network
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshPeer {
+    pub id: String,
+    pub identity: Identity,
+    pub relay: String,
+    pub last_seen: u64,
+    pub status: MeshPeerStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MeshPeerStatus {
+    Online,
+    Offline,
+    Unknown,
+}
+
+/// A mesh network message (relay-to-relay)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshMessage {
+    pub id: String,
+    pub from: String,
+    pub to: Option<String>, // None = broadcast
+    pub kind: MeshMessageKind,
+    pub payload: String,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MeshMessageKind {
+    IdentityAnnounce,
+    RoomSync,
+    PasteSync,
+    AvatarSync,
+    RelayPing,
+}
