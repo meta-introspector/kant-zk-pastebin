@@ -1,6 +1,14 @@
 /* @ts-self-types="./aristotle_wasm.d.ts" */
 
 /**
+ * Forget the session: clears wasm memory and expires the cookie. The API key
+ * is cleared too, so a sign-out leaves nothing behind.
+ */
+export function clear_session() {
+    wasm.clear_session();
+}
+
+/**
  * @param {string} project_id
  * @param {string} project_name
  * @param {string} domain
@@ -37,6 +45,12 @@ export function fetch_project_list() {
 }
 
 /**
+ * Build the wrangler Pages deployment config for a project.
+ *
+ * `domain` falls back to the session's default domain when empty. The account
+ * ID is included only if the client supplied one, and `configured` reports
+ * whether it did, so a caller can tell a real deployment plan from an
+ * incomplete one.
  * @param {string} project_id
  * @param {string} project_name
  * @param {string} domain
@@ -62,6 +76,8 @@ export function generate_deploy_config(project_id, project_name, domain) {
 }
 
 /**
+ * The Aristotle API base URL in effect: the session override when set,
+ * otherwise the shared public service endpoint.
  * @returns {string}
  */
 export function get_api_base_url() {
@@ -91,6 +107,8 @@ export function get_api_key() {
 }
 
 /**
+ * The Cloudflare account ID supplied by the client, or an empty string when
+ * the session has not been configured. There is no built-in fallback.
  * @returns {string}
  */
 export function get_cloudflare_account_id() {
@@ -107,6 +125,7 @@ export function get_cloudflare_account_id() {
 }
 
 /**
+ * The Pages domain supplied by the client, or an empty string when unset.
  * @returns {string}
  */
 export function get_cloudflare_default_domain() {
@@ -147,17 +166,72 @@ export function get_deploy_instructions(project_id, project_name, domain) {
     }
 }
 
+/**
+ * The current session configuration as JSON. Empty fields mean "not set";
+ * they are never filled in from a compiled-in default.
+ * @returns {string}
+ */
+export function get_session_config() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.get_session_config();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
 export function init_panic_hook() {
     wasm.init_panic_hook();
 }
 
 /**
+ * Hydrate the session from the client-side cookie. Call once on page load;
+ * returns `true` if a valid session was restored.
+ * @returns {boolean}
+ */
+export function load_session_from_cookie() {
+    const ret = wasm.load_session_from_cookie();
+    return ret !== 0;
+}
+
+/**
+ * Whether the client has supplied an account ID yet.
+ * @returns {boolean}
+ */
+export function session_is_configured() {
+    const ret = wasm.session_is_configured();
+    return ret !== 0;
+}
+
+/**
+ * Supply the Aristotle API key. Held in wasm memory only; it is never written
+ * to the session cookie and never leaves the browser except in the `x-api-key`
+ * request header.
  * @param {string} key
  */
 export function set_api_key(key) {
     const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     wasm.set_api_key(ptr0, len0);
+}
+
+/**
+ * Set the session configuration from a JSON object and persist it to the
+ * client-side session cookie so it survives a reload. Required keys:
+ * `account_id`; optional: `default_domain`, `api_base_url`.
+ * @param {string} json
+ */
+export function set_session_config(json) {
+    const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.set_session_config(ptr0, len0);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
 }
 
 /**
@@ -173,6 +247,13 @@ export function validate_project_id(project_id) {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_debug_string_4687d8d8c2017d52: function(arg0, arg1) {
+            const ret = debugString(arg1);
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
         __wbg___wbindgen_is_function_1f9d30630b8b1d3d: function(arg0) {
             const ret = typeof(arg0) === 'function';
             return ret;
@@ -180,6 +261,14 @@ function __wbg_get_imports() {
         __wbg___wbindgen_is_undefined_8865fb403f8fe9d8: function(arg0) {
             const ret = arg0 === undefined;
             return ret;
+        },
+        __wbg___wbindgen_string_get_0380ccaa2f57f0d9: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'string' ? obj : undefined;
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
         __wbg___wbindgen_throw_41e9ee4f547fc59a: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
@@ -191,6 +280,10 @@ function __wbg_get_imports() {
             const ret = arg0.call(arg1, arg2);
             return ret;
         }, arguments); },
+        __wbg_document_9854e03c05fc8834: function(arg0) {
+            const ret = arg0.document;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
         __wbg_error_757e9472f8410341: function(arg0, arg1) {
             let deferred0_0;
             let deferred0_1;
@@ -206,6 +299,10 @@ function __wbg_get_imports() {
             const ret = arg0.fetch(arg1);
             return ret;
         },
+        __wbg_get_31af05bd4842a84f: function() { return handleError(function (arg0, arg1) {
+            const ret = Reflect.get(arg0, arg1);
+            return ret;
+        }, arguments); },
         __wbg_instanceof_Response_b8758567269c30b2: function(arg0) {
             let result;
             try {
@@ -224,6 +321,10 @@ function __wbg_get_imports() {
                 result = false;
             }
             const ret = result;
+            return ret;
+        },
+        __wbg_location_9c46e8ada95d3174: function(arg0) {
+            const ret = arg0.location;
             return ret;
         },
         __wbg_log_7e6013090ceb87fd: function(arg0, arg1) {
@@ -267,6 +368,13 @@ function __wbg_get_imports() {
             const ret = arg0.ok;
             return ret;
         },
+        __wbg_protocol_c29b929bd710072b: function() { return handleError(function (arg0, arg1) {
+            const ret = arg1.protocol;
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        }, arguments); },
         __wbg_queueMicrotask_9833f9a49df95a49: function(arg0) {
             const ret = arg0.queueMicrotask;
             return ret;
@@ -334,7 +442,7 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 69, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 78, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h691694ef7169a20c);
             return ret;
         },
@@ -382,6 +490,71 @@ function addToExternrefTable0(obj) {
 const CLOSURE_DTORS = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(state => wasm.__wbindgen_destroy_closure(state.a, state.b));
+
+function debugString(val) {
+    // primitive types
+    const type = typeof val;
+    if (type == 'number' || type == 'boolean' || val == null) {
+        return  `${val}`;
+    }
+    if (type == 'string') {
+        return `"${val}"`;
+    }
+    if (type == 'symbol') {
+        const description = val.description;
+        if (description == null) {
+            return 'Symbol';
+        } else {
+            return `Symbol(${description})`;
+        }
+    }
+    if (type == 'function') {
+        const name = val.name;
+        if (typeof name == 'string' && name.length > 0) {
+            return `Function(${name})`;
+        } else {
+            return 'Function';
+        }
+    }
+    // objects
+    if (Array.isArray(val)) {
+        const length = val.length;
+        let debug = '[';
+        if (length > 0) {
+            debug += debugString(val[0]);
+        }
+        for(let i = 1; i < length; i++) {
+            debug += ', ' + debugString(val[i]);
+        }
+        debug += ']';
+        return debug;
+    }
+    // Test for built-in
+    const builtInMatches = /\[object ([^\]]+)\]/.exec(toString.call(val));
+    let className;
+    if (builtInMatches && builtInMatches.length > 1) {
+        className = builtInMatches[1];
+    } else {
+        // Failed to match the standard '[object ClassName]'
+        return toString.call(val);
+    }
+    if (className == 'Object') {
+        // we're a user defined class or Object
+        // JSON.stringify avoids problems with cycles, and is generally much
+        // easier than looping through ownProperties of `val`.
+        try {
+            return 'Object(' + JSON.stringify(val) + ')';
+        } catch (_) {
+            return 'Object';
+        }
+    }
+    // errors
+    if (val instanceof Error) {
+        return `${val.name}: ${val.message}\n${val.stack}`;
+    }
+    // TODO we could test for more things here, like `Set`s and `Map`s.
+    return className;
+}
 
 let cachedDataViewMemory0 = null;
 function getDataViewMemory0() {
