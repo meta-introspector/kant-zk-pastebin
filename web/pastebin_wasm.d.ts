@@ -7,6 +7,10 @@ export function wasm_cid_identity(cid: string): Uint8Array;
 
 export function wasm_cid_of_bytes(bytes: Uint8Array): string;
 
+export function wasm_decrypt_chunk(secret: Uint8Array, file_nonce: Uint8Array, index: number, ciphertext: Uint8Array): Uint8Array;
+
+export function wasm_encrypt_chunk(secret: Uint8Array, file_nonce: Uint8Array, index: number, plaintext: Uint8Array): Uint8Array;
+
 export function wasm_kzcid_record(peer: string, name: string, cid: string, size: number, note: string, pinned: boolean, ts: number): string;
 
 export function wasm_parse_kzcid_record(line: string): any;
@@ -30,6 +34,8 @@ export interface InitOutput {
     readonly wasm_chunk_plan: (a: number) => [number, number, number, number];
     readonly wasm_cid_identity: (a: number, b: number) => [number, number, number, number];
     readonly wasm_cid_of_bytes: (a: number, b: number) => [number, number];
+    readonly wasm_decrypt_chunk: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+    readonly wasm_encrypt_chunk: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly wasm_kzcid_record: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number, number];
     readonly wasm_parse_kzcid_record: (a: number, b: number) => [number, number, number];
     readonly wasm_unixfs_cid: (a: number, b: number) => [number, number, number, number];
