@@ -55,6 +55,28 @@ jobs:
           cp web/pastebin_wasm_bg.wasm dist/
           chmod +x dist/kant-cli.mjs
 
+      - name: Ship the p2p client
+        run: |
+          # p2p.html is the page that actually loads the wasm core, but it lived
+          # only in web/ and was never copied, so the core shipped to dist with
+          # no page to load it. Copy the page and its whole import closure:
+          #   p2p.html -> kant-p2p.mjs
+          #   kant-p2p.mjs  -> {kant-ipfs, kant-wasm, kant-net, kantzk}.mjs
+          #   kant-net.mjs  -> kant-diag.mjs        (unguarded, hard dep)
+          #   kant-wasm.mjs -> {kant-kernel-embedded.mjs, kant_kernel.wasm}
+          #   kant-ipfs.mjs -> pastebin_wasm.js     (the core, copied above)
+          cp web/p2p.html dist/
+          cp web/kant-p2p.mjs web/kant-ipfs.mjs web/kant-wasm.mjs dist/
+          cp web/kant-net.mjs web/kantzk.mjs web/kant-diag.mjs dist/
+          cp web/kant-kernel-embedded.mjs web/kant_kernel.wasm dist/
+          # web/arist-wasm.mjs is deliberately not copied: it is optional
+          # (kant-p2p.mjs guards the import) and pulls in the vendored
+          # aristotle-wasm binary, which is not part of this crate.
+          #
+          # Then verify the closure, so a new import added later fails the
+          # build instead of 404ing in the browser.
+          node scripts/check-p2p-closure.mjs
+
       - name: Upload artifact
         uses: meta-introspector/upload-pages-artifact@v3
         with:
