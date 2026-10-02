@@ -1,6 +1,11 @@
 target/
 result
 result-*
+# Build output of the Pages workflow and of scripts/kant-file-e2e.mjs.
+# The workflow creates dist/ itself and copies web/ into it, so committing a
+# local copy only ever produces stale duplicates of tracked files.
+dist/
+e2e-out-file/
 *.swp
 *.swo
 *~
