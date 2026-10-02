@@ -37,6 +37,7 @@ class El {
     this.scrollTop = 0;
     this.scrollHeight = 0;
     this.srcObject = null;
+    this.dataset = {};
     this.href = "";
     this.download = "";
     this.classList = {
@@ -49,6 +50,36 @@ class El {
   get shown() { return this._classes.has("on"); }
   appendChild(c) { this.children.push(c); return c; }
   remove() {}
+
+  /** The anchors inside this element, parsed out of the innerHTML the page
+   *  just wrote.  The page wires handlers with
+   *  `box.querySelectorAll("a[data-f]")`, so the shim has to answer that or
+   *  renderFiles throws before the test can assert anything — which it did,
+   *  silently, on a click that reached renderFiles at all.
+   *
+   *  Returns El stubs carrying the matched attributes, so `.dataset` and
+   *  `.onclick` in the page behave as they do in a browser.  Descends into
+   *  children too, since a real querySelectorAll is not depth-limited. */
+  querySelectorAll(sel) {
+    const attr = /\[([\w-]+)\]/.exec(sel);
+    const tag = /^([a-z]+)/i.exec(sel)?.[1]?.toLowerCase();
+    const out = [];
+    const walk = (el) => {
+      for (const m of el.innerHTML.matchAll(/<([a-z]+)\s([^>]*)>/gi)) {
+        const [, t, attrs] = m;
+        if (tag && t.toLowerCase() !== tag) continue;
+        if (attr && !new RegExp(`\\b${attr}=["']([^"']*)["']`).test(attrs)) continue;
+        const a = /data-([\w-]+)=["']([^"']*)["']/.exec(attrs);
+        const e = new El("", t);
+        if (a) e.dataset = { [a[1].replace(/-(\w)/g, (_, c) => c.toUpperCase())]: a[2] };
+        out.push(e);
+      }
+      for (const c of el.children) walk(c);
+    };
+    walk(this);
+    return out;
+  }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
   select() {}
   click() { if (this.onclick) return this.onclick(); }
   play() { return Promise.resolve(); }
