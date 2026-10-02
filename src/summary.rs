@@ -120,7 +120,7 @@ fn recursive_split(text: &str, max_chars: usize) -> Vec<String> {
 
 fn summarize_chunk(name: &str, chunk: &str) -> Option<Summary> {
     let lines: Vec<&str> = chunk.lines().collect();
-    let word_count = chunk.split_whitespace().count();
+    let _word_count = chunk.split_whitespace().count();
 
     let title = generate_title(name, &lines, chunk);
     let description = generate_description(&lines, chunk);
