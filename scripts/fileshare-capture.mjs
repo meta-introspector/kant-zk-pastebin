@@ -77,24 +77,84 @@ const sha256 = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).dig
 
 const { chromium } = await import('playwright');
 
-// The bundled headless shell cannot open a window, so a headed run has to
-// use a real browser binary. Playwright ships one per launch path and the
-// full Chromium is not installed here, so fall back to the system browser
-// and say so — a "headed" run that silently fell back to headless would be
-// the worst possible outcome for an evidence capture.
-const systemChromium = ['/snap/bin/chromium', '/usr/bin/chromium', '/usr/bin/chromium-browser']
-  .find((p) => fs.existsSync(p));
-if (headed && !systemChromium) {
-  throw new Error('--headed needs a real browser: install the full Playwright chromium ' +
-    '(`npx playwright install chromium`) or provide one of /snap/bin/chromium, ' +
-    '/usr/bin/chromium, /usr/bin/chromium-browser. The bundled headless shell ' +
-    'cannot open a window, so there is no honest fallback here.');
+/** A browser that can actually open a window.
+ *
+ *  Playwright's bundled download is only the headless shell here, which
+ *  cannot render headed — so a headed run needs a full browser from
+ *  somewhere else. Preference order:
+ *
+ *    1. $KANT_CHROMIUM, so a caller can name one explicitly;
+ *    2. the Nix-provided chromium (`nix build nixpkgs#chromium`), which is
+ *       pinned by the store hash and does not depend on a snap refresh or a
+ *       Playwright browser download;
+ *    3. the Playwright full-chromium download, if `playwright install` has
+ *       been run;
+ *    4. a system browser, as a last resort.
+ *
+ *  A "headed" run that silently fell back to headless would be the worst
+ *  possible outcome for an evidence capture, so with none of these present
+ *  this throws instead of quietly degrading. */
+function findChromium() {
+  const fromEnv = process.env.KANT_CHROMIUM;
+  if (fromEnv) {
+    if (!fs.existsSync(fromEnv)) throw new Error(`KANT_CHROMIUM=${fromEnv} does not exist`);
+    return { path: fromEnv, from: 'KANT_CHROMIUM' };
+  }
+  // A nix store path for chromium, newest first. Resolved by globbing the
+  // store rather than hardcoding one hash, so a nix GC or an upgrade does
+  // not silently break the capture.
+  const store = process.env.NIX_STORE ?? '/nix/store';
+  const nixPkgsChromium = fs.readdirSync(store)
+    .filter((d) => /^.{32}-chromium-\d/.test(d))
+    .sort()
+    .reverse()
+    .map((d) => path.join(store, d, 'bin', 'chromium'))
+    .find((p) => fs.existsSync(p));
+  if (nixPkgsChromium) return { path: nixPkgsChromium, from: 'nixpkgs#chromium' };
+
+  const pwRoot = process.env.PLAYWRIGHT_BROWSERS_PATH
+    ?? path.join(process.env.HOME ?? '', '.cache', 'ms-playwright');
+  const pwFull = fs.existsSync(pwRoot)
+    ? fs.readdirSync(pwRoot).filter((d) => /^chromium-\d+$/.test(d)).sort().reverse()
+        .map((d) => path.join(pwRoot, d, 'chrome-linux64', 'chrome'))
+        .find((p) => fs.existsSync(p))
+    : null;
+  if (pwFull) return { path: pwFull, from: 'playwright chromium' };
+
+  const system = ['/snap/bin/chromium', '/usr/bin/chromium', '/usr/bin/chromium-browser']
+    .find((p) => fs.existsSync(p));
+  if (system) return { path: system, from: 'system' };
+  return null;
+}
+
+const browserChoice = findChromium();
+// The browser's own version string, recorded so a run can be tied to the
+// engine that produced it. Failing to read it is not a failure of the
+// capture, so it degrades to null rather than throwing.
+let browserVersion = null;
+if (browserChoice) {
+  try {
+    const { execFileSync } = await import('node:child_process');
+    browserVersion = execFileSync(browserChoice.path, ['--version'], {
+      encoding: 'utf8', timeout: 20_000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim().replace(/^Chromium\s+/, '');
+  } catch { browserVersion = null; }
+}
+if (headed && !browserChoice) {
+  throw new Error(
+    '--headed needs a full browser; only the Playwright headless shell is installed.\n' +
+    '  nix build nixpkgs#chromium          # pinned, no snap or download needed\n' +
+    '  npx playwright install chromium      # or the Playwright download\n' +
+    '  KANT_CHROMIUM=<path>                 # or name one explicitly\n' +
+    'There is deliberately no silent fallback to headless here: a headed ' +
+    'evidence run that was secretly headless is worse than no run at all.',
+  );
 }
 
 const browser = await chromium.launch({
   headless: !headed,
-  ...(headed ? { executablePath: systemChromium } : {}),
-  ...(headed ? { args: ['--window-size=1440,1800', '--no-sandbox'] } : {}),
+  ...(browserChoice ? { executablePath: browserChoice.path } : {}),
+  args: ['--no-sandbox', ...(headed ? ['--window-size=1440,1800'] : [])],
 });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 1800 },
@@ -306,6 +366,10 @@ const manifest = {
   url: PUBLIC_URL,
   mode: headed ? 'headed' : 'headless',
   display: headed ? (process.env.DISPLAY ?? '(none)') : null,
+  // Which browser ran, so a reader can tell a pinned store path from a
+  // snap. The store hash is recorded rather than the full path: the path
+  // says nothing the derivation does not, and this file may be published.
+  browser: browserChoice ? { from: browserChoice.from, version: browserVersion } : null,
   checks,
   observation: obs,
   artifacts,
