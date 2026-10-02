@@ -1,5 +1,19 @@
 {
   "nodes": {
+    "browser": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "path": "./browser",
+        "type": "path"
+      },
+      "original": {
+        "path": "./browser",
+        "type": "path"
+      },
+      "parent": []
+    },
     "crane": {
       "locked": {
         "lastModified": 1784218508,
@@ -57,14 +71,14 @@
       "locked": {
         "lastModified": 1731533236,
         "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
-        "ref": "omain",
+        "ref": "main",
         "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
         "revCount": 102,
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/numtide/flake-utils.git"
       },
       "original": {
-        "ref": "omain",
+        "ref": "main",
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/numtide/flake-utils.git"
       }
@@ -94,21 +108,37 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1781619580,
-        "narHash": "sha256-9yp5mGNoL3HARXeGKkRNHIqQhp3dKfeLipYvhw1cHY8=",
-        "ref": "omaster",
-        "rev": "14aceb09acd67cb3b017a08ada6b532981b31594",
-        "revCount": 1017633,
+        "lastModified": 1785318670,
+        "narHash": "sha256-dN6Ou5x/+23FZLEpYP3IffO+NyJFzUlGumt1uu3MMaY=",
+        "ref": "nixos-unstable",
+        "rev": "0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5",
+        "revCount": 1043649,
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
       },
       "original": {
-        "ref": "omaster",
+        "ref": "nixos-unstable",
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
       }
     },
     "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1785318670,
+        "narHash": "sha256-dN6Ou5x/+23FZLEpYP3IffO+NyJFzUlGumt1uu3MMaY=",
+        "ref": "nixos-unstable",
+        "rev": "0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5",
+        "revCount": 1043649,
+        "type": "git",
+        "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
+      },
+      "original": {
+        "ref": "nixos-unstable",
+        "type": "git",
+        "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
+      }
+    },
+    "nixpkgs_3": {
       "locked": {
         "lastModified": 1777578337,
         "narHash": "sha256-Ad49moKWeXtKBJNy2ebiTQUEgdLyvGmTeykAQ9xM+Z4=",
@@ -167,9 +197,10 @@
     },
     "root": {
       "inputs": {
+        "browser": "browser",
         "crane": "crane",
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs",
+        "nixpkgs": "nixpkgs_2",
         "nora-cargo": "nora-cargo",
         "system-manager": "system-manager"
       }
@@ -177,20 +208,20 @@
     "system-manager": {
       "inputs": {
         "flake-compat": "flake-compat",
-        "nixpkgs": "nixpkgs_2",
+        "nixpkgs": "nixpkgs_3",
         "userborn": "userborn"
       },
       "locked": {
         "lastModified": 1780022176,
         "narHash": "sha256-9CD/fxQUsiNbSw+tWHCG6hDn9DDsz5YfndP+TSmWO3o=",
-        "ref": "omain",
+        "ref": "main",
         "rev": "3dd7dbe51bb2232b7b51295a022c627c99fe14fc",
         "revCount": 1023,
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/numtide/system-manager.git"
       },
       "original": {
-        "ref": "omain",
+        "ref": "main",
         "type": "git",
         "url": "file:///mnt/data1/git/github.com/numtide/system-manager.git"
       }
