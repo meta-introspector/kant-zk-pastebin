@@ -2,17 +2,25 @@
   description = "Kant Pastebin - UUCP + zkTLS";
 
   inputs = {
-    nixpkgs.url = "git+file:///mnt/data1/git/github.com/NixOS/nixpkgs.git?ref=omaster";
-    flake-utils.url = "git+file:///mnt/data1/git/github.com/numtide/flake-utils.git?ref=omain";
+    nixpkgs.url = "git+file:///mnt/data1/git/github.com/NixOS/nixpkgs.git?ref=nixos-unstable";
+    flake-utils.url = "git+file:///mnt/data1/git/github.com/numtide/flake-utils.git?ref=main";
     crane.url = "path:/mnt/data1/time-2026/05-may/19/crane";
     nora-cargo = {
       url = "path:/mnt/data1/nora/storage/cargo";
       flake = false;
     };
-    system-manager.url = "git+file:///mnt/data1/git/github.com/numtide/system-manager.git?ref=omain";
+    system-manager.url = "git+file:///mnt/data1/git/github.com/numtide/system-manager.git?ref=main";
+    browser.url = "path:./browser";
   };
 
-  outputs = { self, nixpkgs, flake-utils, system-manager, crane, nora-cargo }:
+  outputs = { self, nixpkgs, flake-utils, system-manager, crane, nora-cargo, browser }:
+    let
+      # The browser the GUI2Lean4 captures run against, carried in from
+      # browser.nix so `--headed` does not depend on the snap package or a
+      # Playwright browser download. See that file for why the full Chromium
+      # is pinned rather than the headless shell.
+      browserPkgs = browser.packages.x86_64-linux;
+    in
     (flake-utils.lib.eachDefaultSystem (system:
       let
         lib = nixpkgs.lib;
@@ -103,7 +111,11 @@ EOF
           };
         });
       in {
-        packages = { inherit kant-pastebin; default = kant-pastebin; };
+        packages = {
+          inherit kant-pastebin;
+          default = kant-pastebin;
+          inherit (browserPkgs) chromium fileshare-capture;
+        };
         apps.default = { type = "app"; program = "${kant-pastebin}/bin/kant-pastebin"; };
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [ rustc cargo rustfmt clippy openssl.dev pkg-config ];
