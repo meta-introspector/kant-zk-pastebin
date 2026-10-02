@@ -166,7 +166,10 @@ test("start announces presence into the room", async () => {
 test("publish pins via ipfs or embeds, and the room gets a kzcid line", async () => {
   const app = newApp();
   const bytes = utf8Bytes("room cargo");
-  const rec = await app.publish("cargo.bin", bytes, { note: "demo" });
+  // A dead RPC address keeps the test hermetic: a machine that happens
+  // to run kubo on :5001 must not change what this suite asserts.
+  const rec = await app.publish("cargo.bin", bytes, { note: "demo",
+    rpcBase: "http://127.0.0.1:1" });
   assert.equal(rec.tag, "kzcid");
   assert.equal(rec.pinned, false, "no kubo in tests → embedded");
   assert.equal(await cidOf(bytes), rec.cid);
