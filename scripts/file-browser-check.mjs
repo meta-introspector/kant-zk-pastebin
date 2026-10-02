@@ -189,6 +189,61 @@ const fileLayer = await page.evaluate(async () => {
   return out;
 });
 
+// The chunk crypto now also lives in the wasm core. Node's crypto and the
+// browser's WebCrypto are different implementations, so agreeing in the
+// crosscheck (node) is not evidence they agree HERE -- this compares the
+// wasm against the page's own WebCrypto, in the browser that will run it.
+const wasmCrypto = await page.evaluate(async () => {
+  const out = { loaded: false, match: false, roundTrip: false, wrongSecretRefused: false, detail: "" };
+  try {
+    const w = await import("./pastebin_wasm.js");
+    await w.default();
+    out.loaded = true;
+    if (typeof w.wasm_encrypt_chunk !== "function") { out.detail = "no wasm_encrypt_chunk export"; return out; }
+
+    const secret = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    const F = await import("./kant-file.mjs");
+
+    // Let the page's own encryptFile choose the nonce, then insist the wasm
+    // reproduce those exact bytes.
+    const size = 300000;                       // two chunks
+    const data = new Uint8Array(size);
+    let seed = 0x1234567;
+    for (let i = 0; i < size; i += 1) {
+      seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
+      data[i] = seed & 0xff;
+    }
+    const enc = await F.encryptFile(secret, "wasm.bin", "application/octet-stream", data);
+    out.chunks = enc.chunks.length;
+
+    let allMatch = true, allBack = true;
+    for (let i = 0; i < enc.chunks.length; i += 1) {
+      const slice = data.subarray(i * F.CHUNK_SIZE, Math.min((i + 1) * F.CHUNK_SIZE, size));
+      const re = w.wasm_encrypt_chunk(secret, Uint8Array.from(enc.nonce), i, slice);
+      if (re.length !== enc.chunks[i].length) { allMatch = false; continue; }
+      for (let k = 0; k < re.length; k += 1) if (re[k] !== enc.chunks[i][k]) { allMatch = false; break; }
+      const back = w.wasm_decrypt_chunk(secret, Uint8Array.from(enc.nonce), i, Uint8Array.from(enc.chunks[i]));
+      if (back.length !== slice.length) { allBack = false; continue; }
+      for (let k = 0; k < back.length; k += 1) if (back[k] !== slice[k]) { allBack = false; break; }
+    }
+    out.match = allMatch;
+    out.roundTrip = allBack;
+
+    const wrong = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    try {
+      w.wasm_decrypt_chunk(wrong, Uint8Array.from(enc.nonce), 0, Uint8Array.from(enc.chunks[0]));
+      out.wrongSecretRefused = false;
+    } catch { out.wrongSecretRefused = true; }
+  } catch (e) { out.detail = String(e); }
+  return out;
+});
+
+check("wasm chunk crypto loads in the browser", wasmCrypto.loaded, wasmCrypto.detail);
+check("wasm ciphertext matches WebCrypto byte-for-byte", wasmCrypto.match,
+  `${wasmCrypto.chunks ?? 0} chunk(s)`);
+check("wasm decrypts what WebCrypto encrypted", wasmCrypto.roundTrip);
+check("wasm refuses another room secret", wasmCrypto.wrongSecretRefused);
+
 for (const [name, ok] of Object.entries(fileLayer.api)) {
   check(`exports ${name}`, ok === "function", ok === "function" ? "" : `got ${ok}`);
 }
