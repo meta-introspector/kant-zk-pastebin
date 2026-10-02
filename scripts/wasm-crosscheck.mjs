@@ -27,6 +27,7 @@ const {
   rawCidOf,
   MAX_ARTIFACT_BYTES,
 } = await import(join(root, "web/kant-ipfs.mjs"));
+const { encryptFile, CHUNK_SIZE } = await import(join(root, "web/kant-file.mjs"));
 const wasm = await import(join(root, "web/pastebin_wasm.js"));
 await wasm.default({
   module_or_path: readFileSync(join(root, "web/pastebin_wasm_bg.wasm")),
@@ -171,6 +172,47 @@ ok("small artifacts keep the raw CID", (() => {
   return [1, 2000, 100_000, MAX_ARTIFACT_BYTES]
     .every((n) => wasm.wasm_unixfs_cid(probe(n)) === core(probe(n)));
 })());
+
+// 6. The chunk crypto is a RUNTIME port, not a format change: for the
+//    exact nonce WebCrypto chose, the wasm must reproduce the JS
+//    ciphertext byte for byte, and must decrypt what the JS produced.
+//    Anything else would strand every manifest and IPFS block already in
+//    the rooms, because the witness names the ciphertext.
+// A wasm-bindgen Err is a synchronous throw. Catching it here means a
+// divergence is reported as the check that failed, not as a raw
+// "AES-GCM authentication failed" that hides which case broke.
+const attempt = (fn) => { try { return fn(); } catch { return null; } };
+
+const secret = rnd(32);
+for (const size of [1, 1000, CHUNK_SIZE - 1, CHUNK_SIZE, CHUNK_SIZE + 1, CHUNK_SIZE * 2 + 777]) {
+  const data = rnd(size);
+  const enc = await encryptFile(Array.from(secret), "f.bin", "application/octet-stream", data);
+  const label = `chunk-crypto ${size}B`;
+
+  ok(`${label} nonce is 12 bytes`, enc.nonce.length === 12);
+  ok(`${label} one chunk per CHUNK_SIZE`, enc.chunks.length === Math.max(1, Math.ceil(size / CHUNK_SIZE)));
+
+  for (let i = 0; i < enc.chunks.length; i += 1) {
+    const slice = data.subarray(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, size));
+    // Byte-for-byte against the JS ciphertext.
+    const re = attempt(() => wasm.wasm_encrypt_chunk(secret, Uint8Array.from(enc.nonce), i, slice));
+    ok(`${label} chunk ${i} encrypt matches js`,
+      re !== null && Buffer.compare(Buffer.from(re), Buffer.from(enc.chunks[i])) === 0);
+    // And it reads back what the JS wrote.
+    const back = attempt(() => wasm.wasm_decrypt_chunk(secret, Uint8Array.from(enc.nonce), i, Uint8Array.from(enc.chunks[i])));
+    ok(`${label} chunk ${i} decrypt matches js`,
+      back !== null && Buffer.compare(Buffer.from(back), Buffer.from(slice)) === 0);
+  }
+}
+
+// The wrong room secret must not open a JS-produced chunk.
+{
+  const data = rnd(64);
+  const enc = await encryptFile(Array.from(secret), "f.bin", "application/octet-stream", data);
+  const threw = await refuses(async () =>
+    wasm.wasm_decrypt_chunk(rnd(32), Uint8Array.from(enc.nonce), 0, Uint8Array.from(enc.chunks[0])));
+  ok("chunk-crypto refuses another room secret", threw);
+}
 
 console.log(`${checks - fail.length}/${checks} crosscheck checks passed`);
 if (fail.length) {
