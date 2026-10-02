@@ -304,6 +304,79 @@ try {
           && node.viewAt().length === 2;
       })();
 
+
+      // (4) The actual IPFS round trip, through the daemon, from the page.
+      //
+      // Everything above this line reasons about manifests and witnesses in
+      // memory. None of it touches a daemon, so none of it can catch the
+      // failures that actually live in this layer: the page resolving its
+      // gateway, kubo refusing a cross-origin RPC (it answers 403, which is
+      // why KUBO_RPC is the same-origin /ipfs-rpc and not :5001), a partial
+      // pin, or a chunk the gateway will not serve back.
+      //
+      // This is the check the earlier suite was missing. It also explains why
+      // a broken IPFS path is invisible from the room: web/index.html
+      // downgrades to a relay-only announcement when `complete` is false, so
+      // the file share keeps working and nothing looks wrong.
+      try {
+        const IPFS = await import('./kant-file-ipfs.mjs');
+        // KUBO_RPC is defined in kant-ipfs.mjs and *not* re-exported by
+        // kant-file-ipfs.mjs, so it has to come from there. Reading it off the
+        // wrong module yields `undefined`, the fetch throws, and the check
+        // reports "unreachable" for a daemon that is up — which is the first
+        // version of this check, and why it is worth saying out loud.
+        const { KUBO_RPC, GATEWAY } = await import('./kant-ipfs.mjs');
+        out.rpcEndpoint = KUBO_RPC;
+        out.gwEndpoint = GATEWAY;
+        out.kuboReachable = await (async () => {
+          try {
+            const r = await fetch(`${KUBO_RPC}/api/v0/version`, { method: 'POST' });
+            return r.ok;
+          } catch (e) {
+            out.rpcError = String(e && e.message ? e.message : e);
+            return false;
+          }
+        })();
+
+        if (out.kuboReachable) {
+          const pin = await IPFS.putChunks(enc.chunks);
+          out.pinnedEveryChunk = pin.complete === true && pin.cids.length === enc.chunks.length;
+          out.pinnedCidCount = pin.cids.length;
+          out.failedAt = pin.failedAt;
+
+          // The manifest a peer would actually receive, carrying the CIDs the
+          // daemon just gave us next to the witnesses that name the chunks.
+          const live = F.manifest(room, 'peer', 3, 'evidence.bin',
+            'application/octet-stream', enc.size, enc.nonce, enc.cids, pin.cids);
+          out.liveManifestRoundTrips = (() => {
+            const q = F.parseManifest(F.printManifest(live));
+            return !!q && q.ipfs.length === enc.cids.length && q.ipfs[0] !== q.cids[0];
+          })();
+
+          // Fetch each chunk back over HTTP and hand it to decryptFile the way
+          // a second peer would — witness-keyed, resolving through ipfsFetcher.
+          const back = await F.decryptFile(secret,
+            { size: enc.size, nonce: enc.nonce, cids: enc.cids },
+            IPFS.ipfsFetcher(live));
+          out.ipfsRoundTripsToSameBytes = (() => {
+            if (back.length !== data.length) return false;
+            for (let i = 0; i < data.length; i += 1) if (back[i] !== data[i]) return false;
+            return true;
+          })();
+
+          // And the daemon must refuse to serve a chunk it does not hold,
+          // rather than handing back something that decrypts to garbage.
+          out.gatewayRefusesAnAbsentCid = await (async () => {
+            try {
+              const bytes = await IPFS.getChunk('bafkreieqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+              return bytes === null;
+            } catch { return true; }
+          })();
+        }
+      } catch (e) {
+        out.ipfsError = String(e && e.message ? e.message : e);
+      }
+
       } catch (e) {
       out.error = String(e && e.stack ? e.stack : e);
     }
@@ -324,6 +397,17 @@ try {
   check('a manifest survives print/parse with both names', observation.manifestRoundTrips);
   check('the ipfs names are committed to', observation.ipfsNamesAreCommitted);
   check('an edited ipfs list is refused', observation.editedIpfsListRefused);
+
+  // The live-daemon round trip. These need the daemon; without it they are
+  // reported as failures rather than skipped, because a skip here is exactly
+  // how a broken IPFS path stayed invisible — the room still works, relay-only.
+  check('kubo is reachable from the page', observation.kuboReachable,
+    observation.ipfsError ?? `via ${observation.kuboReachable ? 'same-origin /ipfs-rpc' : 'unreachable'}`);
+  check('every chunk is pinned on ipfs', observation.pinnedEveryChunk,
+    `${observation.pinnedCidCount ?? 0} pinned, failed at ${observation.failedAt ?? 'n/a'}`);
+  check('a pinned manifest keeps both names', observation.liveManifestRoundTrips);
+  check('ipfs chunks decrypt back to the original bytes', observation.ipfsRoundTripsToSameBytes);
+  check('the gateway refuses an absent cid', observation.gatewayRefusesAnAbsentCid);
   check('a quote names the file witness', observation.quoteNamesWitness);
   check('the quoted text survives', observation.quoteTextRecovered);
   check('chat orders by the sender clock', observation.ordersByClock);

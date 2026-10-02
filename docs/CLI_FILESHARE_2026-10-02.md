@@ -132,11 +132,42 @@ Two operational notes, both learned the hard way:
 * Everything is redacted *before* it is written, never after. A room secret is
   32 bytes of hex and looks exactly like a UUID in the evidence.
 
+### 3a. The IPFS round trip, which is the check that was missing
+
+Checks 1–17 reason about manifests and witnesses **in memory**. None of them
+touches a daemon, so none of them can catch the failures that live in the layer
+where a browser actually pins a chunk. Checks 18–22 do:
+
+| check | what it asserts |
+|---|---|
+| `kubo is reachable from the page` | the RPC endpoint the page resolves to answers |
+| `every chunk is pinned on ipfs` | `putChunks` returns `complete` — no partial pin |
+| `a pinned manifest keeps both names` | the manifest carries CIDs beside witnesses, and the two differ |
+| `ipfs chunks decrypt back to the original bytes` | witness-keyed fetch through the gateway, byte-exact |
+| `the gateway refuses an absent cid` | the daemon does not serve something it does not hold |
+
+They are reported as **failures**, not skips, when the daemon is down. A skip
+here is exactly how the problem stayed invisible: `web/index.html` downgrades to
+a relay-only announcement when `putChunks` is incomplete, so a completely dead
+IPFS path still produces a working file share.
+
+**They immediately found a real bug.** `/ipfs-rpc` was returning 403 to every
+browser request while returning 200 to curl, because kubo refuses requests that
+carry `Origin`, `Referer`, or a browser `User-Agent` — three independent checks,
+any one sufficient — and nginx forwarded all three. So **IPFS pinning had never
+once worked from a browser**; every drop fell through to relay-only and looked
+fine. Fixed in the system-manager nginx config by stripping the three; the
+capture is what found it. See the commit on `nginx/services.d/pastebin.conf`.
+
+One trap in writing the check: `kant-file-ipfs.mjs` does not re-export
+`KUBO_RPC`, so reading it off that module yields `undefined` and the check
+reports "unreachable" for a daemon that is up. It comes from `kant-ipfs.mjs`.
+
 Result, both modes, live:
 
 ```
-headless   17/17   ALL PROOFS PASSED
-headed     17/17   ALL PROOFS PASSED   (Nix Chromium 150.0.7871.186,
+headless   22/22   ALL PROOFS PASSED
+headed     22/22   ALL PROOFS PASSED   (Nix Chromium 150.0.7871.186,
                                             1440x1800 VP8 WebM recorded)
 ```
 
