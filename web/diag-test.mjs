@@ -222,6 +222,20 @@ if (relay) {
   ok("a base derived from location finds the relay", derived.originIsRelay === true);
   eq("…and it is the relay we started", D.effectiveRelay(derived), base);
 
+  // A configured relay that is DOWN. `effectiveRelay` still hands it back —
+  // that is the spec: a configured relay wins, and it is `relayUsable` that
+  // says whether it answered. The banner used to read `used` for its wording
+  // and so announced this dead host as up; it must read `relayUsable`.
+  const deadCfg = await D.resolveReachability({
+    configured: "https://kant-relay.cicada71.net", origin: base,
+    log: new D.DiagLog({ cap: 100 }),
+  });
+  ok("a configured-but-dead relay is not usable", D.relayUsable(deadCfg) === false);
+  ok("…even though effectiveRelay still names it",
+    D.effectiveRelay(deadCfg) === "https://kant-relay.cicada71.net");
+  ok("…which is exactly the pair the banner must not confuse",
+    D.effectiveRelay(deadCfg) !== "" && !D.relayUsable(deadCfg));
+
   // A configured relay that is not there is reported, not swallowed.
   const log2 = new D.DiagLog({ cap: 100 });
   const missing = await D.resolveReachability({

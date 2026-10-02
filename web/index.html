@@ -771,8 +771,14 @@ async function refreshTransport() {
     origin: D.servedBase(location.href),
     log: LOG,
   });
+  // `used` is what we would talk to; `relayUsable` is whether it answered.
+  // They differ exactly when a relay is configured and down — `effectiveRelay`
+  // hands back a configured relay whether or not the probe found it, so asking
+  // `used` alone had the banner announce a dead relay as up. The dead one this
+  // deployment actually had answered that way for as long as it was configured.
   const used = D.effectiveRelay(reach);
-  const text = used
+  const live = D.relayUsable(reach) && used !== "";
+  const text = live
     ? (reach.configured
         ? `Relay ${used} is up — other devices can join.`
         : `This page is served by a relay (${used}) — other browsers on this machine, ` +
@@ -783,7 +789,7 @@ async function refreshTransport() {
         : "No relay: two tabs of THIS browser will find each other, but a second " +
           "browser or a second device will not. Serve the page with " +
           "`node server/relay.mjs --static web`, or set `relay =` in kant.config.");
-  $("transport").innerHTML = used ? K.escapeHtml(text) : `<span class="warn">${K.escapeHtml(text)}</span>`;
+  $("transport").innerHTML = live ? K.escapeHtml(text) : `<span class="warn">${K.escapeHtml(text)}</span>`;
   $("relaymsg").textContent = text;
   if (node) {
     node.reach = reach;
