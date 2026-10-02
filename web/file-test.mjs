@@ -301,6 +301,39 @@ if (!ipfsUp) {
     assert.equal(toManifest(e), null, "the ipfs names are covered by the witness");
   });
 
+  // Every IPFS check above used a 42-byte file, which is ONE chunk. That
+  // never exercises the part most likely to be wrong: a manifest carrying
+  // several chunk locations, and each chunk staying bound to its own index.
+  await checkAsync("ipfs: a multi-chunk file round-trips over ipfs", async () => {
+    const size = CHUNK_SIZE * 2 + 1234;
+    const big = new Uint8Array(size);
+    for (let i = 0; i < size; i += 65536) {
+      crypto.getRandomValues(big.subarray(i, Math.min(i + 65536, size)));
+    }
+    const encBig = await encryptFile(secretB, "big.bin", "application/octet-stream", big);
+    assert.equal(encBig.chunks.length, 3, "two full chunks plus a short tail");
+
+    const r = await putChunks(encBig.chunks, { rpcBase: LOOP_RPC });
+    assert.equal(r.complete, true, "every chunk pinned");
+    assert.equal(r.cids.length, 3, "one location per chunk");
+    assert.equal(new Set(r.cids).size, 3, "distinct chunks get distinct CIDs");
+
+    const manBig = manifest(room, "relay-a", 7, "big.bin", "application/octet-stream",
+      encBig.size, encBig.nonce, encBig.cids, r.cids);
+
+    const out = await decryptFile(secretB, manBig, ipfsFetcher(manBig, { gwBase: LOOP_GW }));
+    assert.deepEqual(Array.from(out), Array.from(big), "byte-exact across chunks");
+
+    // Each chunk is named by its own witness, so the locations must line
+    // up one-for-one. Swapping two of them must not decrypt.
+    const swapped = new Map(manBig.cids.map((w, i) => [w, r.cids[(i + 1) % 3]]));
+    let threw = false;
+    try {
+      await decryptFile(secretB, manBig, ipfsFetcher(swapped, { gwBase: LOOP_GW }));
+    } catch { threw = true; }
+    assert.equal(threw, true, "a chunk fetched from another index does not decrypt");
+  });
+
   await checkAsync("ipfs: a chunk with no ipfs location fails loudly", async () => {
     const orphan = manifestB.cids[0];
     let msg = "";
