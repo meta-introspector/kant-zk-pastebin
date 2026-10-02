@@ -3,7 +3,6 @@ use actix_web::{web, HttpResponse, Result as ActixResult, HttpRequest};
 use actix_cors::Cors;
 use crate::model::{SplitProfile, SplitProfileRequest, Identity, Avatar, MeshPeer, MeshMessage, MeshMessageKind, SplitUnit, SplitMode};
 use crate::storage;
-use crate::storage::Storage;
 use crate::mesh::MeshState;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -121,8 +120,7 @@ pub async fn preview_paste(path: web::Path<String>) -> ActixResult<HttpResponse>
 /// GET /raw/{id} — Get raw paste content
 pub async fn get_raw(path: web::Path<String>) -> ActixResult<HttpResponse> {
     let id = path.into_inner();
-    let storage = crate::storage::Storage::new(None);
-    Ok(storage.load_content(&id).map(|c| HttpResponse::Ok().body(c)).unwrap_or_else(|| HttpResponse::NotFound().body("not found")))
+    storage::load_content(&id).map(|c| HttpResponse::Ok().body(c)).unwrap_or_else(|| HttpResponse::NotFound().body("not found"))
 }
 
 // ========== Gallery / rendering ==========
@@ -355,7 +353,7 @@ pub async fn receive_mesh_ping(
     state: web::Data<Arc<MeshState>>,
     msg: web::Json<MeshMessage>,
 ) -> ActixResult<HttpResponse> {
-    state.handle_message(msg.into_inner()).await.map_err(actix_web::error::ErrorInternalServerError)?;
+    state.handle_message(msg.into_inner()).await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"ok": true})))
 }
 
@@ -365,7 +363,7 @@ pub async fn announce_identity(
     identity: web::Json<Identity>,
 ) -> ActixResult<HttpResponse> {
     let identity = identity.into_inner();
-    state.save_identity(&identity).await.map_err(actix_web::error::ErrorInternalServerError)?;
+    state.save_identity(&identity).await?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"ok": true})))
 }
 
@@ -396,7 +394,7 @@ pub async fn create_identity(
     ident: web::Json<Identity>,
 ) -> ActixResult<HttpResponse> {
     let identity = ident.into_inner();
-    state.save_identity(&identity).await.map_err(actix_web::error::ErrorInternalServerError)?;
+    state.save_identity(&identity).await?;
     Ok(HttpResponse::Created().json(identity))
 }
 
@@ -416,7 +414,7 @@ pub async fn upload_avatar(
     avatar: web::Json<Avatar>,
 ) -> ActixResult<HttpResponse> {
     let avatar = avatar.into_inner();
-    state.save_avatar(&avatar).await.map_err(actix_web::error::ErrorInternalServerError)?;
+    state.save_avatar(&avatar).await?;
     Ok(HttpResponse::Created().json(avatar))
 }
 
@@ -444,43 +442,4 @@ pub async fn list_plugins_handler() -> ActixResult<HttpResponse> {
 pub async fn run_plugin_handler(path: web::Path<(String, String)>) -> ActixResult<HttpResponse> {
     let (name, id) = path.into_inner();
     Ok(HttpResponse::Ok().json(serde_json::json!({"name": name, "id": id, "result": "ok"})))
-}
-
-/// Extract a clean field value from a string
-pub fn clean_field(input: &str) -> String {
-    input.trim().to_string()
-}
-
-/// Capture and report an error case
-pub fn capture_error_case(_err: &dyn std::error::Error) -> String {
-    _err.to_string()
-}
-
-/// Extract archive name and title from filename
-pub fn archive_name_title(filename: &str) -> String {
-    // Simple stub: remove extension and replace underscores with spaces
-    filename.split('.').next().unwrap_or(filename).replace('_', " ")
-}
-
-/// Generate file description from metadata
-pub fn file_description(_orig_name: &str, _mime_type: &str, _size: usize, _data: &[u8]) -> String {
-    "Uploaded file".to_string()
-}
-
-/// Write index entry for the uploaded file
-pub fn write_index_entry(
-    _uucp_dir: &str,
-    _id: &str,
-    _title: &str,
-    _description: Option<&str>,
-    _tags: Vec<String>,
-    _local_cid: &str,
-    _witness: &str,
-    _filename: &str,
-    _size: usize,
-    _ipfs_cid: Option<String>,
-    _permalink: Option<String>,
-    _reply_to: Option<String>,
-) {
-    // Stub implementation - no-op
 }

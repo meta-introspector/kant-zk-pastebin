@@ -1,5 +1,5 @@
 // mesh.rs — relay-to-relay mesh networking for Kant pastebin
-use crate::model::{MeshPeer, MeshMessage, MeshMessageKind, Identity, Avatar};
+use crate::model::{MeshPeer, MeshMessage, MeshMessageKind, MeshPeerStatus, Identity, Avatar};
 use crate::storage::Storage;
 use actix_web::{web, HttpResponse, Result as ActixResult, http::header};
 use reqwest::Client;
@@ -53,6 +53,36 @@ impl MeshState {
             client,
             storage,
         }
+    }
+
+    /// Save user identity to storage
+    pub async fn save_identity(&self, identity: &Identity) -> anyhow::Result<()> {
+        self.storage.save_identity(identity).await
+    }
+
+    /// Load user identity from storage
+    pub async fn load_identity(&self, id: &str) -> Option<Identity> {
+        self.storage.load_identity(id).await
+    }
+
+    /// List all identities in storage
+    pub async fn list_identities(&self) -> Vec<Identity> {
+        self.storage.list_identities().await
+    }
+
+    /// Save avatar to storage
+    pub async fn save_avatar(&self, avatar: &Avatar) -> anyhow::Result<()> {
+        self.storage.save_avatar(avatar).await
+    }
+
+    /// Load avatar from storage
+    pub async fn load_avatar(&self, id: &str) -> Option<Avatar> {
+        self.storage.load_avatar(id).await
+    }
+
+    /// List all avatars for a given owner
+    pub async fn list_avatars(&self, owner: &str) -> Vec<Avatar> {
+        self.storage.list_avatars(owner).await
     }
 
     /// Start the mesh networking background tasks
@@ -231,10 +261,148 @@ impl MeshState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    fn make_storage() -> Arc<Storage> {
+        Arc::new(Storage::new(None))
+    }
+
+    fn sample_identity() -> Identity {
+        Identity {
+            id: "ident-1".to_string(),
+            name: "testuser".to_string(),
+            display_name: Some("Test User".to_string()),
+            avatar_id: Some("avatar-1".to_string()),
+            bio: Some("A test bio".to_string()),
+            relays: vec!["http://relay.local".to_string()],
+            created: 0,
+            updated: 0,
+        }
+    }
+
+    fn sample_avatar() -> Avatar {
+        Avatar {
+            id: "avatar-1".to_string(),
+            owner: "ident-1".to_string(),
+            data_url: Some("data:image/png;base64,abcd".to_string()),
+            ipfs_cid: None,
+            mime_type: "image/png".to_string(),
+            size_bytes: 1234,
+            created: 0,
+        }
+    }
+
+    fn run_async<F, R>(fut: F) -> R
+    where
+        F: std::future::Future<Output = R>,
+    {
+        tokio::runtime::Runtime::new().unwrap().block_on(fut)
+    }
+
+    /// Test the proxy methods on MeshState delegate correctly to Storage.
+    #[test]
+    fn test_mesh_state_proxy_methods() {
+        run_async(async {
+            let storage = make_storage();
+            let state = MeshState::new(MeshConfig::default(), storage.clone());
+
+            let identity = sample_identity();
+            let result = state.save_identity(&identity).await;
+            assert!(result.is_ok());
+
+            let loaded = state.load_identity("ident-1").await;
+            assert_eq!(loaded, Some(identity.clone()));
+
+            let list = state.list_identities().await;
+            assert_eq!(list.len(), 1);
+            assert_eq!(list[0].id, "ident-1");
+
+            let avatar = sample_avatar();
+            let result = state.save_avatar(&avatar).await;
+            assert!(result.is_ok());
+
+            let loaded_avatar = state.load_avatar("avatar-1").await;
+            assert_eq!(loaded_avatar, Some(avatar.clone()));
+
+            let avatars = state.list_avatars("ident-1").await;
+            assert_eq!(avatars.len(), 1);
+            assert_eq!(avatars[0].owner, "ident-1");
+        });
+    }
+
+    /// Two MeshState instances can coexist, sharing the same Storage.
+    #[test]
+    fn test_two_mesh_state_instances_shared_storage() {
+        run_async(async {
+            let storage = make_storage();
+            let state_a = MeshState::new(MeshConfig::default(), storage.clone());
+            let state_b = MeshState::new(MeshConfig::default(), storage);
+
+            let identity = sample_identity();
+            state_a.save_identity(&identity).await.expect("save via state_a");
+
+            // state_b can read what state_a saved (shared persistence).
+            let loaded = state_b.load_identity("ident-1").await;
+            assert_eq!(loaded, Some(identity));
+        });
+    }
+
+    /// Two MeshState instances each with their own Storage can coexist in isolation.
+    #[test]
+    fn test_two_mesh_state_instances_isolated_storage() {
+        run_async(async {
+            let tmp_a = TempDir::new().expect("temp dir a");
+            let tmp_b = TempDir::new().expect("temp dir b");
+            let storage_a = Arc::new(Storage::new(Some(
+                tmp_a.path().to_string_lossy().to_string(),
+            )));
+            let storage_b = Arc::new(Storage::new(Some(
+                tmp_b.path().to_string_lossy().to_string(),
+            )));
+            let state_a = MeshState::new(MeshConfig::default(), storage_a);
+            let state_b = MeshState::new(MeshConfig::default(), storage_b);
+
+            state_a.save_identity(&sample_identity()).await.expect("save a");
+            let loaded_b = state_b.load_identity("ident-1").await;
+            assert!(loaded_b.is_none(), "isolated storage should not see other state");
+        });
+    }
+
+    /// Proxy method list_avatars filters by owner correctly.
+    #[test]
+    fn test_mesh_state_list_avatars_filter() {
+        run_async(async {
+            let storage = make_storage();
+            let state = MeshState::new(MeshConfig::default(), storage);
+
+            let owner1 = sample_avatar();
+            let mut owner2 = sample_avatar();
+            owner2.id = "avatar-2".to_string();
+            owner2.owner = "ident-2".to_string();
+
+            state.save_avatar(&owner1).await.expect("save avatar 1");
+            state.save_avatar(&owner2).await.expect("save avatar 2");
+
+            let for_owner1 = state.list_avatars("ident-1").await;
+            assert_eq!(for_owner1.len(), 1);
+            assert_eq!(for_owner1[0].id, "avatar-1");
+
+            let for_owner2 = state.list_avatars("ident-2").await;
+            assert_eq!(for_owner2.len(), 1);
+            assert_eq!(for_owner2[0].id, "avatar-2");
+        });
+    }
+}
+
 /// API handlers for mesh networking
 pub mod handlers {
     use super::*;
     use actix_web::{web, HttpResponse, Result as ActixResult};
+    use actix_web::error::ErrorInternalServerError;
 
     /// GET /api/mesh/peers - List all known mesh peers
     pub async fn list_peers(state: web::Data<Arc<MeshState>>) -> ActixResult<HttpResponse> {
@@ -247,7 +415,10 @@ pub mod handlers {
         state: web::Data<Arc<MeshState>>,
         msg: web::Json<MeshMessage>,
     ) -> ActixResult<HttpResponse> {
-        state.handle_message(msg.into_inner()).await?;
+        state
+            .handle_message(msg.into_inner())
+            .await
+            .map_err(ErrorInternalServerError)?;
         Ok(HttpResponse::Ok().json(serde_json::json!({ "ok": true })))
     }
 
@@ -256,7 +427,10 @@ pub mod handlers {
         state: web::Data<Arc<MeshState>>,
         msg: web::Json<MeshMessage>,
     ) -> ActixResult<HttpResponse> {
-        state.handle_message(msg.into_inner()).await?;
+        state
+            .handle_message(msg.into_inner())
+            .await
+            .map_err(ErrorInternalServerError)?;
         Ok(HttpResponse::Ok().json(serde_json::json!({ "ok": true })))
     }
 
@@ -266,7 +440,11 @@ pub mod handlers {
         identity: web::Json<Identity>,
     ) -> ActixResult<HttpResponse> {
         let identity = identity.into_inner();
-        state.storage.save_identity(&identity).await?;
+        state
+            .storage
+            .save_identity(&identity)
+            .await
+            .map_err(ErrorInternalServerError)?;
         Ok(HttpResponse::Ok().json(serde_json::json!({ "ok": true })))
     }
 }

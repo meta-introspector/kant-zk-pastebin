@@ -74,10 +74,18 @@ pub struct SplitProfile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SplitUnit { Byte, Word, Token }
+pub enum SplitUnit {
+    Byte,
+    Word,
+    Token,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SplitMode { Line, Word, Exact }
+pub enum SplitMode {
+    Line,
+    Word,
+    Exact,
+}
 
 impl SplitProfile {
     /// Built-in platform presets based on current API limits.
@@ -168,28 +176,42 @@ pub struct SplitProfileRequest {
 // === New: Avatar / Identity models ===
 
 /// A user avatar (stored as base64 or IPFS CID)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Avatar {
     pub id: String,
     pub owner: String,
-    pub data_url: Option<String>,   // base64 data URL for local storage
-    pub ipfs_cid: Option<String>,   // IPFS CID for p2p sharing
+    pub data_url: Option<String>, // base64 data URL for local storage
+    pub ipfs_cid: Option<String>, // IPFS CID for p2p sharing
     pub mime_type: String,
     pub size_bytes: usize,
     pub created: u64,
 }
 
 /// A user identity / profile
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Identity {
     pub id: String,
     pub name: String,
     pub display_name: Option<String>,
     pub avatar_id: Option<String>,
     pub bio: Option<String>,
-    pub relays: Vec<String>,       // known relays for mesh networking
+    pub relays: Vec<String>, // known relays for mesh networking
     pub created: u64,
     pub updated: u64,
+}
+
+/// A post in a threaded view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadPost {
+    pub id: String,
+    pub title: String,
+    pub depth: usize,
+    pub reply_to: Option<String>,
+    pub description: Option<String>,
+    pub content_excerpt: String,
+    pub created: u64,
+    pub timestamp: String,
+    pub size: usize,
 }
 
 /// A peer in the mesh network
@@ -203,14 +225,18 @@ pub struct MeshPeer {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MeshPeerStatus { Online, Offline, Unknown }
+pub enum MeshPeerStatus {
+    Online,
+    Offline,
+    Unknown,
+}
 
 /// A mesh network message (relay-to-relay)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshMessage {
     pub id: String,
     pub from: String,
-    pub to: Option<String>,   // None = broadcast
+    pub to: Option<String>, // None = broadcast
     pub kind: MeshMessageKind,
     pub payload: String,
     pub timestamp: u64,
