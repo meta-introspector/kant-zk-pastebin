@@ -109,9 +109,11 @@ export class P2PApp {
    * (verified end to end by CID on fetch). Announces the kzcid record.
    */
   async publish(name, bytes, { note = "", rpcBase, gwBase } = {}) {
-    if (bytes.length > MAX_ARTIFACT_BYTES) {
-      throw new Error(`artifact ${bytes.length}B exceeds ${MAX_ARTIFACT_BYTES}B — chunk it`);
-    }
+    // No size ceiling: anything past one chunk is addressed by its UnixFS
+    // dag-pb root and announced as a leaf list. encodeCidRecord decides
+    // whether the bytes can ride in the record (they cannot once the base64
+    // would exceed a relay line), so a chunked publish carries leaves only
+    // and the fetcher resolves the root through a gateway.
     const rec = await publishArtifact({ peer: this.id, name, bytes, note, rpcBase, gwBase });
     await this.postRecord(rec);
     this.seen.set(rec.cid, rec);
