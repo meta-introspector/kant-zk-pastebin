@@ -233,6 +233,25 @@ const needRoom = (c) => {
   }
 };
 
+/** One conversation line for a terminal: the time when the sender put one
+ *  there, a `re: <file>` tag when the line quotes a dropped file, and the
+ *  quoted text rather than the raw `kzquote:<witness>` prefix.  The prefix
+ *  is machinery; printing it meant a reader saw the wire format instead of
+ *  what was said. */
+function lineText(c, m) {
+  const who = `${m.sender.slice(0, 8)}:`;
+  const when = m.at === null || m.at === undefined
+    ? ""
+    : ` ${new Date(m.at).toISOString().replace("T", " ").slice(0, 19)}`;
+  const quoted = C.quotedText(m);
+  if (quoted !== null && quoted !== undefined) {
+    const w = C.quoteWitness(m);
+    const f = C.filesOf(c).find((x) => C.manifestWitness(x) === w);
+    return `${who}${when} re: ${f ? f.name : "(a file)"} — ${quoted}`;
+  }
+  return `${who}${when} ${C.msgText(m)}`;
+}
+
 /** Take in whatever a text carries — a whole conversation in a bag, or an
  *  invitation to join a room — wherever in the text it happens to be.  On
  *  success the state is saved and a report printed; the return is the client
@@ -605,10 +624,23 @@ async function main() {
       };
       if (cmd === "read") {
         const answer = await once();
-        out(C.viewText(c).join("\n"), {
+        // The room is chat *and* files, so `read` shows both: a line that is
+        // a dropped file has no text to print, and silently omitting it made
+        // a room where a file had just been shared look empty.
+        const files = C.filesOf(c);
+        const chat = C.viewAt(c).map((m) => lineText(c, m));
+        const human = [
+          ...chat,
+          ...files.map((f, i) => `[file ${i}] ${f.name} (${f.size}B, ${f.cids.length} chunk(s))`),
+        ].join("\n");
+        out(human || "(nothing said yet)", {
           ok: true, room: C.clientRoom(c), cursor: c.cursor,
           arrived: (answer.lines ?? []).length,
           view: C.view(c).map((m) => ({ sender: m.sender, seq: m.seq, text: C.msgText(m) })),
+          at: C.viewAt(c).map((m) => ({
+            sender: m.sender, seq: m.seq, text: C.msgText(m), at: m.at,
+          })),
+          files: files.map((f) => ({ name: f.name, size: f.size, chunks: f.cids.length })),
           lines: c.lines,
           curl: C.curlLine(C.pollFrom(c)),
         });
