@@ -22,6 +22,7 @@ import {
   accept, receive, transcript, printSignal, parseSignal, Server, KantNode, RelayClient,
   TAG_AT, timed, printTimed, parseTimed, sayTextAt, timedWitness, transcriptAt,
   receiveTimed, acceptTimed, byDay, TAG_CHAT, UNTITLED,
+  sayQuote, quotePrefix, quotedText, quoteWitness, QUOTE_PREFIX,
 } from "./kant-net.mjs";
 import { utf8, asciiBytes, envelopeEncode, envelopeDecode, natToBytesBE } from "./kantzk.mjs";
 import { createServer, Rooms, CONFIG } from "../server/relay.mjs";
@@ -502,6 +503,59 @@ await check("an untimed line cannot be laundered into a timed one", () => {
 
 await check("kzat is a distinct tag from kzchat", () => {
   assert.notDeepEqual(TAG_AT, TAG_CHAT);
+});
+
+// ------------------------------------------------------- quoting a file
+
+const FLmod = await import("./kant-file.mjs");
+
+await check("a quote round-trips as ordinary timestamped chat", () => {
+  const room = roomOf(utf8("quote"));
+  const f = FLmod.manifest(room, "alice", 1, "notes.md", "text/markdown", 12,
+    [1, 2, 3], ["w1", "w2"]);
+  const line = printTimed(sayQuote(room, "bob", 0, f, "this matches my notes"));
+  const m = parseTimed(line);
+  assert.ok(m, "a quote must parse as a kzat line");
+  assert.equal(quotedText(m), "this matches my notes");
+  assert.equal(quoteWitness(m), FLmod.manifestWitness(f));
+  assert.equal(m.at > 0, true, "a quote carries the sender's clock");
+});
+
+await check("a quote names a file the reader must actually have", () => {
+  const room = roomOf(utf8("quote2"));
+  const f = FLmod.manifest(room, "alice", 1, "notes.md", "text/markdown", 12,
+    [1, 2, 3], ["w1"]);
+  const m = parseTimed(printTimed(sayQuote(room, "bob", 0, f, "mine too")));
+  // A reader with the file can resolve the witness...
+  const seen = new Map([[FLmod.manifestWitness(f), "notes.md"]]);
+  assert.equal(seen.get(quoteWitness(m)), "notes.md");
+  // ...and one without it cannot invent a file name from the quote.
+  assert.equal(new Map().get(quoteWitness(m)), undefined,
+    "an unresolved quote must not name a file");
+});
+
+await check("a line that is not a quote reads as plain text", () => {
+  const room = roomOf(utf8("plain"));
+  const m = parseTimed(printTimed(sayTextAt(room, "bob", 0, "just talking")));
+  assert.equal(quotedText(m), null);
+  assert.equal(quoteWitness(m), null);
+});
+
+await check("a quote whose witness was edited on the wire is refused", () => {
+  const room = roomOf(utf8("quote3"));
+  const f = FLmod.manifest(room, "alice", 1, "n.md", "text/markdown", 1, [1], ["w"]);
+  const line = printTimed(sayQuote(room, "bob", 0, f, "look"));
+  const e = envelopeDecode(line);
+  // Re-point the quote at a different file's witness: the body changes, so
+  // the witness no longer covers it.
+  const other = FLmod.manifestWitness(
+    FLmod.manifest(room, "alice", 2, "other.md", "text/markdown", 1, [1], ["w"]));
+  const body = Array.from(utf8(`${QUOTE_PREFIX}${other} look`));
+  e.fields[3] = body;
+  assert.equal(parseTimed(envelopeEncode(e)), null,
+    "a quote re-pointed at another file must be refused");
+  // The original is untouched.
+  assert.ok(parseTimed(line));
 });
 
 server.close();

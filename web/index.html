@@ -405,16 +405,40 @@ function transportLine() {
 
 function renderChat() {
   if (!node) { $("chat").textContent = "(not in a room)"; $("chatstatus").textContent = ""; return; }
-  const lines = node.view();
+  // viewAt, not view: a kzat line carries the sender's own clock, so a peer
+  // that joins late reads the room in the order it was talked rather than in
+  // whatever order the counter happens to run in. Untimed chat from an older
+  // peer still shows, sorted last and marked, rather than vanishing.
+  const lines = node.viewAt();
   $("chat").innerHTML = lines.length
     ? lines.map((m) => {
         const who = m.sender === node.self ? "you" : m.sender;
         const cls = m.sender === node.self ? "me" : "";
-        return `<div class="${cls}">${K.escapeHtml(who)}: ${K.escapeHtml(N.msgText(m))}</div>`;
+        const when = m.at === null
+          ? '<span class="dim" title="this peer did not timestamp the line">·</span>'
+          : `<span class="dim" title="${K.escapeHtml(new Date(m.at).toISOString())}">` +
+            `${new Date(m.at).toLocaleTimeString()}</span>`;
+        const quoted = quoteOf(m);
+        return `<div class="${cls}">${when} ${K.escapeHtml(who)}: ` +
+          `${quoted ? `<span class="dim">${K.escapeHtml(quoted)} </span>` : ""}` +
+          `${K.escapeHtml(N.msgText(m))}</div>`;
       }).join("")
     : "(nothing said yet)";
   $("chat").scrollTop = $("chat").scrollHeight;
   $("chatstatus").textContent = transportLine();
+}
+
+/** The file a line is quoting, if any: a `kzquote` body is the sender's
+ *  text prefixed by the file's witness, so the quote is checkable against a
+ *  file the room actually announced rather than being free text. */
+function quoteOf(m) {
+  const files = node?.files ?? [];
+  for (const f of files) {
+    const w = FL.manifestWitness(f);
+    const prefix = `kzquote:${w.slice(0, 12)}… `;
+    if (N.msgText(m).startsWith(prefix)) return `re: ${f.name}`;
+  }
+  return null;
 }
 
 /** The files dropped in the room, ours and others'.  A click fetches
@@ -428,9 +452,17 @@ function renderFiles() {
   box.innerHTML = files.length
     ? "dropped: " + files.map((f, i) =>
         `<a href="#" data-f="${i}">${K.escapeHtml(f.name)}</a>` +
-        ` <span>(${f.size}B, ${f.cids.length} chunk${f.cids.length > 1 ? "s" : ""})</span>`
+        ` <span>(${f.size}B, ${f.cids.length} chunk${f.cids.length > 1 ? "s" : ""}` +
+        `${f.ipfs?.length ? ", pinned on ipfs" : ""})</span>` +
+        ` <a href="#" data-q="${i}" title="reply in the room, quoting this file">quote</a>`
       ).join(" · ")
     : "";
+  for (const a of box.querySelectorAll("a[data-q]")) {
+    a.onclick = async (ev) => {
+      ev.preventDefault();
+      await quoteFile(files[Number(a.dataset.q)]);
+    };
+  }
   for (const a of box.querySelectorAll("a[data-f]")) {
     a.onclick = async (ev) => {
       ev.preventDefault();
@@ -530,14 +562,29 @@ $("btn-send").onclick = async () => {
   const text = $("say").value;
   if (!text) return;
   $("say").value = "";
-  await node.say(text);
+  // Stamped: the line carries our own clock, so a peer joining tomorrow
+  // reads the room in the order it was talked. An old peer still reads it —
+  // it ignores kzat lines rather than choking on them.
+  await node.sayAt(text);
   dispatch({ type: "say" });
 };
+
+/** Reply to a dropped file, quoting it back into the room. */
+async function quoteFile(f) {
+  if (!node) return;
+  const text = $("say").value.trim() || `re: ${f.name}`;
+  $("say").value = "";
+  await node.quoteFile(f, text);
+  dispatch({ type: "say" });
+}
 $("say").onkeydown = (e) => { if (e.key === "Enter") $("btn-send").click(); };
 
-// Drop a file: encrypt it in this browser with a key only the room
-// knows, pin every ciphertext chunk on the relay under its digest, then
-// announce the manifest as an ordinary self-certifying room line.
+// Drop a file: encrypt it in this browser with a key only the room knows,
+// pin every ciphertext chunk on the relay under its witness, then announce
+// the manifest as an ordinary self-certifying room line. With a kubo
+// reachable the chunks are pinned on IPFS too, and the manifest carries
+// both names — the witness, which is what the signature covers, and the
+// CID, which is where the bytes can be fetched.
 $("btn-drop").onclick = async () => {
   if (!node || !node.secret) { LOG.warn("app", "no room to drop into", ""); return; }
   const picked = $("dropfile").files[0];
@@ -552,11 +599,25 @@ $("btn-drop").onclick = async () => {
         { method: "POST", body: enc.chunks[i] });
       if (!r.ok) throw new Error(`the relay refused chunk ${i} (${r.status})`);
     }
+    // Pin on IPFS as well. A partial pin is announced as relay-only rather
+    // than carrying names a reader could chase and fail to find.
+    let ipfs = [];
+    try {
+      const { putChunks } = await import("./kant-file-ipfs.mjs");
+      const res = await putChunks(enc.chunks);
+      if (res.complete) ipfs = res.cids;
+      else LOG.warn("app", `ipfs kept ${res.cids.length}/${enc.chunks.length} chunk(s)`,
+        "announcing relay-only");
+    } catch (e) {
+      LOG.warn("app", "no ipfs daemon reachable", "announcing relay-only");
+    }
     node.seq += 1;
     const m = FL.manifest(node.room, node.self, node.seq,
-      enc.name, enc.mime, enc.size, enc.nonce, enc.cids);
+      enc.name, enc.mime, enc.size, enc.nonce, enc.cids, ipfs);
     await node.publish(FL.printManifest(m));
-    LOG.info("app", `dropped ${picked.name}`, `${enc.cids.length} chunk(s) pinned`);
+    LOG.info("app", `dropped ${picked.name}`,
+      `${enc.cids.length} chunk(s) on the relay` +
+      `${ipfs.length ? `, ${ipfs.length} pinned on ipfs` : ""}`);
   } catch (e) {
     LOG.error("app", "the file could not be dropped", e.message);
   }

@@ -18,7 +18,11 @@ import {
   shareUrl, parseShareUrl, CHANNEL_CAPACITY,
 } from "./kantzk.mjs";
 import { DiagLog, ref as diagRef, diagnose, effectiveRelay, clientOf } from "./kant-diag.mjs";
-import { parseManifest, printManifest } from "./kant-file.mjs";
+import { parseManifest, printManifest, manifestWitness } from "./kant-file.mjs";
+
+/** The witness a manifest is named by — re-exported so a caller quoting a
+ *  file does not have to import both modules. */
+const manifestWitnessOf = manifestWitness;
 
 /** A log that keeps nothing: used when a caller supplies none.  Every
  *  transport below writes to `log` instead of swallowing its errors —
@@ -410,6 +414,45 @@ export function byDay(ms) {
     return a.day < b.day ? 1 : -1;
   });
 }
+
+// ---------------------------------------------------------- quoting a file
+
+/** A chat line that quotes a dropped file back.
+ *
+ *  A `kzfile` manifest announces a file; this is the other direction — a
+ *  reader saying something *about* it, in the room, without re-sending the
+ *  bytes.  The quote rides in the body as `kzquote:<witness> <text>` rather
+ *  than in a field of its own, so it is covered by the ordinary message
+ *  witness and needs no new trust: a peer renders it as a quote of that file
+ *  only if it has actually seen a manifest with that witness, and shows the
+ *  text plainly when it has not.
+ *
+ *  The witness is truncated in the prefix purely so the prefix stays short
+ *  to read; `quoteWitness` still matches on the full value, so a truncated
+ *  collision would render as plain text rather than as a quote of the wrong
+ *  file. */
+export const QUOTE_PREFIX = "kzquote:";
+
+/** The prefix a quoting line starts with, for a file's witness. */
+export const quotePrefix = (witnessStr) => `${QUOTE_PREFIX}${witnessStr} `;
+
+/** The text a quoting line carries, or null if it is not quoting. */
+export function quotedText(m) {
+  const t = msgText(m);
+  return t.startsWith(QUOTE_PREFIX) ? t.slice(t.indexOf(" ") + 1) : null;
+}
+
+/** The witness a quoting line names, or null. */
+export function quoteWitness(m) {
+  const t = msgText(m);
+  if (!t.startsWith(QUOTE_PREFIX)) return null;
+  const end = t.indexOf(" ");
+  return end < 0 ? null : t.slice(QUOTE_PREFIX.length, end);
+}
+
+/** Write a line quoting a manifest, as ordinary timestamped chat. */
+export const sayQuote = (room, sender, seq, f, text, at = now()) =>
+  sayTextAt(room, sender, seq, `${quotePrefix(manifestWitnessOf(f))}${text}`, at);
 
 // ------------------------------------------------- signalling for WebRTC
 
@@ -921,17 +964,30 @@ export class KantNode {
 
   /** Announce a dropped file to the room: cut, encrypt, pin every chunk,
    *  then publish the manifest as one self-certifying line.  The relay and
-   *  IPFS only ever see ciphertext. */
-  async dropFile(name, mime, data, { secret = this.secret, pin } = {}) {
+   *  IPFS only ever see ciphertext.
+   *
+   *  `pin` puts each chunk on IPFS as well as the relay.  A partial pin is
+   *  reported rather than announced as complete: `putChunks` stops at the
+   *  first refusal, so the manifest carries no ipfs names at all unless
+   *  every chunk landed — a half-pinned manifest would leave a reader
+   *  fetching names that do not exist. */
+  async dropFile(name, mime, data, { secret = this.secret, pin = false } = {}) {
     if (!secret) throw new Error("dropping a file needs the room secret");
     const { encryptFile, manifest } = await import("./kant-file.mjs");
     const enc = await encryptFile(secret, name, mime, data);
     let ipfs = [];
     if (pin) {
       const { putChunks } = await import("./kant-file-ipfs.mjs");
-      ipfs = (await putChunks(enc.chunks)).map((c) => c ?? "");
-      while (ipfs.length && !ipfs[ipfs.length - 1]) ipfs.pop();
+      const res = await putChunks(enc.chunks);
+      if (res.complete) {
+        ipfs = res.cids;
+      } else {
+        this.log.warn("file", `ipfs kept only ${res.cids.length}/${enc.chunks.length}` +
+          " chunk(s); announcing without ipfs names so no reader chases a missing CID",
+          `failed at chunk ${res.failedAt}`);
+      }
     }
+    this.seq += 1;
     const f = manifest(this.room, this.self, this.seq, name, mime,
       enc.size, enc.nonce, enc.cids, ipfs);
     await this.publish(printManifest(f));
@@ -977,6 +1033,21 @@ export class KantNode {
   async say(text) {
     this.seq += 1;
     return this.publish(printMsg(sayText(this.room, this.self, this.seq, text)));
+  }
+
+  /** Say something with our own clock attached, so the room reads in the
+   *  order it was talked.  `say` above stays on plain `kzchat` because that
+   *  is what every peer already understands; this is the opt-in form. */
+  async sayStamped(text) { return this.sayAt(text); }
+
+  /** Reply to a dropped file, quoting it by its witness.  The quote is part
+   *  of the message body, so it is covered by the ordinary witness and a
+   *  peer can check it against a manifest it has actually seen. */
+  async quoteFile(f, text) {
+    this.seq += 1;
+    const line = printTimed(sayQuote(this.room, this.self, this.seq, f, text));
+    await this.publish(line);
+    return line;
   }
 
   /** Attach the same-browser bus and the WebRTC mesh. */

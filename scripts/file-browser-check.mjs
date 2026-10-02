@@ -259,6 +259,60 @@ check("tampered chunk refused", fileLayer.tamperedChunkRefused);
 check("manifest survives print/parse", fileLayer.manifestRoundTrip);
 check("manifest witness is stable", fileLayer.manifestWitnessStable);
 
+// The time-stored chat and the file quote, in the browser. These are pure
+// functions of kant-net.mjs, but the module graph has to resolve over HTTP
+// and the page has to load, so running them here catches a broken import
+// that node would not.
+const chatLayer = await page.evaluate(async () => {
+  const out = {};
+  try {
+    const N = await import("./kant-net.mjs");
+    const F = await import("./kant-file.mjs");
+    const { utf8 } = await import("./kantzk.mjs");
+
+    const room = N.roomOf(utf8("browser"));
+    const mk = (seq, text, at) => N.printTimed(N.timed(room, "alice", seq, utf8(text), at));
+
+    const three = [mk(0, "first", 3000), mk(1, "second", 1000), mk(2, "third", 2000)];
+    out.orderedByClock = N.transcriptAt(N.receiveTimed([], three)).map(N.msgText)
+      .join(",") === "second,third,first";
+
+    // An edited clock on the wire must be refused.
+    const honest = mk(0, "hi", 1000);
+    const e = (await import("./kantzk.mjs")).envelopeDecode(honest);
+    e.fields[4] = (await import("./kantzk.mjs")).natToBytesBE(9999);
+    out.editedClockRefused = N.parseTimed(
+      (await import("./kantzk.mjs")).envelopeEncode(e)) === null;
+
+    // kzat must not be mistaken for kzchat, or an old peer breaks.
+    out.oldPeerIgnores = N.parseMsg(honest) === null;
+
+    // Quoting a file round-trips and names the manifest's witness.
+    const f = F.manifest(room, "alice", 1, "notes.md", "text/markdown", 3, [1, 2, 3], ["w1"]);
+    const q = N.parseTimed(N.printTimed(N.sayQuote(room, "bob", 0, f, "mine too")));
+    out.quoteRoundTrip = q !== null && N.quotedText(q) === "mine too";
+    out.quoteNamesFile = q !== null && N.quoteWitness(q) === F.manifestWitness(f);
+
+    // A node shows a mixed room without losing untimed chat.
+    const node = new N.KantNode({ room });
+    node.ingest(N.printMsg(N.sayText(room, "alice", 0, "untimed")));
+    node.ingest(mk(1, "timed", Date.parse("2026-10-02T12:00:00Z")));
+    out.mixedRoomKeepsBoth = node.viewAt().length === 2;
+    out.noEpochBucket = !node.viewByDay().some((d) => d.day.startsWith("1970"));
+    out.untitledBucket = node.viewByDay().some((d) => d.untimed === true);
+  } catch (e) { out.detail = String(e); }
+  return out;
+});
+
+check("chat orders by the sender's clock", chatLayer.orderedByClock, chatLayer.detail ?? "");
+check("an edited clock is refused", chatLayer.editedClockRefused);
+check("an old peer ignores a stamped line", chatLayer.oldPeerIgnores);
+check("a file quote round-trips", chatLayer.quoteRoundTrip);
+check("a quote names the file's witness", chatLayer.quoteNamesFile);
+check("a mixed room keeps untimed chat", chatLayer.mixedRoomKeepsBoth);
+check("no message is filed under the epoch", chatLayer.noEpochBucket);
+check("untimed chat gets its own bucket", chatLayer.untitledBucket);
+
 // The gateway probe is an optional convenience, not part of the file layer.
 // kant-ipfs.mjs defaults GATEWAY to 127.0.0.1:8080 and p2p.html probes it on
 // load to decide whether to advertise "gateway reachable" or "artifacts will
