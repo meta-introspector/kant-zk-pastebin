@@ -37,6 +37,63 @@ export const cidOf = (bytes) => witness(Array.from(bytes));
 
 const subtle = () => globalThis.crypto.subtle;
 
+// ── the Rust core (pastebin-wasm), preferred over WebCrypto ──────────
+//
+// `pastebin-wasm/src/lib.rs` is an exact port of `encryptFile` below: same
+// HKDF over the room secret salted with the file nonce, same index-into-the
+// last-four-bytes nonce, same bare `ciphertext || tag` output with no
+// version byte and no AAD. scripts/wasm-crosscheck.mjs checks the two agree
+// byte-for-byte, including past the 256 KiB chunk boundary, so this is a
+// swap of implementation and not of format — a manifest written by one is
+// read by the other.
+//
+// Loaded lazily and independently of kant-ipfs.mjs's own copy, because a
+// caller may want the file crypto with no IPFS daemon in sight. When the
+// wasm cannot load (old browser, blocked wasm) WebCrypto below still works,
+// so dropping a file never hard-fails on this.
+let cryptoCore = null;
+let cryptoTried = false;
+
+/** The Rust chunk crypto, or `null` when it cannot load. */
+export async function cryptoOnce() {
+  if (cryptoTried) return cryptoCore;
+  cryptoTried = true;
+  try {
+    const mod = await import("./pastebin_wasm.js");
+    try {
+      await mod.default();
+    } catch {
+      // Node (and some sandboxes) cannot fetch the wasm over file:// URLs:
+      // hand the glue the bytes explicitly. Browsers take the fetch path.
+      const { readFileSync } = await import("node:fs");
+      const bytes = readFileSync(new URL("./pastebin_wasm_bg.wasm", import.meta.url));
+      await mod.default({ module_or_path: bytes });
+    }
+    cryptoCore = mod;
+  } catch {
+    cryptoCore = null;
+  }
+  return cryptoCore;
+}
+
+/** Encrypt one chunk through whichever core is available. */
+async function encryptChunk(secret, nonce, index, plain) {
+  const core = await cryptoOnce();
+  if (core) return new Uint8Array(core.wasm_encrypt_chunk(secret, nonce, index, plain));
+  return new Uint8Array(await subtle().encrypt(
+    { name: "AES-GCM", iv: Uint8Array.from(chunkNonce(nonce, index)) },
+    await fileKey(secret, nonce), plain));
+}
+
+/** Decrypt one chunk through whichever core is available. */
+async function decryptChunk(secret, nonce, index, cipher) {
+  const core = await cryptoOnce();
+  if (core) return new Uint8Array(core.wasm_decrypt_chunk(secret, nonce, index, cipher));
+  return new Uint8Array(await subtle().decrypt(
+    { name: "AES-GCM", iv: Uint8Array.from(chunkNonce(nonce, index)) },
+    await fileKey(secret, nonce), cipher));
+}
+
 /** The file key: the room secret, stretched per file so two files in one
  *  room never share a key (`Kant.File.derive`). */
 async function fileKey(secret, nonce) {
@@ -61,13 +118,11 @@ const chunkNonce = (nonce, index) => {
  *  and the encrypted chunks in order. */
 export async function encryptFile(secret, name, mime, data) {
   const nonce = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(12)));
-  const key = await fileKey(secret, nonce);
   const chunks = [];
   const cids = [];
   for (let off = 0, i = 0; off < data.length || i === 0; off += CHUNK_SIZE, i += 1) {
     const plain = data.slice(off, Math.min(off + CHUNK_SIZE, data.length));
-    const cipher = new Uint8Array(await subtle().encrypt(
-      { name: "AES-GCM", iv: Uint8Array.from(chunkNonce(nonce, i)) }, key, plain));
+    const cipher = await encryptChunk(secret, nonce, i, plain);
     chunks.push(cipher);
     cids.push(cidOf(cipher));
     if (off + CHUNK_SIZE >= data.length) break;
@@ -81,15 +136,14 @@ export async function encryptFile(secret, name, mime, data) {
 /** Fetch and decrypt every chunk back into the original bytes; any chunk
  *  whose digest does not match its cid is refused. */
 export async function decryptFile(secret, manifest, fetchChunk) {
-  const key = await fileKey(secret, manifest.nonce);
   const out = new Uint8Array(manifest.size);
   for (let i = 0; i < manifest.cids.length; i += 1) {
     const cipher = new Uint8Array(await fetchChunk(manifest.cids[i]));
     if (cidOf(cipher) !== manifest.cids[i]) {
-      throw new Error(`chunk ${i} is not its own name (expected ${manifest.cids[i].slice(0, 12)}…)`);
+      throw new Error(
+        `chunk ${i} is not its own name (expected ${manifest.cids[i].slice(0, 12)}…)`);
     }
-    const plain = new Uint8Array(await subtle().decrypt(
-      { name: "AES-GCM", iv: Uint8Array.from(chunkNonce(manifest.nonce, i)) }, key, cipher));
+    const plain = await decryptChunk(secret, manifest.nonce, i, cipher);
     out.set(plain, i * CHUNK_SIZE);
   }
   return out;
