@@ -50,6 +50,52 @@ export function wasm_cid_of_bytes(bytes) {
 }
 
 /**
+ * @param {Uint8Array} secret
+ * @param {Uint8Array} file_nonce
+ * @param {number} index
+ * @param {Uint8Array} ciphertext
+ * @returns {Uint8Array}
+ */
+export function wasm_decrypt_chunk(secret, file_nonce, index, ciphertext) {
+    const ptr0 = passArray8ToWasm0(secret, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(file_nonce, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.wasm_decrypt_chunk(ptr0, len0, ptr1, len1, index, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
+}
+
+/**
+ * @param {Uint8Array} secret
+ * @param {Uint8Array} file_nonce
+ * @param {number} index
+ * @param {Uint8Array} plaintext
+ * @returns {Uint8Array}
+ */
+export function wasm_encrypt_chunk(secret, file_nonce, index, plaintext) {
+    const ptr0 = passArray8ToWasm0(secret, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(file_nonce, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(plaintext, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.wasm_encrypt_chunk(ptr0, len0, ptr1, len1, index, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
+}
+
+/**
  * @param {string} peer
  * @param {string} name
  * @param {string} cid
