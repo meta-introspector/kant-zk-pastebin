@@ -10,7 +10,7 @@
 // credits itself — the ledger (Kant/Credits.lean) is authoritative and lives in
 // the page.
 
-const SHELL_CACHE = "kantzk-shell-v10";
+const SHELL_CACHE = "kantzk-shell-v11";
 const PIN_CACHE = "kantzk-pins-v1";
 
 // kant-kernel-embedded.mjs is part of the shell, not an optional extra: it is
@@ -22,11 +22,15 @@ const SHELL = ["./", "./index.html", "./lab.html", "./diag.html", "./hand.html",
                "./kant-kernel-embedded.mjs",
                "./kant-net.mjs", "./kant-qr.mjs", "./kant-uucp.mjs",
                "./kant-site.mjs", "./kant-flow.mjs", "./kant-diag.mjs", "./kant-carddebug.mjs",
-               "./kant-sharelog.mjs",
+               "./kant-sharelog.mjs", "./kant-file.mjs",
                "./kant.config", "./kant-logo.svg"];
 
-// The standalone kernel binary, cached best-effort from wherever it is served.
-const OPTIONAL = ["../dist/kant_kernel.wasm", "./kant_kernel.wasm"];
+// The standalone kernel binary, cached best-effort from wherever it is
+// served. Only the path that exists: index.html never loads a kernel from
+// web/, so asking for it here only bought a 404 in the console of every
+// page load. The catch() below kept it from breaking install; it did not
+// keep it from being logged.
+const OPTIONAL = ["../dist/kant_kernel.wasm"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

@@ -144,6 +144,24 @@ ok(
 const doctored = line.slice(0, -2) + (line.endsWith("00") ? "11" : "00");
 ok("a doctored chat line is refused", N.parseMsg(doctored) === null);
 
+// --- where links point when no kant.config can be read -------------------
+// The stack self-deploys, so the built-in configuration must not name a
+// host: a copy served from somewhere else has to mint links for where it
+// is actually being served, not where the file was written.
+eq("the built-in origin is empty", S.DEFAULT_CONFIG.origin, "");
+ok("the built-in config names no deployment host",
+  !/^https?:\/\//.test(S.originOf(S.DEFAULT_CONFIG)) ||
+  globalThis.location?.origin === "https://kant.cicada71.net");
+eq("a configured origin wins", S.originOf(CONFIG), CONFIG.origin);
+eq("a blank origin means same-origin",
+  S.originOf({ origin: "  " }), globalThis.location?.origin
+    ? `${globalThis.location.origin}/` : "");
+eq("links are relative when there is no origin at all",
+  S.addressUrl({ origin: "" }, SAMPLE_URL.replace(CONFIG.origin, "")),
+  `#${SAMPLE_URL.replace(CONFIG.origin, "")}`);
+ok("a configured origin still builds the whole URL",
+  S.addressUrl(CONFIG, "abc").startsWith(CONFIG.origin));
+
 console.log(`${checks - fail.length}/${checks} checks passed`);
 if (fail.length) {
   for (const f of fail) console.error(`FAIL: ${f}`);

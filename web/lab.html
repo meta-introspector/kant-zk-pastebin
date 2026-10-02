@@ -257,7 +257,7 @@ let siteConfig = { ...S.DEFAULT_CONFIG };
   const { config, source } = await S.loadConfig();
   siteConfig = config;
   $("site").textContent =
-    `site: ${config.origin}#<address>  (from ${source})` +
+    `site: ${S.originOf(config)}#<address>  (from ${source})` +
     (S.configWf(config) ? "" : "  — this configuration is not well formed");
   if (current) address();
 })();
