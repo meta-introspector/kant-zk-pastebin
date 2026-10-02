@@ -28,10 +28,38 @@ The refs were only half the problem. Every input was a local path:
 | `path:/mnt/data1/time-2026/05-may/19/crane` | `github:ipetkov/crane/8833b7dc…` |
 | `path:/mnt/data1/nora/storage/cargo` | *deleted* — see §3 |
 | `git+file:///mnt/data1/git/github.com/numtide/system-manager.git?ref=main` | `github:numtide/system-manager/3dd7dbe…` |
-| `path:./browser` | unchanged: it is in this repository |
+| `path:./browser` | *deleted* — folded into this flake, see §2a |
 
 A runner has no `/mnt/data1`, so the ref fix alone left CI red on the next
 failure. `flake.lock` now contains **zero** `mnt/data1` references.
+
+### 2a. `path:./browser` cannot be an input either
+
+`browser/flake.nix` was carried in as `path:./browser`. That resolves on a
+machine with a checkout, but a `path` input is a **mutable** lock — it has no
+rev — and Nix refuses to use a lock file that contains one:
+
+```
+error: lock file contains mutable lock '{"path":"./browser","type":"path"}'
+```
+
+CI evaluates a locked flake, so that is fatal there. The two obvious workarounds
+are both worse than fixing it:
+
+* `git+https://github.com/meta-introspector/kant-zk-pastebin?dir=browser` — a
+  self-referential input, so the browser would come from whatever rev was last
+  *pushed* rather than the tree being built. A flake input that can disagree
+  with its own repository is worse than a duplicate.
+* `--no-update-lock-file` in the workflow — then CI never verifies the lock,
+  which is the property worth having.
+
+`browser/flake.nix` held three packages, one devShell and one app, and needed
+a nixpkgs input solely to be a flake at all. It is now part of this file, with
+its reasoning kept as comments. `flake.lock` has no `path` node of any kind.
+
+The trade: there is no longer a standalone `browser` flake to build on its own.
+`nix build .#chromium` and `nix run .#fileshare-capture` work exactly as they
+did, from the repository root.
 
 `crane` was a working tree at `/mnt/data1/time-2026/05-may/19/crane`, not a
 URL. Its `local` remote points at `~/git/github.com/ipetkov/crane.git` and its
