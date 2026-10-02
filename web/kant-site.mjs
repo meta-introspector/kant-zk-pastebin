@@ -25,13 +25,33 @@ import { qrEncode, qrSvg } from "./kant-qr.mjs";
 
 // ---------------------------------------------------------------- config
 
-/** The configuration used when no `kant.config` can be read. */
+/** The configuration used when no `kant.config` can be read.
+ *
+ *  `origin` is deliberately empty here.  The stack self-deploys, so a copy
+ *  opened from a different host must mint links pointing at wherever it is
+ *  actually being served, not at the machine the file was written on.  An
+ *  empty origin means "this page's own origin" -- see `originOf`, which
+ *  every link builder goes through.
+ */
 export const DEFAULT_CONFIG = Object.freeze({
-  origin: "https://kant.cicada71.net/",
+  origin: "",
   caption: "kant-zk-pastebin",
   picture: "./kant-logo.svg",
   alt: "the Kant pastebin logo",
 });
+
+/**
+ * The origin to build links against: the configured one, else the origin
+ * this page was served from, else "" (a `file://` copy, or a test in node
+ * with no `location`).  "" yields relative `#<address>` links, which is
+ * still correct on a page -- just not shareable to another device.
+ */
+export function originOf(cfg) {
+  const configured = cfg && typeof cfg.origin === "string" ? cfg.origin.trim() : "";
+  if (configured) return configured;
+  const o = globalThis.location && globalThis.location.origin;
+  return o && o !== "null" ? `${o}/` : "";
+}
 
 const KEYS = ["origin", "caption", "picture", "alt"];
 
@@ -116,7 +136,7 @@ export async function loadRelay(url = "./kant.config", fetchImpl = globalThis.fe
 // ------------------------------------------------------------------ URLs
 
 /** `origin#address` — the whole address of a page. */
-export const addressUrl = (cfg, addr) => `${cfg.origin}#${addr}`;
+export const addressUrl = (cfg, addr) => `${originOf(cfg)}#${addr}`;
 
 /** The address a URL points at. */
 export const urlAddress = (u) => fragment(u);

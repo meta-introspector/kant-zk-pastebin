@@ -18,6 +18,7 @@ import {
   shareUrl, parseShareUrl, CHANNEL_CAPACITY,
 } from "./kantzk.mjs";
 import { DiagLog, ref as diagRef, diagnose, effectiveRelay, clientOf } from "./kant-diag.mjs";
+import { parseManifest } from "./kant-file.mjs";
 
 /** A log that keeps nothing: used when a caller supplies none.  Every
  *  transport below writes to `log` instead of swallowing its errors —
@@ -358,14 +359,32 @@ export class RelayClient {
     // relay, whatever the page's worker does.
     if (!init) init = { cache: "no-cache" };
     else if (!init.cache) init = { ...init, cache: "no-cache" };
+    
+    // Extract wait parameter from URL to set appropriate timeout
+    const waitMatch = url.match(/[?&]wait=(\d+)/);
+    const waitSeconds = waitMatch ? Math.min(Number(waitMatch[1]), 60) : 0;
+    
+    // Set timeout to wait time + 5 seconds buffer for network latency
+    const timeoutMs = waitSeconds > 0 ? (waitSeconds + 5) * 1000 : 30000;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
     this.log.info("relay", `${what}…`, url);
     let r;
     try {
-      r = await this.fetchImpl(url, init);
+      r = await this.fetchImpl(url, { ...init, signal: controller.signal });
     } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        this.log.error("relay", `${what} timed out after ${timeoutMs}ms`, url);
+        throw new Error(`relay ${what} timed out`);
+      }
       this.log.error("relay", `${what} could not reach the relay`, `${url} — ${e.message ?? e}`);
       throw e;
     }
+    clearTimeout(timeoutId);
+    
     if (!r.ok) {
       this.log.error("relay", `${what} was refused (${r.status})`, url);
       throw new Error(`relay ${what} failed: ${r.status}`);
@@ -721,16 +740,21 @@ export class KantNode {
     if (a) this.roster = rosterInsert(this.roster, a);
     const sig = parseSignal(line);
     if (sig && this.mesh && sig.room === this.room) this.mesh.onSignal(sig);
+    const file = parseManifest(line);
+    if (file && file.room === this.room) {
+      this.files = this.files ?? [];
+      if (!this.files.some((f) => printManifest(f) === line)) this.files.push(file);
+    }
     if (m && m.room !== this.room) {
       this.log.warn("ingest", "a line for another room was ignored", diagRef(m.room));
     }
-    if (!m && !a && !sig) {
+    if (!m && !a && !sig && !file) {
       this.log.warn("ingest", "a line was refused: it does not certify itself",
         `${line.slice(0, 24)}…`);
     }
-    if (this.messages.length + this.roster.length !== before) {
+    if (this.messages.length + this.roster.length + (this.files?.length ?? 0) !== before) {
       this.log.info("ingest", "a line was accepted",
-        m ? "chat" : a ? `peer ${a.peer}` : "signal");
+        m ? "chat" : a ? `peer ${a.peer}` : sig ? "signal" : "file");
       this.onChange();
     }
     return { message: m, announce: a, signal: sig };
@@ -871,11 +895,14 @@ export class KantNode {
         if (failures <= 3 || failures % 5 === 0) {
           this.log.error("relay", `polling failed (${failures} in a row)`, e);
         }
-        await sleep(Math.min(interval * failures, 15000));
+        // Exponential backoff with jitter to avoid thundering herd
+        const backoff = Math.min(interval * Math.pow(2, Math.min(failures, 6)), 30000);
+        await sleep(backoff + Math.random() * 1000);
+        continue; // Skip the post-poll sleep on failure
       }
       // Always yield, even when the relay answers at once: a long poll that
       // returns immediately must not turn into a spin.
-      await sleep(wait ? 25 : interval);
+      await sleep(wait ? 100 : interval); // Reduced delay for long-poll mode
     }
   }
 

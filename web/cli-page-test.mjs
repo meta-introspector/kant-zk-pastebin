@@ -47,6 +47,24 @@ function startRelay(port) {
 
 const port = 9101 + Math.floor(Math.random() * 90);
 const relay = await startRelay(port);
+
+// The relay must die with this process on *every* path. There is a long
+// stretch of top-level code between here and the try/finally further down;
+// anything that threw in it used to leave the relay listening forever, and
+// a leaked relay squatting on 9101-9190 makes the next run of this file
+// fail on a port collision that has nothing to do with the code under test.
+let stopped = false;
+const stopRelay = () => {
+  if (stopped) return;
+  stopped = true;
+  try { relay.kill(); } catch { /* already gone */ }
+};
+for (const sig of ["exit", "SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(sig, () => { stopRelay(); if (sig !== "exit") process.exit(1); });
+}
+process.on("uncaughtException", (e) => { stopRelay(); console.error(e); process.exit(1); });
+process.on("unhandledRejection", (e) => { stopRelay(); console.error(e); process.exit(1); });
+
 const base = `http://127.0.0.1:${port}`;
 const origin = `${base}/`;
 const dir = mkdtempSync(join(tmpdir(), "kant-page-"));
@@ -101,6 +119,8 @@ class El {
   click() { if (this.onclick) return this.onclick(); }
   play() { return Promise.resolve(); }
   addEventListener() {}
+  querySelectorAll() { return this.children.filter((c) => c instanceof El); }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
 }
 
 const elements = new Map();
@@ -108,11 +128,14 @@ for (const id of [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1])) {
   elements.set(id, new El(id));
 }
 const $ = (id) => elements.get(id);
+const guideBox = new El("", "div");
 
 globalThis.document = {
   body: new El("", "body"),
   getElementById: (id) => elements.get(id) ?? null,
   createElement: (tag) => new El("", tag),
+  addEventListener: () => {},
+  querySelector: (sel) => (sel === ".guide" ? guideBox : null),
   execCommand: () => true,
 };
 // The browser is pointed at the link the terminal printed: same origin, and
@@ -197,7 +220,7 @@ try {
   ok(`the page ran without throwing (${e.message})`, false);
 } finally {
   try { unlinkSync(scratch); } catch { /* already gone */ }
-  relay.kill();
+  stopRelay();
   rmSync(dir, { recursive: true, force: true });
 }
 

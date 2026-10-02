@@ -53,6 +53,8 @@ class El {
   click() { if (this.onclick) return this.onclick(); }
   play() { return Promise.resolve(); }
   addEventListener() {}
+  querySelectorAll() { return this.children.filter((c) => c instanceof El); }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
 }
 
 const elements = new Map();
