@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- Without this the browser asks for /favicon.ico on every load and logs a
+     404, which the browser check counts as a console error. -->
+<link rel="icon" href="kant-logo.svg" type="image/svg+xml">
 <title>Kant — a private room you share with one link</title>
 <style>
   :root { --ink: #0f0; --dim: #7a7; --hi: #0ff; --bg: #0a0a0a; --panel: #111; }
