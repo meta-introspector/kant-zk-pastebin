@@ -30,6 +30,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import crypto from "node:crypto";
 import { PassStore } from "./pass-store.mjs";
 import { pastePass, passOk, passRoom } from "../web/kant-pass.mjs";
@@ -358,9 +359,24 @@ function serveStatic(cfg, res, urlPath) {
   attempt(0);
 }
 
+/** The pass store: at the configured path when that is usable, else a
+ *  writable os.tmpdir() fallback (CI, sandboxes, unprivileged runs).
+ *  An explicit --pass-db or KANT_PASS_DB is never downgraded silently --
+ *  if the operator named a path, failing loudly is the honest answer. */
+function makePassStore(cfg) {
+  const opts = { peerLimit: cfg.peerLimit, peerWindowMs: cfg.peerWindowMs };
+  try {
+    return new PassStore(cfg.passDb, opts);
+  } catch (err) {
+    if (process.env.KANT_PASS_DB || String(args.get("pass-db") ?? "")) throw err;
+    const fallback = path.join(os.tmpdir(), "kant-zk-passes.sqlite");
+    console.error(`pass-db ${cfg.passDb} unusable (${err.code ?? err}), using ${fallback}`);
+    return new PassStore(fallback, opts);
+  }
+}
+
 export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLogger(cfg),
-  passes = new PassStore(cfg.passDb, {
-    peerLimit: cfg.peerLimit, peerWindowMs: cfg.peerWindowMs })) {
+  passes = makePassStore(cfg)) {
   const blocks = new Blocks(cfg);
   // The archive: every room line and every block pin, appended to one
   // ndjson file per room handle, so a reader can replay a room that the
