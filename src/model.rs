@@ -42,7 +42,7 @@ pub struct PasteIndex {
     pub root: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ThreadPost {
     pub id: String,
     pub title: String,
@@ -58,7 +58,7 @@ pub struct ThreadPost {
 // ─── Split Profiles ───────────────────────────────────────────────────
 
 /// How to split at chunk boundaries.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SplitUnit {
     /// Byte-based chunking.
@@ -69,7 +69,7 @@ pub enum SplitUnit {
     Token,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SplitMode {
     /// Break on newline boundaries
@@ -251,7 +251,7 @@ pub struct SplitProfileRequest {
 }
 
 /// An avatar, stored locally as a data URL and/or on IPFS for p2p sharing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Avatar {
     pub id: String,
     pub owner: String,
@@ -263,7 +263,7 @@ pub struct Avatar {
 }
 
 /// A user identity / profile
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Identity {
     pub id: String,
     pub name: String,

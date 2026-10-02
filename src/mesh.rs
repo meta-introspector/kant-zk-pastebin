@@ -261,6 +261,144 @@ impl MeshState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    /// A Storage in a scratch directory. Every test gets one: `Storage::new(None)`
+    /// falls back to `$HOME/.kant-pastebin`, which for the service user is
+    /// /var/empty, so a test that used it would be writing where the service
+    /// cannot and asserting against whatever was already there.
+    fn storage_in(dir: &TempDir) -> Arc<Storage> {
+        Arc::new(Storage::new(Some(dir.path().to_string_lossy().to_string())))
+    }
+
+    fn sample_identity() -> Identity {
+        Identity {
+            id: "ident-1".to_string(),
+            name: "testuser".to_string(),
+            display_name: Some("Test User".to_string()),
+            avatar_id: Some("avatar-1".to_string()),
+            bio: Some("A test bio".to_string()),
+            relays: vec!["http://relay.local".to_string()],
+            created: 0,
+            updated: 0,
+        }
+    }
+
+    fn sample_avatar() -> Avatar {
+        Avatar {
+            id: "avatar-1".to_string(),
+            owner: "ident-1".to_string(),
+            data_url: Some("data:image/png;base64,abcd".to_string()),
+            ipfs_cid: None,
+            mime_type: "image/png".to_string(),
+            size_bytes: 1234,
+            created: 0,
+        }
+    }
+
+    /// `MeshState`'s methods are async but the tests are not `#[tokio::test]`:
+    /// the crate has tokio in [dependencies] for the mesh's own use, and a
+    /// half-registered macro is a test that silently does not run.
+    fn run_async<F, R>(fut: F) -> R
+    where
+        F: std::future::Future<Output = R>,
+    {
+        tokio::runtime::Runtime::new().unwrap().block_on(fut)
+    }
+
+    /// The proxy methods on MeshState delegate to the wrapped Storage.
+    #[test]
+    fn test_mesh_state_proxy_methods() {
+        run_async(async {
+            let dir = TempDir::new().expect("temp dir");
+            let state = MeshState::new(MeshConfig::default(), storage_in(&dir));
+
+            let identity = sample_identity();
+            state.save_identity(&identity).await.expect("save identity");
+
+            let loaded = state.load_identity("ident-1").await;
+            assert_eq!(loaded, Some(identity.clone()));
+
+            let list = state.list_identities().await;
+            assert_eq!(list.len(), 1);
+            assert_eq!(list[0].id, "ident-1");
+
+            let avatar = sample_avatar();
+            state.save_avatar(&avatar).await.expect("save avatar");
+
+            let loaded_avatar = state.load_avatar("avatar-1").await;
+            assert_eq!(loaded_avatar, Some(avatar.clone()));
+
+            let avatars = state.list_avatars("ident-1").await;
+            assert_eq!(avatars.len(), 1);
+            assert_eq!(avatars[0].owner, "ident-1");
+        });
+    }
+
+    /// Two MeshState instances sharing one Storage see each other's writes.
+    #[test]
+    fn test_two_mesh_state_instances_shared_storage() {
+        run_async(async {
+            let dir = TempDir::new().expect("temp dir");
+            let storage = storage_in(&dir);
+            let state_a = MeshState::new(MeshConfig::default(), storage.clone());
+            let state_b = MeshState::new(MeshConfig::default(), storage);
+
+            let identity = sample_identity();
+            state_a.save_identity(&identity).await.expect("save via state_a");
+
+            let loaded = state_b.load_identity("ident-1").await;
+            assert_eq!(loaded, Some(identity));
+        });
+    }
+
+    /// Two MeshState instances with separate Storage stay isolated.
+    #[test]
+    fn test_two_mesh_state_instances_isolated_storage() {
+        run_async(async {
+            let dir_a = TempDir::new().expect("temp dir a");
+            let dir_b = TempDir::new().expect("temp dir b");
+            let state_a = MeshState::new(MeshConfig::default(), storage_in(&dir_a));
+            let state_b = MeshState::new(MeshConfig::default(), storage_in(&dir_b));
+
+            state_a.save_identity(&sample_identity()).await.expect("save a");
+            assert!(
+                state_b.load_identity("ident-1").await.is_none(),
+                "isolated storage must not see the other state's writes"
+            );
+        });
+    }
+
+    /// list_avatars filters by owner rather than returning everything.
+    #[test]
+    fn test_mesh_state_list_avatars_filter() {
+        run_async(async {
+            let dir = TempDir::new().expect("temp dir");
+            let state = MeshState::new(MeshConfig::default(), storage_in(&dir));
+
+            let owner1 = sample_avatar();
+            let mut owner2 = sample_avatar();
+            owner2.id = "avatar-2".to_string();
+            owner2.owner = "ident-2".to_string();
+
+            state.save_avatar(&owner1).await.expect("save avatar 1");
+            state.save_avatar(&owner2).await.expect("save avatar 2");
+
+            let for_owner1 = state.list_avatars("ident-1").await;
+            assert_eq!(for_owner1.len(), 1);
+            assert_eq!(for_owner1[0].id, "avatar-1");
+
+            let for_owner2 = state.list_avatars("ident-2").await;
+            assert_eq!(for_owner2.len(), 1);
+            assert_eq!(for_owner2[0].id, "avatar-2");
+        });
+    }
+}
+
 /// API handlers for mesh networking
 pub mod handlers {
     use super::*;
