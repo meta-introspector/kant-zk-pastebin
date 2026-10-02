@@ -8,8 +8,12 @@
 //!     `kubo add --cid-version=1 --raw-leaves` for ≤ one-chunk inputs;
 //!   * `cid_identity`   — the 36 identity bytes behind a CID string
 //!     (version + codec + multihash), for cross-checking peers;
-//!   * `chunk_plan`     — the ≤ 256 KiB chunking discipline: artifact size →
+//!   * `chunk_plan`     — the 256 KiB chunking discipline: artifact size →
 //!     the list of block sizes a peer must produce/expect;
+//!   * `unixfs_cid_of_bytes` / `unixfs_plan` — the CID an artifact is published
+//!     under, byte-identical to `ipfs add --cid-version=1 --raw-leaves` at any
+//!     size. Artifacts over one chunk get a UnixFS dag-pb root so zips and
+//!     documents over 256 KiB can be shared;
 //!   * `kzcid_record` / `parse_kzcid_record` — encode/decode the kzcid
 //!     room-record JSON, with the credential-field guard the fleet rooms
 //!     require (docs/SECRET-HAZARDS.md: rooms are public and append-only).
@@ -62,17 +66,36 @@ pub fn base32_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// CIDv1 codec for a raw leaf (`bafkrei…`).
+pub const CODEC_RAW: u8 = 0x55;
+/// CIDv1 codec for dag-pb (`bafybei…`).
+pub const CODEC_DAG_PB: u8 = 0x70;
+
+/// The 36 CID identity bytes `<0x01 codec> <0x12 0x20> <32-byte digest>`.
+/// A PBLink's `Hash` field carries exactly these bytes, so they are built
+/// separately from the base32 form.
+fn cid_identity_bytes(codec: u8, digest: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(4 + digest.len());
+    bytes.push(0x01); // CIDv1
+    bytes.push(codec);
+    bytes.push(0x12); // sha2-256
+    bytes.push(0x20); // 32-byte digest length
+    bytes.extend_from_slice(digest);
+    bytes
+}
+
+/// The same identity bytes as a base32 multibase string (`b` prefix).
+fn cid_string(codec: u8, digest: &[u8]) -> String {
+    format!("b{}", base32_no_pad(&cid_identity_bytes(codec, digest)))
+}
+
 /// CIDv1, codec `raw` (0x55), multihash sha2-256 (0x12, length 0x20):
 /// `<0x01 0x55> <0x12 0x20> <32-byte digest>`, multibase base32, `b` prefix.
+///
+/// This is the leaf CID. For an artifact of one chunk or less it is also the
+/// published CID, which is what [`unixfs_cid_of_bytes`] preserves.
 pub fn cid_of_bytes(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut cid_bytes = Vec::with_capacity(4 + digest.len());
-    cid_bytes.push(0x01); // CIDv1
-    cid_bytes.push(0x55); // raw codec
-    cid_bytes.push(0x12); // sha2-256
-    cid_bytes.push(0x20); // 32-byte digest length
-    cid_bytes.extend_from_slice(&digest);
-    format!("b{}", base32_no_pad(&cid_bytes))
+    cid_string(CODEC_RAW, &Sha256::digest(bytes))
 }
 
 /// The CID string as its 36 identity bytes (2 header + 2 multihash + 32
@@ -96,19 +119,161 @@ pub fn cid_identity(cid: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// The chunking discipline: `Ok(chunk_sizes)` when the artifact is within
-/// the single-block guarantee (one chunk = the whole artifact), `Err` with
-/// the overage when it is not.
+/// The chunking discipline: artifact size -> the block sizes a peer must
+/// produce or expect. At or under [`MAX_ARTIFACT_BYTES`] that is a single
+/// chunk; anything larger splits into full chunks plus a remainder.
 pub fn chunk_plan(size: usize) -> Result<Vec<usize>, String> {
     if size == 0 {
         return Err("empty artifact".into());
     }
-    if size > MAX_ARTIFACT_BYTES {
-        return Err(format!(
-            "artifact {size}B > {MAX_ARTIFACT_BYTES}B — chunk it or use kubo directly"
-        ));
+    let mut sizes = Vec::with_capacity(size.div_ceil(MAX_ARTIFACT_BYTES));
+    let mut left = size;
+    while left > 0 {
+        let take = left.min(MAX_ARTIFACT_BYTES);
+        sizes.push(take);
+        left -= take;
     }
-    Ok(vec![size])
+    Ok(sizes)
+}
+
+// ── UnixFS (dag-pb) ──────────────────────────────────────────────────────
+//
+// Encoding notes, all read off real `ipfs add --cid-version=1 --raw-leaves`
+// output rather than from the spec, because the spec permits encodings that
+// parse identically and hash differently:
+//
+//   * Links come first in the PBNode, then Data.
+//   * Every link carries a `Name`, but for a flat file it is present and
+//     *empty* (`0x12 0x00`). Omitting it is the obvious-looking choice and
+//     still parses as a valid PBNode, just with a different hash.
+//   * `Tsize` is that leaf's own size, not a running total.
+//   * `blocksizes` entries are written unpacked: a bare `field 4, varint` per
+//     chunk (`0x20 …`). protobuf also permits the packed form (`0x22 <len> …`,
+//     one blob holding every varint); both parse to the same message and hash
+//     differently, so encoding it the "other valid way" would silently produce
+//     the wrong CID.
+
+fn put_varint(out: &mut Vec<u8>, mut value: u64) {
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+fn put_len_field(out: &mut Vec<u8>, field: u32, body: &[u8]) {
+    put_varint(out, (field as u64) << 3 | 2);
+    put_varint(out, body.len() as u64);
+    out.extend_from_slice(body);
+}
+
+fn put_varint_field(out: &mut Vec<u8>, field: u32, value: u64) {
+    put_varint(out, (field as u64) << 3);
+    put_varint(out, value);
+}
+
+/// UnixFS `Data`: `Type = File (2)`, `filesize`, then one unpacked
+/// `blocksizes` varint per chunk.
+fn unixfs_data_message(filesize: u64, blocksizes: &[usize]) -> Vec<u8> {
+    let mut out = Vec::new();
+    put_varint_field(&mut out, 1, 2);
+    put_varint_field(&mut out, 3, filesize);
+    for size in blocksizes {
+        put_varint_field(&mut out, 4, *size as u64);
+    }
+    out
+}
+
+/// The dag-pb `PBNode` for a flat UnixFS file.
+fn unixfs_root_block(links: &[(Vec<u8>, u64)], filesize: u64, blocksizes: &[usize]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (hash, tsize) in links {
+        let mut link = Vec::new();
+        put_len_field(&mut link, 1, hash);
+        put_len_field(&mut link, 2, &[]); // Name: present but empty
+        put_varint_field(&mut link, 3, *tsize);
+        put_len_field(&mut out, 2, &link);
+    }
+    put_len_field(&mut out, 1, &unixfs_data_message(filesize, blocksizes));
+    out
+}
+
+/// The CID an artifact is published under, byte-identical to
+/// `ipfs add --cid-version=1 --raw-leaves`.
+///
+/// At or under one chunk kubo collapses the dag-pb away and the CID *is* the
+/// raw leaf, so small artifacts keep addressing exactly as they did before
+/// chunking existed and rooms already published under those CIDs stay valid.
+/// Larger artifacts get a UnixFS file node: a dag-pb root linking every raw
+/// leaf, which is what gives reassembly a manifest to verify against.
+pub fn unixfs_cid_of_bytes(bytes: &[u8]) -> Result<String, String> {
+    let sizes = chunk_plan(bytes.len())?;
+    if sizes.len() == 1 {
+        return Ok(cid_of_bytes(bytes));
+    }
+    let mut links = Vec::with_capacity(sizes.len());
+    for chunk in bytes.chunks(MAX_ARTIFACT_BYTES) {
+        let digest = Sha256::digest(chunk);
+        links.push((cid_identity_bytes(CODEC_RAW, &digest), chunk.len() as u64));
+    }
+    let root = unixfs_root_block(&links, bytes.len() as u64, &sizes);
+    Ok(cid_string(CODEC_DAG_PB, &Sha256::digest(&root)))
+}
+
+/// One exchangeable piece of a multi-chunk artifact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnixfsLeaf {
+    pub index: usize,
+    pub cid: String,
+    pub size: usize,
+    /// Byte offset of this leaf within the whole artifact.
+    pub offset: usize,
+}
+
+/// Everything the browser needs to move a multi-chunk artifact: the root CID
+/// to publish under, and the leaves to exchange, in order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnixfsPlan {
+    pub root: String,
+    pub size: usize,
+    pub chunk_size: usize,
+    pub chunked: bool,
+    pub leaves: Vec<UnixfsLeaf>,
+}
+
+impl UnixfsPlan {
+    /// Sum of the leaf sizes; must equal `self.size`.
+    pub fn leaves_total(&self) -> usize {
+        self.leaves.iter().map(|l| l.size).sum()
+    }
+}
+
+/// Build the transfer plan for an artifact.
+pub fn unixfs_plan(bytes: &[u8]) -> Result<UnixfsPlan, String> {
+    let sizes = chunk_plan(bytes.len())?;
+    let root = unixfs_cid_of_bytes(bytes)?;
+    let mut leaves = Vec::with_capacity(sizes.len());
+    let mut offset = 0usize;
+    for (index, (chunk, size)) in bytes.chunks(MAX_ARTIFACT_BYTES).zip(&sizes).enumerate() {
+        leaves.push(UnixfsLeaf {
+            index,
+            cid: cid_of_bytes(chunk),
+            size: *size,
+            offset,
+        });
+        offset += size;
+    }
+    Ok(UnixfsPlan {
+        root,
+        size: bytes.len(),
+        chunk_size: MAX_ARTIFACT_BYTES,
+        chunked: sizes.len() > 1,
+        leaves,
+    })
 }
 
 // ── kzcid room records ──────────────────────────────────────────────────
@@ -186,6 +351,21 @@ pub fn wasm_chunk_plan(size: usize) -> Result<Vec<u32>, JsValue> {
         .map_err(|e| JsValue::from_str(&e))
 }
 
+/// The CID to publish an artifact under — the raw leaf for anything within
+/// one chunk, otherwise the UnixFS dag-pb root.
+#[wasm_bindgen]
+pub fn wasm_unixfs_cid(bytes: &[u8]) -> Result<String, JsValue> {
+    unixfs_cid_of_bytes(bytes).map_err(|e| JsValue::from_str(&e))
+}
+
+/// The full transfer plan as JSON: root CID plus every leaf, in order, so the
+/// browser can exchange the pieces and reassemble.
+#[wasm_bindgen]
+pub fn wasm_unixfs_plan(bytes: &[u8]) -> Result<String, JsValue> {
+    let plan = unixfs_plan(bytes).map_err(|e| JsValue::from_str(&e))?;
+    serde_json::to_string(&plan).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 #[wasm_bindgen]
 pub fn wasm_kzcid_record(
     peer: &str,
@@ -251,10 +431,180 @@ mod tests {
 
     #[test]
     fn chunk_plan_bounds() {
-        assert!(chunk_plan(1).is_ok());
-        assert!(chunk_plan(MAX_ARTIFACT_BYTES).is_ok());
-        assert!(chunk_plan(MAX_ARTIFACT_BYTES + 1).is_err());
+        assert_eq!(chunk_plan(1).unwrap(), vec![1]);
+        assert_eq!(chunk_plan(MAX_ARTIFACT_BYTES).unwrap(), vec![MAX_ARTIFACT_BYTES]);
+        assert_eq!(
+            chunk_plan(MAX_ARTIFACT_BYTES + 1).unwrap(),
+            vec![MAX_ARTIFACT_BYTES, 1]
+        );
+        assert_eq!(
+            chunk_plan(MAX_ARTIFACT_BYTES * 3).unwrap(),
+            vec![MAX_ARTIFACT_BYTES; 3]
+        );
+        assert_eq!(
+            chunk_plan(MAX_ARTIFACT_BYTES * 2 + 7).unwrap(),
+            vec![MAX_ARTIFACT_BYTES, MAX_ARTIFACT_BYTES, 7]
+        );
         assert!(chunk_plan(0).is_err());
+    }
+
+    /// Every plan's parts must add back up to the whole artifact, or a
+    /// reassembled file would be silently truncated.
+    #[test]
+    fn chunk_plan_always_sums_to_size() {
+        for size in [1usize, 255, 256, 257, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_BYTES + 1, 700_000] {
+            let plan = chunk_plan(size).expect("non-empty");
+            assert_eq!(plan.iter().sum::<usize>(), size, "size {size}");
+            assert!(plan.iter().all(|&n| n > 0), "no empty chunk for {size}");
+        }
+    }
+
+    /// Deterministic probe bytes: `byte[i] = i % 251`, so the same input
+    /// always yields the same CID and the vectors below stay meaningful.
+    fn probe(n: usize) -> Vec<u8> {
+        (0..n).map(|i| (i % 251) as u8).collect()
+    }
+
+    /// CIDs captured from real `ipfs add --cid-version=1 --raw-leaves` on
+    /// kubo 0.40.1, over `probe(n)`. If any of these change, the dag-pb
+    /// encoding has drifted from what IPFS actually produces.
+    #[test]
+    fn unixfs_cids_match_kubo() {
+        // One chunk: kubo collapses the dag-pb, so this is the raw leaf CID.
+        assert_eq!(
+            unixfs_cid_of_bytes(&probe(262_144)).unwrap(),
+            "bafkreibruh455iawsviqslif5c7uurdcfdemh22mtnytyzvnzn75kpejxy"
+        );
+        // First size that needs a root: two leaves, 262144 + 1.
+        assert_eq!(
+            unixfs_cid_of_bytes(&probe(262_145)).unwrap(),
+            "bafybeiexg2oqkfnj56l7fcmawswqbijt5shq4b5rg6a546uwpkqqzwjioi"
+        );
+        // Two leaves with a real remainder.
+        assert_eq!(
+            unixfs_cid_of_bytes(&probe(300_000)).unwrap(),
+            "bafybeih7gz5kvvg2zafb7vue6izhy6c4tglvwpi3rgunwdag2fidn2y6eq"
+        );
+        // Three leaves.
+        assert_eq!(
+            unixfs_cid_of_bytes(&probe(700_000)).unwrap(),
+            "bafybeiat65mgaomregcezwr6uzau6iumvujm3xlrtud36wlbpivuexuu24"
+        );
+    }
+
+    /// Backwards compatibility: rooms already published under a raw single
+    /// block CID must keep resolving to the same CID.
+    #[test]
+    fn small_artifacts_keep_their_raw_cid() {
+        for n in [1usize, 2000, 100_000, MAX_ARTIFACT_BYTES] {
+            assert_eq!(
+                unixfs_cid_of_bytes(&probe(n)).unwrap(),
+                cid_of_bytes(&probe(n)),
+                "size {n} must not gain a dag-pb wrapper"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_artifact_is_rejected() {
+        assert!(unixfs_cid_of_bytes(&[]).is_err());
+        assert!(unixfs_plan(&[]).is_err());
+    }
+
+    #[test]
+    fn plan_covers_every_byte_in_order() {
+        let bytes = probe(700_000);
+        let plan = unixfs_plan(&bytes).unwrap();
+
+        assert!(plan.chunked);
+        assert_eq!(plan.size, bytes.len());
+        assert_eq!(plan.root, unixfs_cid_of_bytes(&bytes).unwrap());
+        assert_eq!(plan.leaves.len(), 3);
+        assert_eq!(plan.leaves_total(), bytes.len());
+
+        // Leaves are in order, contiguous, and each CID addresses its own slice.
+        for (i, leaf) in plan.leaves.iter().enumerate() {
+            assert_eq!(leaf.index, i);
+            let end = leaf.offset + leaf.size;
+            assert!(end <= bytes.len());
+            assert_eq!(leaf.cid, cid_of_bytes(&bytes[leaf.offset..end]));
+        }
+        assert_eq!(plan.leaves[0].offset, 0);
+        assert_eq!(plan.leaves[1].offset, MAX_ARTIFACT_BYTES);
+        assert_eq!(
+            plan.leaves[2].offset + plan.leaves[2].size,
+            bytes.len(),
+            "leaves must reach the end with no gap"
+        );
+    }
+
+    #[test]
+    fn small_plan_is_a_single_leaf() {
+        let plan = unixfs_plan(&probe(2000)).unwrap();
+        assert!(!plan.chunked);
+        assert_eq!(plan.leaves.len(), 1);
+        assert_eq!(plan.leaves_total(), 2000);
+        assert_eq!(plan.leaves[0].cid, plan.root);
+    }
+
+    /// The dag-pb root for a two-leaf artifact, pinned against the bytes kubo
+    /// emits. Locks the field order and the per-entry blocksize framing, which
+    /// are the two places a "valid but different" encoding could creep in.
+    #[test]
+    fn root_block_matches_kubo_framing() {
+        let bytes = probe(262_145);
+        let leaves: Vec<(Vec<u8>, u64)> = bytes
+            .chunks(MAX_ARTIFACT_BYTES)
+            .map(|c| {
+                (
+                    cid_identity_bytes(CODEC_RAW, &Sha256::digest(c)),
+                    c.len() as u64,
+                )
+            })
+            .collect();
+        let root = unixfs_root_block(&leaves, bytes.len() as u64, &chunk_plan(bytes.len()).unwrap());
+
+        // Links (field 2) precede Data (field 1): the block opens with 0x12.
+        assert_eq!(root[0], 0x12, "Links must come before Data");
+        // Each link is 44 bytes: 36-byte identity + an empty Name (2) +
+        // a one-byte Tsize varint + the field's own tag/length (4). A link
+        // without the empty Name is 42 and yields a different CID.
+        assert_eq!(&root[..2], &[0x12, 0x2c], "link length 44");
+        let name_at = 2 + 2 + 36; // link tag+len, then Hash tag+len
+        assert_eq!(&root[name_at..name_at + 2], &[0x12, 0x00], "empty Name");
+        // Blocksizes are unpacked varints: two bare `0x20` entries, not one
+        // packed `0x22` blob. The Data message is therefore 12 bytes for
+        // [262144, 1]; the packed form would be 11 and hash differently.
+        let data = unixfs_data_message(262_145, &[262_144, 1]);
+        assert_eq!(data.len(), 12, "unpacked blocksize framing");
+        assert_eq!(&data[..2], &[0x08, 0x02], "Type = File");
+        assert_eq!(&data[2..6], &[0x18, 0x81, 0x80, 0x10], "filesize = 262145");
+        assert_eq!(&data[6..10], &[0x20, 0x80, 0x80, 0x10], "blocksize 262144");
+        assert_eq!(&data[10..12], &[0x20, 0x01], "blocksize 1");
+        assert!(root.ends_with(&data));
+    }
+
+    #[test]
+    fn varint_roundtrips_through_the_wire_format() {
+        for v in [0u64, 1, 127, 128, 300, 262_144, 262_145, 700_000, u32::MAX as u64] {
+            let mut out = Vec::new();
+            put_varint(&mut out, v);
+            // Decode it back by hand: continuation bit until the top bit is clear.
+            let (mut value, mut shift, mut bytes) = (0u64, 0u32, out.as_slice());
+            let mut consumed = 0;
+            loop {
+                let byte = bytes[0];
+                bytes = &bytes[1..];
+                consumed += 1;
+                value |= ((byte & 0x7f) as u64) << shift;
+                if byte & 0x80 == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            assert_eq!(value, v, "varint {v}");
+            assert_eq!(consumed, out.len());
+        }
     }
 
     #[test]
