@@ -199,6 +199,12 @@ Against `https://solana.solfunmeme.com/p2p-relay`:
 | `web/test.mjs`, codec, net, file, crosscheck | all green |
 
 Pre-existing failures, unchanged by this branch and confirmed on a clean tree:
-`web/page-test.mjs` 73/75 (two diagnostics-verdict failures) and
-`scripts/cli-page-test.mjs`, which looks for `index.html` under `scripts/`
-rather than `web/`.
+
+* `web/page-test.mjs` 73/75 — two diagnostics-verdict failures
+* `web/cli-page-test.mjs` 8/9 — its copy of the test DOM shim has no
+  `querySelectorAll`, which `web/page-test.mjs` had added. The shim is
+  copy-pasted into each test, and `1c921a46` fixed one copy of it
+* `web/diagpage-test.mjs` 33/34
+* `web/wasm-test.mjs` — needs `lake exe emitwasm dist` first
+* `web/carddebug-test.mjs` — spawns `scripts/kant-debug.mjs`, which is not in
+  the tree
