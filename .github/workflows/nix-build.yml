@@ -3,8 +3,11 @@ name: Nix Build
 on:
   push:
     branches: [ main, master ]
+  # Any branch, not just main: a flake that only ever gets evaluated on main
+  # cannot be reviewed. This branch's whole point was a flake fix, and the
+  # check could not run on it — `pull_request: branches: [main, master]` meant
+  # a PR against feature/big-merge was never built at all.
   pull_request:
-    branches: [ main, master ]
 
 jobs:
   build:
