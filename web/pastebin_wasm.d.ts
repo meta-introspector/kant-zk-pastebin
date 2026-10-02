@@ -11,6 +11,18 @@ export function wasm_kzcid_record(peer: string, name: string, cid: string, size:
 
 export function wasm_parse_kzcid_record(line: string): any;
 
+/**
+ * The CID to publish an artifact under — the raw leaf for anything within
+ * one chunk, otherwise the UnixFS dag-pb root.
+ */
+export function wasm_unixfs_cid(bytes: Uint8Array): string;
+
+/**
+ * The full transfer plan as JSON: root CID plus every leaf, in order, so the
+ * browser can exchange the pieces and reassemble.
+ */
+export function wasm_unixfs_plan(bytes: Uint8Array): string;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -20,6 +32,8 @@ export interface InitOutput {
     readonly wasm_cid_of_bytes: (a: number, b: number) => [number, number];
     readonly wasm_kzcid_record: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number, number];
     readonly wasm_parse_kzcid_record: (a: number, b: number) => [number, number, number];
+    readonly wasm_unixfs_cid: (a: number, b: number) => [number, number, number, number];
+    readonly wasm_unixfs_plan: (a: number, b: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
