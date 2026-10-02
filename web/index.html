@@ -903,7 +903,7 @@ $("btn-diagpage").onclick = () => {
   const loaded = await S.loadConfig();
   cfg = loaded.config;
   LOG.info("config", loaded.ok === false ? "kant.config could not be read" : "kant.config read",
-    loaded.ok === false ? "using the defaults" : cfg.origin);
+    loaded.ok === false ? "using the defaults" : S.originOf(cfg));
   relayBase = await S.loadRelay();
   // A browser that has already left the guided tour does not get it again.
   try {
