@@ -18,6 +18,7 @@ import {
   shareUrl, parseShareUrl, CHANNEL_CAPACITY,
 } from "./kantzk.mjs";
 import { DiagLog, ref as diagRef, diagnose, effectiveRelay, clientOf } from "./kant-diag.mjs";
+import { parseManifest, printManifest } from "./kant-file.mjs";
 
 /** A log that keeps nothing: used when a caller supplies none.  Every
  *  transport below writes to `log` instead of swallowing its errors —
@@ -687,7 +688,7 @@ export class KantNode {
 
   /** Take a line from any transport. */
   ingest(line) {
-    const before = this.messages.length + this.roster.length;
+    const before = this.messages.length + this.roster.length + (this.files?.length ?? 0);
     if (typeof line !== "string" || line === "") {
       this.log.warn("ingest", "an empty line arrived", "");
       return { message: null, announce: null, signal: null };
@@ -698,19 +699,28 @@ export class KantNode {
     if (a) this.roster = rosterInsert(this.roster, a);
     const sig = parseSignal(line);
     if (sig && this.mesh && sig.room === this.room) this.mesh.onSignal(sig);
+    // A dropped file arrives as an ordinary room line: a kzfile manifest
+    // naming the file, its size, and the digests its chunks are pinned
+    // under.  It certifies itself exactly like a chat line, so a forged
+    // or mangled announcement is refused before a single chunk is fetched.
+    const file = parseManifest(line);
+    if (file && file.room === this.room) {
+      this.files = this.files ?? [];
+      if (!this.files.some((f) => printManifest(f) === line)) this.files.push(file);
+    }
     if (m && m.room !== this.room) {
       this.log.warn("ingest", "a line for another room was ignored", diagRef(m.room));
     }
-    if (!m && !a && !sig) {
+    if (!m && !a && !sig && !file) {
       this.log.warn("ingest", "a line was refused: it does not certify itself",
         `${line.slice(0, 24)}…`);
     }
-    if (this.messages.length + this.roster.length !== before) {
+    if (this.messages.length + this.roster.length + (this.files?.length ?? 0) !== before) {
       this.log.info("ingest", "a line was accepted",
-        m ? "chat" : a ? `peer ${a.peer}` : "signal");
+        m ? "chat" : a ? `peer ${a.peer}` : sig ? "signal" : "file");
       this.onChange();
     }
-    return { message: m, announce: a, signal: sig };
+    return { message: m, announce: a, signal: sig, file };
   }
 
   /** The chat as displayed. */
