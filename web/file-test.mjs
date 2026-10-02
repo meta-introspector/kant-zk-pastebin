@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import {
   CHUNK_SIZE, TAG_FILE, cidOf, encryptFile, decryptFile,
   manifest, manifestCore, manifestWitness, ofManifest, toManifest,
-  printManifest, parseManifest,
+  printManifest, parseManifest, manifestChunks,
 } from "./kant-file.mjs";
 import { roomOf, KantNode, parseMsg } from "./kant-net.mjs";
 import {
@@ -226,8 +226,9 @@ if (!ipfsUp) {
   const data = Uint8Array.from(utf8("the file the pastebin shared with the chat"));
 
   const enc = await encryptFile(secretB, name, mime, data);
-  const manifestB = manifest(room, "relay-a", 1, name, mime, enc.size, enc.nonce, enc.cids);
 
+  // Pin first: the manifest cannot name an IPFS location that does not
+  // exist yet, and it must commit to the names it actually published.
   let cids = [];
   await checkAsync("ipfs: pinned every chunk", async () => {
     const r = await putChunks(enc.chunks, { rpcBase: LOOP_RPC });
@@ -236,7 +237,9 @@ if (!ipfsUp) {
     assert.ok(r.cids.every((c) => typeof c === "string" && c.length > 0), "CIDs are strings");
     cids = r.cids;
   });
-  assert.equal(cids.length, manifestB.cids.length, "every chunk got a CID");
+  assert.equal(cids.length, enc.cids.length, "every chunk got a CID");
+
+  const manifestB = manifest(room, "relay-a", 1, name, mime, enc.size, enc.nonce, enc.cids, cids);
 
   await checkAsync("ipfs: fetched chunks pass the kant witness check", async () => {
     assert.ok(cids.length > 0, "there is at least one chunk to fetch");
@@ -249,7 +252,7 @@ if (!ipfsUp) {
   });
 
   await checkAsync("ipfs: file decrypts to the original bytes", async () => {
-    const out = await decryptFile(secretB, manifestB, ipfsFetcher(ipfsMap(manifestB.cids, cids), { gwBase: LOOP_GW }));
+    const out = await decryptFile(secretB, manifestB, ipfsFetcher(manifestB, { gwBase: LOOP_GW }));
     assert.deepEqual(Array.from(out), Array.from(data), "round-trips exactly");
   });
 
@@ -257,7 +260,7 @@ if (!ipfsUp) {
     const wrong = Array.from(crypto.getRandomValues(new Uint8Array(32)));
     let threw = false;
     try {
-      await decryptFile(wrong, manifestB, ipfsFetcher(ipfsMap(manifestB.cids, cids), { gwBase: LOOP_GW }));
+      await decryptFile(wrong, manifestB, ipfsFetcher(manifestB, { gwBase: LOOP_GW }));
     } catch { threw = true; }
     assert.equal(threw, true, "ciphertext does not decrypt under another room secret");
   });
@@ -267,6 +270,35 @@ if (!ipfsUp) {
     assert.equal(pairs.length, manifestB.cids.length, "one pair per chunk");
     assert.notEqual(pairs[0].witness, pairs[0].ipfs, "not the same string");
     assert.throws(() => ipfsCidsFor(manifestB.cids, cids.slice(1)), /mismatch/);
+  });
+
+  check("ipfs: the manifest line round-trips with both names", () => {
+    const back = parseManifest(printManifest(manifestB));
+    assert.ok(back, "an ipfs-carrying manifest still certifies itself");
+    assert.equal(back.cids.length, manifestB.cids.length, "witnesses survive");
+    assert.equal(back.ipfs.length, manifestB.ipfs.length, "ipfs names survive");
+    const chunks = manifestChunks(back);
+    assert.equal(chunks.length, manifestB.cids.length, "one entry per chunk");
+    assert.notEqual(chunks[0].witness, chunks[0].ipfs, "still two distinct names");
+  });
+
+  check("ipfs: a relay-only manifest keeps its old witness", () => {
+    const relayOnly = manifest(room, "relay-a", 1, name, mime, enc.size, enc.nonce, enc.cids);
+    assert.equal(relayOnly.ipfs.length, 0, "no ipfs names");
+    assert.equal(manifestWitness(relayOnly),
+      manifestWitness({ ...relayOnly, ipfs: [] }), "hashes identically either way");
+    const back = parseManifest(printManifest(relayOnly));
+    assert.ok(back, "and still verifies");
+    assert.equal(back.ipfs.length, 0, "with no ipfs names");
+  });
+
+  check("ipfs: a manifest whose ipfs names are edited on the wire is refused", () => {
+    // printManifest always re-signs whatever it is handed, so a forgery has
+    // to be made on the encoded line: rewrite the location, keep the witness.
+    const e = ofManifest(manifestB);
+    assert.equal(e.fields.length, 10, "an ipfs-carrying line has ten fields");
+    e.fields[8] = utf8(`bafy${"0".repeat(52)}`);
+    assert.equal(toManifest(e), null, "the ipfs names are covered by the witness");
   });
 
   await checkAsync("ipfs: a chunk with no ipfs location fails loudly", async () => {

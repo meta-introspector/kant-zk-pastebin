@@ -97,16 +97,21 @@ export async function decryptFile(secret, manifest, fetchChunk) {
 
 // ---------------------------------------------------------- the manifest
 
-export const manifest = (room, sender, seq, name, mime, size, nonce, cids) =>
-  ({ room, sender, seq, name, mime, size, nonce, cids });
+export const manifest = (room, sender, seq, name, mime, size, nonce, cids, ipfs = []) =>
+  ({ room, sender, seq, name, mime, size, nonce, cids, ipfs });
 
-/** The bytes a manifest commits to — same shape as `Msg.core`. */
+/** The bytes a manifest commits to — same shape as `Msg.core`.
+ *
+ *  The IPFS names are committed to only when the manifest carries them,
+ *  so a relay-only manifest hashes to exactly the bytes it always did
+ *  and an older line still verifies against its own witness. */
 export const manifestCore = (f) => [
   ...asciiBytes(f.room), 0, ...asciiBytes(f.sender), 0,
   ...natToBytesBE(f.seq), 0,
   ...utf8(f.name), 0, ...utf8(f.mime), 0,
   ...natToBytesBE(f.size), 0,
   ...f.nonce, 0, ...utf8(f.cids.join(" ")),
+  ...(f.ipfs && f.ipfs.length ? [0, ...utf8(f.ipfs.join(" "))] : []),
 ];
 
 export const manifestWitness = (f) => witness(manifestCore(f));
@@ -117,23 +122,35 @@ export const ofManifest = (f) => ({
     asciiBytes(f.room), asciiBytes(f.sender), natToBytesBE(f.seq),
     utf8(f.name), utf8(f.mime), natToBytesBE(f.size),
     f.nonce.slice(), utf8(f.cids.join(" ")),
+    ...(f.ipfs && f.ipfs.length ? [utf8(f.ipfs.join(" "))] : []),
     asciiBytes(manifestWitness(f)),
   ],
 });
 
-/** Read a manifest back, refusing anything whose witness does not match. */
+/** Read a manifest back, refusing anything whose witness does not match.
+ *  Both the 9-field (relay-only) and 10-field (IPFS) shapes are accepted. */
 export function toManifest(e) {
-  if (!e || !eqBytes(e.tag, TAG_FILE) || e.fields.length !== 9) return null;
-  const [r, s, q, n, mi, sz, nc, cs, w] = e.fields;
+  if (!e || !eqBytes(e.tag, TAG_FILE)) return null;
+  if (e.fields.length !== 9 && e.fields.length !== 10) return null;
+  const [r, s, q, n, mi, sz, nc, cs, ...rest] = e.fields;
+  const ipfs = e.fields.length === 10 ? fromUtf8(rest[0]).split(" ").filter(Boolean) : [];
+  const w = rest[rest.length - 1];
   const f = {
     room: asciiChars(r), sender: asciiChars(s),
     seq: Number(bytesBEToNat(q)),
     name: fromUtf8(n), mime: fromUtf8(mi),
     size: Number(bytesBEToNat(sz)),
     nonce: nc.slice(), cids: fromUtf8(cs).split(" ").filter(Boolean),
+    ipfs,
   };
+  if (f.cids.length !== f.ipfs.length && f.ipfs.length !== 0) return null;
   return manifestWitness(f) === asciiChars(w) ? f : null;
 }
+
+/** Each chunk as { witness, ipfs } — witness is what the signature covers,
+ *  ipfs is where the bytes can be fetched. They are independent names. */
+export const manifestChunks = (f) =>
+  f.cids.map((witness, i) => ({ witness, ipfs: f.ipfs?.[i] ?? null }));
 
 /** A manifest as one self-certifying room line. */
 export const printManifest = (f) => envelopeEncode(ofManifest(f));

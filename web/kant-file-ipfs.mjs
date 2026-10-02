@@ -20,7 +20,7 @@
 // be computed from it.  IPFS CIDs therefore have to be carried explicitly
 // alongside the witness list; see `ipfsCidsFor`.
 
-import { cidOf } from "./kant-file.mjs";
+import { cidOf, manifestChunks } from "./kant-file.mjs";
 import { ipfsAdd, ipfsCat, GATEWAY, KUBO_RPC } from "./kant-ipfs.mjs";
 
 /** Pin one encrypted chunk; returns its CID, or null if the daemon refused. */
@@ -62,11 +62,8 @@ export async function getChunk(cid, { gwBase = GATEWAY, timeoutMs = 8000 } = {})
  * loudly rather than silently decrypting to zeros.
  */
 export const ipfsFetcher = (pairs, opts = {}) => {
-  const lookup = (witness) => {
-    if (pairs instanceof Map) return pairs.get(witness);
-    if (Array.isArray(pairs)) return pairs.find((p) => p.witness === witness)?.ipfs;
-    return undefined;
-  };
+  const map = pairs instanceof Map ? pairs : ipfsMap(pairs);
+  const lookup = (witness) => map.get(witness) ?? undefined;
   return async (witness) => {
     const cid = lookup(witness);
     if (cid === undefined) {
@@ -92,9 +89,16 @@ export const ipfsCidsFor = (witnessCids, ipfsCids) => {
   return witnessCids.map((witness, i) => ({ witness, ipfs: ipfsCids[i] }));
 };
 
-/** The witness -> IPFS CID lookup `ipfsFetcher` wants, from a CID list. */
-export const ipfsMap = (witnessCids, ipfsCids) =>
-  new Map(ipfsCidsFor(witnessCids, ipfsCids).map((p) => [p.witness, p.ipfs]));
+/** The witness -> IPFS CID lookup `ipfsFetcher` wants. Takes either a
+ *  manifest (as produced by `kant-file.mjs`) or two parallel CID lists. */
+export const ipfsMap = (manifestOrWitnessCids, ipfsCids) => {
+  const m = manifestOrWitnessCids;
+  if (m && !Array.isArray(m) && Array.isArray(m.cids)) {
+    return new Map(manifestChunks(m).map((c) => [c.witness, c.ipfs]));
+  }
+  const pairs = ipfsCidsFor(m, ipfsCids ?? []);
+  return new Map(pairs.map((p) => [p.witness, p.ipfs]));
+};
 
 /** Sanity check a fetched chunk against the witness that named it. */
 export const verifyChunk = (witness, bytes) => cidOf(bytes) === witness;
