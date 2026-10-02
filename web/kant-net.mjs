@@ -259,6 +259,158 @@ export function transcript(ms) {
   return out.sort((a, b) => (leMsg(a, b) ? (leMsg(b, a) ? 0 : -1) : 1));
 }
 
+// ------------------------------------------------- time-stamped chat lines
+
+/** A chat line that also carries *when* its sender wrote it.
+ *
+ *  `kzchat` orders by a per-sender counter and nothing else, which is the
+ *  right total order for agreeing on what was said but useless for reading:
+ *  a peer that joins late, or reconnects after six hours, has no idea which
+ *  of yesterday's messages came first. `kzat` adds a sender-declared
+ *  millisecond timestamp to the committed bytes, so the time is covered by
+ *  the same witness as everything else.
+ *
+ *  Deliberately a *new tag* rather than a sixth field on `kzchat`: an old
+ *  peer parses `kzchat` strictly (five fields, exact tag) and would drop a
+ *  six-field line, whereas it ignores `kzat` entirely — and this file has to
+ *  keep working with peers that predate the file drop.
+ *
+ *  The clock is the sender's, not the relay's. The relay stores lines it
+ *  never parses, so a server timestamp would mean trusting one relay over
+ *  another; two peers with skewed clocks may disagree about order, which is
+ *  why `transcriptAt` sorts by time but breaks ties on `leMsg` and never
+ *  *rejects* a line for having a strange time.
+ */
+export const TAG_AT = asciiBytes("kzat");
+
+/** The wall clock, in milliseconds. Isolated so a test can pin it. */
+export const now = () => Date.now();
+
+export const timed = (room, sender, seq, body, at) => ({ room, sender, seq, body, at });
+
+/** The bytes a timed message commits to — the tag, then `Msg.core`, then
+ *  its `at`.
+ *
+ *  The tag is in here, unlike in `msgCore`/`manifestCore` (which leave it
+ *  out and so let a `kzchat` line be re-tagged as a `kzfile` one).  Nothing
+ *  depends on that looseness for `kzat`: it is a new tag, so binding it
+ *  breaks no stored line, and it means a timestamp cannot be attached to an
+ *  existing untimed message after the fact — re-tagging now invalidates the
+ *  witness instead of quietly inventing a time the sender never claimed. */
+export const timedCore = (m) => [...TAG_AT, 0, ...msgCore(m), 0, ...natToBytesBE(m.at)];
+
+export const timedWitness = (m) => witness(timedCore(m));
+
+export const ofTimed = (m) => ({
+  tag: TAG_AT,
+  fields: [
+    asciiBytes(m.room), asciiBytes(m.sender), natToBytesBE(m.seq),
+    Array.from(m.body), natToBytesBE(m.at), asciiBytes(timedWitness(m)),
+  ],
+});
+
+/** Read a timed message back, refusing anything whose witness does not match. */
+export function toTimed(e) {
+  if (!e || !eqBytes(e.tag, TAG_AT) || e.fields.length !== 6) return null;
+  const [r, s, q, b, t, w] = e.fields;
+  const m = {
+    room: asciiChars(r), sender: asciiChars(s),
+    seq: Number(bytesBEToNat(q)), body: b,
+    at: Number(bytesBEToNat(t)),
+  };
+  return timedWitness(m) === asciiChars(w) ? m : null;
+}
+
+export const printTimed = (m) => envelopeEncode(ofTimed(m));
+export const parseTimed = (s) => toTimed(envelopeDecode(s));
+
+/** Write a timestamped message from plain text, at `at` (default: now). */
+export const sayTextAt = (room, sender, seq, text, at = now()) =>
+  timed(room, sender, seq, utf8(text), at);
+
+const sameTimed = (a, b) =>
+  a.room === b.room && a.sender === b.sender && a.seq === b.seq &&
+  a.at === b.at && a.body.length === b.body.length &&
+  a.body.every((x, i) => x === b.body[i]);
+
+/** Take one timed line, dropping anything that does not certify itself. */
+export function acceptTimed(ms, line) {
+  const m = parseTimed(line);
+  if (!m) return ms;
+  return ms.some((x) => sameTimed(x, m)) ? ms : [...ms, m];
+}
+
+export const receiveTimed = (ms, lines) => lines.reduce(acceptTimed, ms);
+
+/** Order by declared time, breaking ties on `leMsg` so two peers with the
+ *  same clock still agree.
+ *
+ *  A line with no declared time (`at === null`, an untimed `kzchat` line
+ *  from a peer that predates `kzat`) sorts *after* every timed one and keeps
+ *  `leMsg` order among itself.  It is not given a synthetic time: a counter
+ *  is not a clock, and `at = seq` would file a message under 1970-01-01,
+ *  which is a date nobody said.  Ordering it after is a choice, stated here
+ *  because it is one — the alternative, dropping it, loses chat outright.
+ *
+ *  A line with a time in the future or the distant past is kept and ordered
+ *  as given: a peer cannot prove a sender's clock is wrong, so it has no
+ *  business discarding the message.  Sender clocks do jump backwards, so the
+ *  sort is stable on input order within equal times rather than trying to
+ *  repair the sender's clock. */
+export function transcriptAt(ms) {
+  const out = [];
+  for (const m of ms) if (!out.some((x) => sameTimed(x, m))) out.push(m);
+  return out
+    .map((m, i) => ({ m, i }))
+    .sort((x, y) => {
+      const xt = x.m.at, yt = y.m.at;
+      if (xt === null && yt === null) return leMsg(x.m, y.m) ? (leMsg(y.m, x.m) ? x.i - y.i : -1) : 1;
+      if (xt === null) return 1;
+      if (yt === null) return -1;
+      if (xt !== yt) return xt < yt ? -1 : 1;
+      return leMsg(x.m, y.m) ? (leMsg(y.m, x.m) ? x.i - y.i : -1) : 1;
+    })
+    .map((x) => x.m);
+}
+
+/** A day's worth of a transcript, for the time-stored view. */
+export const DAY_MS = 86400000;
+
+/** The label used for lines that carry no declared time, so they are never
+ *  filed under a day nobody claimed. */
+export const UNTITLED = "untitled";
+
+/** The transcript grouped into days, newest first, each day in time order.
+ *  A day is named in UTC: two peers on either side of a date line must land
+ *  in the same bucket, and a local-midnight boundary would not.
+ *
+ *  Untimed lines get their own bucket named `UNTITLED`, placed last — they
+ *  belong to no day, and inventing one would be a lie in the only place the
+ *  view claims to be a record of when things happened. */
+export function byDay(ms) {
+  const days = new Map();
+  let untitled = null;
+  for (const m of transcriptAt(ms)) {
+    if (m.at === null) {
+      if (!untitled) untitled = [];
+      untitled.push(m);
+      continue;
+    }
+    const d = new Date(m.at).toISOString().slice(0, 10);
+    if (!days.has(d)) days.set(d, []);
+    days.get(d).push(m);
+  }
+  const out = [...days.entries()].map(([day, messages]) => ({ day, messages }));
+  if (untitled) out.push({ day: UNTITLED, messages: untitled, untimed: true });
+  return out.sort((a, b) => {
+    // Untimed last, and oldest day first within the timed ones reversed:
+    // newest first, except the bucket that is not a day at all.
+    if (a.untimed) return 1;
+    if (b.untimed) return -1;
+    return a.day < b.day ? 1 : -1;
+  });
+}
+
 // ------------------------------------------------- signalling for WebRTC
 
 // Direct browser-to-browser links need one round of introductions.  The
@@ -610,6 +762,9 @@ export class KantNode {
     this.seq = 0;
     this.roster = [];
     this.messages = [];
+    // Chat that carries a sender-declared time (`kzat`), kept apart from
+    // `messages` so an old peer still shows the room.
+    this.timed = [];
     this.onChange = onChange;
     this.fetchImpl = fetchImpl;
     this.reach = reach;
@@ -688,13 +843,20 @@ export class KantNode {
 
   /** Take a line from any transport. */
   ingest(line) {
-    const before = this.messages.length + this.roster.length + (this.files?.length ?? 0);
+    const before = this.messages.length + this.timed.length +
+      this.roster.length + (this.files?.length ?? 0);
     if (typeof line !== "string" || line === "") {
       this.log.warn("ingest", "an empty line arrived", "");
-      return { message: null, announce: null, signal: null };
+      return { message: null, timed: null, announce: null, signal: null, file: null };
     }
     const m = parseMsg(line);
     if (m && m.room === this.room) this.messages = accept(this.messages, line);
+    // A `kzat` line is chat that also carries the sender's clock. It lives
+    // in its own list rather than in `messages` so that a peer which
+    // predates it still shows a room with no times instead of no room at
+    // all; `viewAt` merges the two for display.
+    const t = parseTimed(line);
+    if (t && t.room === this.room) this.timed = acceptTimed(this.timed, line);
     const a = parseAnnounce(line);
     if (a) this.roster = rosterInsert(this.roster, a);
     const sig = parseSignal(line);
@@ -711,20 +873,70 @@ export class KantNode {
     if (m && m.room !== this.room) {
       this.log.warn("ingest", "a line for another room was ignored", diagRef(m.room));
     }
-    if (!m && !a && !sig && !file) {
+    if (!m && !t && !a && !sig && !file) {
       this.log.warn("ingest", "a line was refused: it does not certify itself",
         `${line.slice(0, 24)}…`);
     }
-    if (this.messages.length + this.roster.length + (this.files?.length ?? 0) !== before) {
+    if (this.messages.length + this.timed.length + this.roster.length +
+        (this.files?.length ?? 0) !== before) {
       this.log.info("ingest", "a line was accepted",
-        m ? "chat" : a ? `peer ${a.peer}` : sig ? "signal" : "file");
+        m ? "chat" : t ? "chat (timed)" : a ? `peer ${a.peer}` : sig ? "signal" : "file");
       this.onChange();
     }
-    return { message: m, announce: a, signal: sig, file };
+    return { message: m, timed: t, announce: a, signal: sig, file };
   }
 
   /** The chat as displayed. */
   view() { return transcript(this.messages); }
+
+  /** Everything said, timed and untimed together, in declared time order.
+   *
+   *  An untimed `kzchat` line has no clock of its own, so it carries
+   *  `at: null` and sorts after the timed ones rather than being dropped:
+   *  dropping it would silently hide every message from a peer that predates
+   *  `kzat`.  `viewByDay` puts them in their own untitled bucket, so the
+   *  time-stored view never attributes a message to a day it was not sent
+   *  on. */
+  viewAt() {
+    return transcriptAt([
+      ...this.timed,
+      ...this.messages.map((m) => ({ ...m, at: null })),
+    ]);
+  }
+
+  /** The transcript grouped by UTC day, newest first, untimed last. */
+  viewByDay() {
+    return byDay([
+      ...this.timed,
+      ...this.messages.map((m) => ({ ...m, at: null })),
+    ]);
+  }
+
+  /** Say something, timestamped, to everyone in the room. */
+  async sayAt(text) {
+    const line = printTimed(sayTextAt(this.room, this.self, this.seq, text));
+    await this.publish(line);
+    return line;
+  }
+
+  /** Announce a dropped file to the room: cut, encrypt, pin every chunk,
+   *  then publish the manifest as one self-certifying line.  The relay and
+   *  IPFS only ever see ciphertext. */
+  async dropFile(name, mime, data, { secret = this.secret, pin } = {}) {
+    if (!secret) throw new Error("dropping a file needs the room secret");
+    const { encryptFile, manifest } = await import("./kant-file.mjs");
+    const enc = await encryptFile(secret, name, mime, data);
+    let ipfs = [];
+    if (pin) {
+      const { putChunks } = await import("./kant-file-ipfs.mjs");
+      ipfs = (await putChunks(enc.chunks)).map((c) => c ?? "");
+      while (ipfs.length && !ipfs[ipfs.length - 1]) ipfs.pop();
+    }
+    const f = manifest(this.room, this.self, this.seq, name, mime,
+      enc.size, enc.nonce, enc.cids, ipfs);
+    await this.publish(printManifest(f));
+    return f;
+  }
 
   /** The peers known, freshest announcement each. */
   peers() { return rosterPeers(this.roster); }
