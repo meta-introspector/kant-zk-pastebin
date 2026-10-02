@@ -20,3 +20,6 @@ rust-ipfs
 /build-output-2.log
 /build-output.log
 /logs/
+dist
+e2e-out-file/
+.sops

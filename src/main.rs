@@ -24,6 +24,7 @@ mod summary;
 mod tagging;
 mod tiles;
 mod view;
+mod mesh;
 
 mod archive;
 
@@ -601,6 +602,15 @@ async fn main() -> std::io::Result<()> {
                 "/api/nix-skill/analyze",
                 web::post().to(handlers::nix_skill_analyze),
             )
+            .route("/api/mesh/peers", web::get().to(handlers::mesh::list_mesh_peers))
+            .route("/api/mesh/ping", web::post().to(handlers::mesh::receive_mesh_ping))
+            .route("/api/mesh/announce", web::post().to(handlers::mesh::announce_identity))
+            .route("/api/identities", web::get().to(handlers::list_identities))
+            .route("/api/identities/{id}", web::get().to(handlers::get_identity))
+            .route("/api/identities", web::post().to(handlers::create_identity))
+            .route("/api/avatars/{owner}", web::get().to(handlers::list_avatars))
+            .route("/api/avatars", web::post().to(handlers::upload_avatar))
+            .route("/api/avatars/{id}", web::get().to(handlers::get_avatar)),
             .route(
                 "/api/nix-skill/find",
                 web::post().to(handlers::nix_skill_find),

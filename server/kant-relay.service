@@ -1,0 +1,24 @@
+[Unit]
+Description=kant-zk rendezvous relay
+Documentation=https://github.com/meta-introspector/kant-zk-pastebin
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mdupont
+Group=mdupont
+WorkingDirectory=/mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d
+ExecStart=/usr/bin/node /mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d/server/relay.mjs --port 8787 --host 127.0.0.1 --static /mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d/web
+Restart=on-failure
+RestartSec=2
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/mnt/data1/time-2026/05-may/07/arist/6f91c03d-87e8-4c6a-8d3f-de39edee2f6d
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
