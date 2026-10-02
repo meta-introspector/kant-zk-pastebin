@@ -41,6 +41,20 @@ node scripts/kant-cli.mjs --state a.json say 'hello from the terminal'
 node scripts/kant-cli.mjs --state a.json read
 ```
 
+### Share a file with the room
+
+```bash
+node scripts/kant-cli.mjs --state a.json drop ./report.pdf   # encrypt, pin every chunk, announce
+node scripts/kant-cli.mjs --state b.json files               # what has been shared
+node scripts/kant-cli.mjs --state b.json fetch 0 --out ./got.pdf
+node scripts/kant-cli.mjs --state b.json quote 0 'the graph on page 4 is wrong'
+```
+
+Only ciphertext leaves the machine. Chunks are pinned under their own witness
+before the manifest naming them is posted, so the announcement can never
+describe a file that cannot be finished. `read` shows files alongside chat and
+renders a quote as `re: report.pdf - the text`.
+
 ### Watch for new messages
 
 ```bash
@@ -73,6 +87,7 @@ node scripts/kant-cli.mjs --state a.json say 'hello' --transport curl
 | `--relay <url>` | Relay URL |
 | `--spool <dir>` | UUCP spool directory |
 | `--backend <url>` | Pastebin backend |
+| `--out <path>` | Where `fetch` writes the file (default: its announced name) |
 
 ## Join and Post Script
 
