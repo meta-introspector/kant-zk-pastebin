@@ -30,6 +30,10 @@ actix-multipart = "0.7"
 anyhow = "1.0"
 mime_guess = "2"
 thiserror = "1.0"
+# mesh.rs (lib code) needs both of these; they were previously absent
+# or misfiled under [dev-dependencies], so the lib failed to compile.
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
 futures-util = "0.3"
 utoipa = { version = "4", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "6", features = ["actix-web"] }
@@ -49,7 +53,6 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 chromiumoxide = "0.7"
 futures = "0.3"
-tokio = { version = "1", features = ["full"] }
 tempfile = "3"
 
 [[bin]]
