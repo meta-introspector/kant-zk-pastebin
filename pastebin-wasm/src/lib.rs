@@ -837,15 +837,20 @@ mod chunk_crypto_tests {
         assert!(decrypt_chunk(&SECRET, &NONCE, 0, &enc[..TAG_LEN - 1]).is_err());
     }
 
-    /// The vector a browser interop bug would show up in: a fixed key,
-    /// nonce and plaintext must produce a fixed ciphertext, so a change to
-    /// the derivation shows up as a diff rather than as a silent
-    /// divergence from the JS.
+    /// The vector a browser interop bug would show up in. These bytes were
+    /// produced by web/kant-file.mjs through WebCrypto, not by this crate:
+    /// secret [7;32], file nonce [9;12], chunk 3, plaintext "kant". Pinning
+    /// the JS output means any change to the derivation -- the HKDF info
+    /// string, the salt, the nonce XOR -- fails here instead of quietly
+    /// producing chunks no room can open.
     #[test]
-    fn known_vector() {
+    fn known_vector_matches_the_js() {
         let enc = encrypt_chunk(&SECRET, &NONCE, 3, b"kant").unwrap();
         let hex: String = enc.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex, "b1283937c9a11000e8a6abe35407d15fcb0cb9ac",
+            "the wasm no longer reproduces the JS ciphertext"
+        );
         assert_eq!(decrypt_chunk(&SECRET, &NONCE, 3, &enc).unwrap(), b"kant");
-        println!("known vector: {hex}");
     }
 }
