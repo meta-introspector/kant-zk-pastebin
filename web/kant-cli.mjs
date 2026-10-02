@@ -15,8 +15,8 @@ import {
   roomOf, invite, copyInvite, pasteInvite, parseInviteUrl, inviteRoom,
   printMsg, parseMsg, sayText, msgText, accept, receive, transcript,
   printAnnounce, parseAnnounce, announce,
-  printTimed, parseTimed, sayTextAt, receiveTimed, sayQuote, quoteWitness,
-  quotedText,
+  printTimed, parseTimed, sayTextAt, receiveTimed, transcriptAt, sayQuote,
+  quoteWitness, quotedText,
 } from "./kant-net.mjs";
 import {
   encryptFile, decryptFile, manifest, printManifest, parseManifest,
@@ -167,7 +167,13 @@ export const getBlock = (c, cid) => getReq(blockUrl(c, cid));
 export const compose = (c, text) => sayText(clientRoom(c), c.self, c.seq + 1, text);
 
 /** The messages a client holds, from the lines it has kept. */
-export const messagesOf = (c) => receive([], c.lines);
+/** The messages a client holds, from the lines it has kept.
+ *
+ *  Both chat forms: `receive` takes plain `kzchat`, `receiveTimed` takes a
+ *  `kzat` line. A client that only called `receive` would hold a stamped
+ *  line in `c.lines` and still display nothing for it, which is how `read`
+ *  came back empty in a room where a quote had just been posted. */
+export const messagesOf = (c) => receiveTimed(receive([], c.lines), c.lines);
 
 /** The conversation it displays (`Client.view`). */
 export const view = (c) => transcript(messagesOf(c));
@@ -175,6 +181,15 @@ export const view = (c) => transcript(messagesOf(c));
 /** The conversation as plain text lines, newest last. */
 export const viewText = (c) =>
   view(c).map((m) => `${m.sender.slice(0, 8)}: ${msgText(m)}`);
+
+/** The transcript with each message's time, for `read --at`.  A plain
+ *  kzchat line has no clock of its own and is marked rather than given one:
+ *  `at = seq` would file it under 1970-01-01, which is a date nobody said. */
+export const viewAt = (c) =>
+  transcriptAt([
+    ...receiveTimed([], c.lines),
+    ...receive([], c.lines).map((m) => ({ ...m, at: null })),
+  ]);
 
 // ------------------------------------------------------------------ files
 
