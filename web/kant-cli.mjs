@@ -15,7 +15,13 @@ import {
   roomOf, invite, copyInvite, pasteInvite, parseInviteUrl, inviteRoom,
   printMsg, parseMsg, sayText, msgText, accept, receive, transcript,
   printAnnounce, parseAnnounce, announce,
+  printTimed, parseTimed, sayTextAt, receiveTimed, sayQuote, quoteWitness,
+  quotedText,
 } from "./kant-net.mjs";
+import {
+  encryptFile, decryptFile, manifest, printManifest, parseManifest,
+  manifestWitness, cidOf, CHUNK_SIZE,
+} from "./kant-file.mjs";
 import { findInvite } from "./kant-flow.mjs";
 import { bagUrl, readBagUrl, packBag, openBag } from "./kant-uucp.mjs";
 
@@ -136,9 +142,26 @@ export function joinText(self, text) {
 /** The request that posts a line (`postLine`). */
 export const postLine = (c, line) => postReq(`${c.relay}${roomPath(clientRoom(c))}`, line);
 
+/** The request that pins one encrypted chunk under its witness
+ *  (`/room/<addr>/block/<cid>`).  Binary, so the content type is octet-stream
+ *  rather than the text/plain a line uses — the relay reads the body either
+ *  way, but saying so keeps it honest for anything reading the logs. */
+export const blockUrl = (c, cid) => `${c.relay}${roomPath(clientRoom(c))}/block/${cid}`;
+
+export const postBlock = (c, cid, bytes) => ({
+  method: "post",
+  url: blockUrl(c, cid),
+  body: bytes,
+  binary: true,
+});
+
 /** The request that reads everything new (`pollFrom`). */
 export const pollFrom = (c) =>
   getReq(`${c.relay}${roomPath(clientRoom(c))}${cursorQuery(c.cursor)}`);
+
+/** The request that fetches one chunk back by its witness
+ *  (`/room/<addr>/block/<cid>`). */
+export const getBlock = (c, cid) => getReq(blockUrl(c, cid));
 
 /** The message a client is about to write (`Client.compose`). */
 export const compose = (c, text) => sayText(clientRoom(c), c.self, c.seq + 1, text);
@@ -152,6 +175,43 @@ export const view = (c) => transcript(messagesOf(c));
 /** The conversation as plain text lines, newest last. */
 export const viewText = (c) =>
   view(c).map((m) => `${m.sender.slice(0, 8)}: ${msgText(m)}`);
+
+// ------------------------------------------------------------------ files
+
+/** A timestamped message: what `compose` writes when the client has a
+ *  clock.  Kept beside `compose` so the two cannot drift apart — the CLI and
+ *  the browser must produce the same line for the same words. */
+export const composeAt = (c, text, at) => sayTextAt(clientRoom(c), c.self, c.seq + 1, text, at);
+
+/** Cut and encrypt a file for this room (`Kant.File.encrypt`).  The caller
+ *  pins the chunks; this only ever returns ciphertext. */
+export const encryptFor = (secret, name, mime, data) => encryptFile(secret, name, mime, data);
+
+/** The manifest line announcing those chunks (`Kant.File.manifest`). */
+export const manifestLine = (c, enc, ipfs = []) =>
+  printManifest(manifest(clientRoom(c), c.self, c.seq + 1,
+    enc.name, enc.mime, enc.size, enc.nonce, enc.cids, ipfs));
+
+/** The files announced in this room, in the order they were announced. */
+export function filesOf(c) {
+  const out = [];
+  for (const l of c.lines) {
+    const f = parseManifest(l);
+    if (f && !out.some((x) => printManifest(x) === l)) out.push(f);
+  }
+  return out;
+}
+
+/** Fetch and decrypt a dropped file (`Kant.File.decrypt`).  `fetchChunk`
+ *  takes a *witness*, not an IPFS CID: no CID can be derived from a witness,
+ *  so the caller resolves witness -> CID (see `kant-file-ipfs.mjs`). */
+export const takeFile = (secret, f, fetchChunk) => decryptFile(secret, f, fetchChunk);
+
+/** Every chunk of a manifest, for a caller that wants to pin them. */
+export const chunksOf = (enc) => enc.chunks;
+
+/** The chunking constant, so a caller sizes its requests the same way. */
+export { CHUNK_SIZE, cidOf, manifestWitness };
 
 /** What a URL turns out to carry (`loadUrl`).  A link points at the static
  *  page, and the information the sender added to it — a room to join, or a
@@ -171,11 +231,17 @@ export const clientBagUrl = (cfg, c) => bagUrl(cfg.origin ?? String(cfg), view(c
 
 /** Take lines that came by hand rather than off the relay: keep every line
  *  that certifies itself, whatever room it names (`Kant.Uucp.Node.absorb`).
- *  Returns how many were new. */
+ *  Returns how many were new.
+ *
+ *  Every self-certifying line type is kept, not just chat: a dropped file
+ *  (`kzfile`) and a timestamped line (`kzat`) were both being discarded here,
+ *  which meant the CLI could post a file and then be unable to see its own
+ *  announcement come back.  The room filter stays with `ingest`; here the
+ *  point is only "does it certify itself". */
 export function absorb(c, lines) {
   let taken = 0;
   for (const l of lines) {
-    if (!parseMsg(l)) continue;
+    if (!certifies(l)) continue;
     if (c.lines.includes(l)) continue;
     c.lines.push(l);
     taken += 1;
@@ -183,13 +249,24 @@ export function absorb(c, lines) {
   return taken;
 }
 
+/** Does this line certify itself, whatever it is?  The four room line types
+ *  the CLI understands: chat, timestamped chat, a peer announcement, and a
+ *  dropped file.  Anything else — a signal, a mangled line — is refused. */
+export const certifies = (l) =>
+  parseMsg(l) !== null || parseTimed(l) !== null ||
+  parseAnnounce(l) !== null || parseManifest(l) !== null;
+
 /** Take a line the way the client takes it: keep it only if it certifies
  *  itself and names this room. */
 export function ingest(c, line) {
   const m = parseMsg(line);
+  const t = parseTimed(line);
   const a = parseAnnounce(line);
-  if (m && m.room !== clientRoom(c)) return false;
-  if (!m && !a) return false;
+  const f = parseManifest(line);
+  // Only chat and files are room-scoped; an announcement names a peer, not a
+  // room, and is kept wherever it turns up.
+  if ((m || t || f) && (m ?? t ?? f).room !== clientRoom(c)) return false;
+  if (!m && !t && !a && !f) return false;
   if (c.lines.includes(line)) return false;
   c.lines.push(line);
   return true;
@@ -198,4 +275,6 @@ export function ingest(c, line) {
 export { roomOf, copyInvite, pasteInvite, parseInviteUrl, inviteRoom, findInvite,
   printMsg, parseMsg, msgText, sayText, accept, receive, transcript, witness,
   hexEncode, hexDecode, utf8, fromUtf8, printAnnounce, parseAnnounce, announce,
-  bagUrl, readBagUrl, packBag, openBag };
+  bagUrl, readBagUrl, packBag, openBag,
+  printTimed, parseTimed, sayTextAt, receiveTimed, sayQuote, quoteWitness,
+  quotedText, printManifest, parseManifest, encryptFile, decryptFile };
