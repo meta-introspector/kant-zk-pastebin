@@ -21,17 +21,9 @@
     crane.url = "github:ipetkov/crane/8833b7dc3c7426ce1110ed6fed31b6f63d74f2dc";
     # 3dd7dbe is the commit that vendored system-manager's 107 crate deps.
     system-manager.url = "github:numtide/system-manager/3dd7dbe51bb2232b7b51295a022c627c99fe14fc";
-    browser.url = "path:./browser";
   };
 
-  outputs = { self, nixpkgs, flake-utils, system-manager, crane, browser }:
-    let
-      # The browser the GUI2Lean4 captures run against, carried in from
-      # browser.nix so `--headed` does not depend on the snap package or a
-      # Playwright browser download. See that file for why the full Chromium
-      # is pinned rather than the headless shell.
-      browserPkgs = browser.packages.x86_64-linux;
-    in
+  outputs = { self, nixpkgs, flake-utils, system-manager, crane }:
     (flake-utils.lib.eachDefaultSystem (system:
       let
         lib = nixpkgs.lib;
@@ -121,11 +113,56 @@ EOF
         packages = {
           inherit kant-pastebin;
           default = kant-pastebin;
-          inherit (browserPkgs) chromium fileshare-capture;
+
+          # The browser the GUI2Lean4 captures run against.
+          #
+          #   nix build .#chromium
+          #   KANT_CHROMIUM=$(nix build .#chromium --print-out-paths)/bin/chromium \
+          #     node scripts/fileshare-capture.mjs --headed
+          #
+          # Playwright's bundled download is only chrome-headless-shell, which
+          # cannot open a window, so `--headed` needs a full browser from
+          # somewhere else. nixpkgs' chromium is the obvious answer: pinned by
+          # store hash, no snap refresh, no download at run time, and it works
+          # in both modes. The capture script finds it by globbing the store for
+          # `*-chromium-*`, so this is a convenience and a record of intent
+          # rather than something the script depends on.
+          #
+          # Deliberately NOT a pinned `chrome-headless-shell`: it is smaller,
+          # but it is the reason headed runs were failing, and a browser that
+          # cannot open a window is the wrong thing to pin for a test that is
+          # supposed to prove a page renders.
+          chromium = pkgs.chromium;
+
+          # The capture script plus the browser it should use, so the whole
+          # thing can be run without asking where chromium came from:
+          #   nix run .#fileshare-capture -- --headed
+          fileshare-capture = pkgs.writeShellApplication {
+            name = "fileshare-capture";
+            runtimeInputs = [ pkgs.nodejs ];
+            text = ''
+              exec ${pkgs.nodejs}/bin/node ${self}/scripts/fileshare-capture.mjs \
+                --base "''${KANT_BASE_URL:-https://solana.solfunmeme.com/p2p-relay}" \
+                "$@"
+            '';
+          };
         };
-        apps.default = { type = "app"; program = "${kant-pastebin}/bin/kant-pastebin"; };
+        apps = {
+          default = { type = "app"; program = "${kant-pastebin}/bin/kant-pastebin"; };
+          fileshare-capture = {
+            type = "app";
+            program = "${self.packages.${system}.fileshare-capture}/bin/fileshare-capture";
+          };
+        };
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [ rustc cargo rustfmt clippy openssl.dev pkg-config ];
+          # Playwright is only ever used as a driver here, never as the browser:
+          # its bundled download is the headless shell.
+          shellHook = ''
+            echo "chromium: $(command -v chromium || echo none)"
+            echo "display:  ''${DISPLAY:-(none)}"
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+          '';
         };
       }
     )) // {
