@@ -35,13 +35,26 @@ pub struct Storage {
 
 impl Storage {
     pub fn new(data_dir: Option<String>) -> Self {
-        let dir = data_dir
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-                PathBuf::from(home).join(".kant-pastebin")
-            });
-        fs::create_dir_all(&dir).expect("create data dir");
+        let dir = data_dir.map(PathBuf::from).unwrap_or_else(|| {
+            // The service runs as `kant`, whose HOME is /var/empty and is
+            // not writable, so this has to be able to land somewhere else
+            // rather than take the whole server down with it.
+            match env::var("HOME") {
+                Ok(h) if !h.is_empty() && h != "/var/empty" => PathBuf::from(h).join(".kant-pastebin"),
+                _ => PathBuf::from("/var/lib/kant-pastebin"),
+            }
+        });
+        // Never panic here. This runs during startup, before the listener
+        // exists, so a failure to create the directory would otherwise
+        // crash-loop the service instead of degrading to "mesh state is
+        // not persisted".
+        if let Err(e) = fs::create_dir_all(&dir) {
+            warn!(
+                "mesh storage dir {} is unavailable ({}); identities and avatars will not persist",
+                dir.display(),
+                e
+            );
+        }
         Self { data_dir: dir }
     }
 
