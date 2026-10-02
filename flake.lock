@@ -16,14 +16,18 @@
     },
     "crane": {
       "locked": {
-        "lastModified": 1784218508,
-        "narHash": "sha256-B5NAXFkC4yTaQFee4CJbDg2qQe4eI4WyviagTOA1PMU=",
-        "path": "/mnt/data1/time-2026/05-may/19/crane",
-        "type": "path"
+        "lastModified": 1784172867,
+        "narHash": "sha256-hzzeOgTP0MXMvg4djVwysTDvvUXIpsUCgsA0wPMF/Qk=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "8833b7dc3c7426ce1110ed6fed31b6f63d74f2dc",
+        "type": "github"
       },
       "original": {
-        "path": "/mnt/data1/time-2026/05-may/19/crane",
-        "type": "path"
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "8833b7dc3c7426ce1110ed6fed31b6f63d74f2dc",
+        "type": "github"
       }
     },
     "flake-compat": {
@@ -71,16 +75,16 @@
       "locked": {
         "lastModified": 1731533236,
         "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
-        "ref": "main",
+        "owner": "numtide",
+        "repo": "flake-utils",
         "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
-        "revCount": 102,
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/numtide/flake-utils.git"
+        "type": "github"
       },
       "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/numtide/flake-utils.git"
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
       }
     },
     "gitignore": {
@@ -110,32 +114,32 @@
       "locked": {
         "lastModified": 1785318670,
         "narHash": "sha256-dN6Ou5x/+23FZLEpYP3IffO+NyJFzUlGumt1uu3MMaY=",
-        "ref": "nixos-unstable",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
         "rev": "0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5",
-        "revCount": 1043649,
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
+        "type": "github"
       },
       "original": {
-        "ref": "nixos-unstable",
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5",
+        "type": "github"
       }
     },
     "nixpkgs_2": {
       "locked": {
         "lastModified": 1785318670,
         "narHash": "sha256-dN6Ou5x/+23FZLEpYP3IffO+NyJFzUlGumt1uu3MMaY=",
-        "ref": "nixos-unstable",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
         "rev": "0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5",
-        "revCount": 1043649,
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
+        "type": "github"
       },
       "original": {
-        "ref": "nixos-unstable",
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/NixOS/nixpkgs.git"
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5",
+        "type": "github"
       }
     },
     "nixpkgs_3": {
@@ -152,19 +156,6 @@
         "ref": "nixos-unstable",
         "repo": "nixpkgs",
         "type": "github"
-      }
-    },
-    "nora-cargo": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1786100980,
-        "narHash": "sha256-HOFR44wltulR0Vp8yqh/XyYIRJMDFM92H4qshTwDPeA=",
-        "path": "/mnt/data1/nora/storage/cargo",
-        "type": "path"
-      },
-      "original": {
-        "path": "/mnt/data1/nora/storage/cargo",
-        "type": "path"
       }
     },
     "pre-commit-hooks-nix": {
@@ -201,7 +192,6 @@
         "crane": "crane",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs_2",
-        "nora-cargo": "nora-cargo",
         "system-manager": "system-manager"
       }
     },
@@ -214,16 +204,16 @@
       "locked": {
         "lastModified": 1780022176,
         "narHash": "sha256-9CD/fxQUsiNbSw+tWHCG6hDn9DDsz5YfndP+TSmWO3o=",
-        "ref": "main",
+        "owner": "numtide",
+        "repo": "system-manager",
         "rev": "3dd7dbe51bb2232b7b51295a022c627c99fe14fc",
-        "revCount": 1023,
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/numtide/system-manager.git"
+        "type": "github"
       },
       "original": {
-        "ref": "main",
-        "type": "git",
-        "url": "file:///mnt/data1/git/github.com/numtide/system-manager.git"
+        "owner": "numtide",
+        "repo": "system-manager",
+        "rev": "3dd7dbe51bb2232b7b51295a022c627c99fe14fc",
+        "type": "github"
       }
     },
     "systems": {
