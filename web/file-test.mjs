@@ -18,6 +18,9 @@ import {
   printManifest, parseManifest,
 } from "./kant-file.mjs";
 import { roomOf, KantNode, parseMsg } from "./kant-net.mjs";
+import {
+  putChunks, getChunk, ipfsFetcher, ipfsCidsFor, ipfsMap, verifyChunk,
+} from "./kant-file-ipfs.mjs";
 import { envelopeDecode, utf8 } from "./kantzk.mjs";
 import { createServer, Rooms, CONFIG } from "../server/relay.mjs";
 import { witness } from "./kantzk.mjs";
@@ -200,3 +203,78 @@ await checkAsync("the archive recorded the pins and the line", async () => {
 
 server.close();
 console.log(`\n${checks} checks passed.`);
+
+// ---------------------------------------------------------- IPFS storage
+//
+// Same end-to-end path as the relay run above, but the chunks live on
+// IPFS instead of relay blocks: Alice encrypts and pins ciphertext, Bob
+// fetches every chunk by its CID from the gateway and still has to pass
+// the Kant witness check before a byte is decrypted.
+
+const LOOP_RPC = "http://127.0.0.1:5001";
+const LOOP_GW = "http://127.0.0.1:8081";
+
+const ipfsUp = await fetch(`${LOOP_RPC}/api/v0/version`, { method: "POST" })
+  .then((r) => r.ok).catch(() => false);
+
+if (!ipfsUp) {
+  console.log("  skip  ipfs end-to-end (no kubo on 127.0.0.1:5001)");
+} else {
+  const secretB = Array.from(crypto.getRandomValues(new Uint8Array(32)));
+  const name = "quote.txt";
+  const mime = "text/plain";
+  const data = Uint8Array.from(utf8("the file the pastebin shared with the chat"));
+
+  const enc = await encryptFile(secretB, name, mime, data);
+  const manifestB = manifest(room, "relay-a", 1, name, mime, enc.size, enc.nonce, enc.cids);
+
+  let cids = [];
+  await checkAsync("ipfs: pinned every chunk", async () => {
+    const r = await putChunks(enc.chunks, { rpcBase: LOOP_RPC });
+    assert.equal(r.complete, true, "all chunks pinned");
+    assert.equal(r.cids.length, enc.chunks.length, "one CID per chunk");
+    assert.ok(r.cids.every((c) => typeof c === "string" && c.length > 0), "CIDs are strings");
+    cids = r.cids;
+  });
+  assert.equal(cids.length, manifestB.cids.length, "every chunk got a CID");
+
+  await checkAsync("ipfs: fetched chunks pass the kant witness check", async () => {
+    assert.ok(cids.length > 0, "there is at least one chunk to fetch");
+    for (let i = 0; i < cids.length; i += 1) {
+      const got = await getChunk(cids[i], { gwBase: LOOP_GW });
+      assert.ok(got, `chunk ${i} fetched`);
+      assert.equal(verifyChunk(manifestB.cids[i], got), true,
+        `chunk ${i} matches the witness that named it`);
+    }
+  });
+
+  await checkAsync("ipfs: file decrypts to the original bytes", async () => {
+    const out = await decryptFile(secretB, manifestB, ipfsFetcher(ipfsMap(manifestB.cids, cids), { gwBase: LOOP_GW }));
+    assert.deepEqual(Array.from(out), Array.from(data), "round-trips exactly");
+  });
+
+  await checkAsync("ipfs: a wrong room secret still fails", async () => {
+    const wrong = Array.from(crypto.getRandomValues(new Uint8Array(32)));
+    let threw = false;
+    try {
+      await decryptFile(wrong, manifestB, ipfsFetcher(ipfsMap(manifestB.cids, cids), { gwBase: LOOP_GW }));
+    } catch { threw = true; }
+    assert.equal(threw, true, "ciphertext does not decrypt under another room secret");
+  });
+
+  await checkAsync("ipfs: witness and cid are independent names", () => {
+    const pairs = ipfsCidsFor(manifestB.cids, cids);
+    assert.equal(pairs.length, manifestB.cids.length, "one pair per chunk");
+    assert.notEqual(pairs[0].witness, pairs[0].ipfs, "not the same string");
+    assert.throws(() => ipfsCidsFor(manifestB.cids, cids.slice(1)), /mismatch/);
+  });
+
+  await checkAsync("ipfs: a chunk with no ipfs location fails loudly", async () => {
+    const orphan = manifestB.cids[0];
+    let msg = "";
+    try {
+      await ipfsFetcher(new Map(), { gwBase: LOOP_GW })(orphan);
+    } catch (e) { msg = e.message; }
+    assert.match(msg, /no ipfs location/, "refuses to guess a location");
+  });
+}
