@@ -1,5 +1,5 @@
 // mesh.rs — relay-to-relay mesh networking for Kant pastebin
-use crate::model::{MeshPeer, MeshMessage, MeshMessageKind, Identity, Avatar};
+use crate::model::{MeshPeer, MeshMessage, MeshMessageKind, MeshPeerStatus, Identity, Avatar};
 use crate::storage::Storage;
 use actix_web::{web, HttpResponse, Result as ActixResult, http::header};
 use reqwest::Client;
@@ -53,6 +53,36 @@ impl MeshState {
             client,
             storage,
         }
+    }
+
+    /// Save user identity to storage
+    pub async fn save_identity(&self, identity: &Identity) -> anyhow::Result<()> {
+        self.storage.save_identity(identity).await
+    }
+
+    /// Load user identity from storage
+    pub async fn load_identity(&self, id: &str) -> Option<Identity> {
+        self.storage.load_identity(id).await
+    }
+
+    /// List all identities in storage
+    pub async fn list_identities(&self) -> Vec<Identity> {
+        self.storage.list_identities().await
+    }
+
+    /// Save avatar to storage
+    pub async fn save_avatar(&self, avatar: &Avatar) -> anyhow::Result<()> {
+        self.storage.save_avatar(avatar).await
+    }
+
+    /// Load avatar from storage
+    pub async fn load_avatar(&self, id: &str) -> Option<Avatar> {
+        self.storage.load_avatar(id).await
+    }
+
+    /// List all avatars for a given owner
+    pub async fn list_avatars(&self, owner: &str) -> Vec<Avatar> {
+        self.storage.list_avatars(owner).await
     }
 
     /// Start the mesh networking background tasks
@@ -235,6 +265,7 @@ impl MeshState {
 pub mod handlers {
     use super::*;
     use actix_web::{web, HttpResponse, Result as ActixResult};
+    use actix_web::error::ErrorInternalServerError;
 
     /// GET /api/mesh/peers - List all known mesh peers
     pub async fn list_peers(state: web::Data<Arc<MeshState>>) -> ActixResult<HttpResponse> {
@@ -247,7 +278,10 @@ pub mod handlers {
         state: web::Data<Arc<MeshState>>,
         msg: web::Json<MeshMessage>,
     ) -> ActixResult<HttpResponse> {
-        state.handle_message(msg.into_inner()).await?;
+        state
+            .handle_message(msg.into_inner())
+            .await
+            .map_err(ErrorInternalServerError)?;
         Ok(HttpResponse::Ok().json(serde_json::json!({ "ok": true })))
     }
 
@@ -256,7 +290,10 @@ pub mod handlers {
         state: web::Data<Arc<MeshState>>,
         msg: web::Json<MeshMessage>,
     ) -> ActixResult<HttpResponse> {
-        state.handle_message(msg.into_inner()).await?;
+        state
+            .handle_message(msg.into_inner())
+            .await
+            .map_err(ErrorInternalServerError)?;
         Ok(HttpResponse::Ok().json(serde_json::json!({ "ok": true })))
     }
 
@@ -266,7 +303,11 @@ pub mod handlers {
         identity: web::Json<Identity>,
     ) -> ActixResult<HttpResponse> {
         let identity = identity.into_inner();
-        state.storage.save_identity(&identity).await?;
+        state
+            .storage
+            .save_identity(&identity)
+            .await
+            .map_err(ErrorInternalServerError)?;
         Ok(HttpResponse::Ok().json(serde_json::json!({ "ok": true })))
     }
 }

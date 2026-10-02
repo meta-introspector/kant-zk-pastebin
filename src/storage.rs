@@ -1,10 +1,34 @@
-// Storage - Load/save pastes, identities, avatars and mesh state
-use crate::model::{Identity, Avatar};
+// Storage - Load/save pastes from UUCP/IPFS/consumer service
+use crate::model::{Avatar, Identity};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use tracing::{info, warn, debug};
+use tracing::{info, warn};
 
+pub fn load_content(id: &str) -> Option<String> {
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let filename = format!("{}/{}.txt", uucp_dir, id);
+
+    if let Ok(content) = fs::read_to_string(&filename) {
+        return Some(content);
+    }
+
+    None
+}
+
+pub fn save_content(id: &str, content: &str) -> Result<(), std::io::Error> {
+    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let filename = format!("{}/{}.txt", uucp_dir, id);
+
+    fs::write(&filename, content)?;
+    Ok(())
+}
+
+/// On-disk store for mesh identities and avatars.
+///
+/// Ported from the `wip` commit (150437b6), which removed the UUCP
+/// free functions above; here both coexist because the pre-wip tree is
+/// what mesh.rs is being re-applied onto.
 pub struct Storage {
     pub data_dir: PathBuf,
 }
@@ -19,22 +43,6 @@ impl Storage {
             });
         fs::create_dir_all(&dir).expect("create data dir");
         Self { data_dir: dir }
-    }
-
-    pub fn load_content(&self, id: &str) -> Option<String> {
-        let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
-        let filename = format!("{}/{}.txt", uucp_dir, id);
-        if let Ok(content) = fs::read_to_string(&filename) {
-            return Some(content);
-        }
-        None
-    }
-
-    pub fn save_content(&self, id: &str, content: &str) -> Result<(), std::io::Error> {
-        let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
-        let filename = format!("{}/{}.txt", uucp_dir, id);
-        fs::write(&filename, content)?;
-        Ok(())
     }
 
     /// Save user identity to local storage
@@ -134,4 +142,12 @@ impl Storage {
         }
         avatars
     }
+}
+
+fn load_from_ipfs(id: &str) -> Option<String> {
+    None
+}
+
+fn save_to_ipfs(_content: &str) -> Option<String> {
+    None
 }
