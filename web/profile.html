@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kant Profile — FOAF over IPFS/IPLD</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --purple: #a371f7;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: var(--accent); margin-bottom: 0.5rem; font-size: 1.5rem; }
+    h2 { color: var(--purple); margin: 1.5rem 0 0.75rem; font-size: 1.25rem; }
+    .subtitle { color: var(--muted); margin-bottom: 2rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .field { margin-bottom: 1rem; }
+    label { display: block; color: var(--muted); font-size: 0.875rem; margin-bottom: 0.25rem; }
+    input, textarea, select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    .btn {
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 6px;
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-weight: 600;
+      margin-right: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn-secondary { background: var(--purple); }
+    .btn-green { background: var(--green); color: var(--bg); }
+    .profile-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: var(--purple);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+    .username { font-size: 1.25rem; font-weight: 600; }
+    .bio { color: var(--muted); font-size: 0.875rem; margin-top: 0.25rem; }
+    .foaf-data {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      font-family: 'Monaco', monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .cid { color: var(--green); font-family: monospace; font-size: 0.8rem; word-break: break-all; }
+    .status { color: var(--green); font-size: 0.875rem; }
+    .error { color: #f85149; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>👤 Kant Profile — FOAF over IPFS/IPLD</h1>
+    <p class="subtitle">User profiles stored on IPFS, shared via P2P</p>
+
+    <!-- Profile Editor -->
+    <div class="card" id="editor-card">
+      <h2>Edit Profile</h2>
+      <div class="field">
+        <label>Username</label>
+        <input type="text" id="username" placeholder="e.g., lean-agent">
+      </div>
+      <div class="field">
+        <label>Display Name</label>
+        <input type="text" id="displayName" placeholder="e.g., Lean4 Agent">
+      </div>
+      <div class="field">
+        <label>Bio</label>
+        <textarea id="bio" placeholder="Tell others about yourself..."></textarea>
+      </div>
+      <div class="field">
+        <label>Avatar URL (IPFS or HTTPS)</label>
+        <input type="text" id="avatar" placeholder="ipfs://... or https://...">
+      </div>
+      <div class="field">
+        <label>Public Key (for verification)</label>
+        <input type="text" id="publicKey" placeholder="0x...">
+      </div>
+      <button class="btn" onclick="publishProfile()">Publish to IPFS</button>
+      <button class="btn btn-secondary" onclick="showMyProfile()">View My Profile</button>
+    </div>
+
+    <!-- Profile Display -->
+    <div class="card hidden" id="profile-card">
+      <h2>My Profile</h2>
+      <div class="profile-header">
+        <div class="avatar" id="avatar-display">?</div>
+        <div>
+          <div class="username" id="profile-username">—</div>
+          <div class="bio" id="profile-bio">—</div>
+        </div>
+      </div>
+      <div id="profile-details"></div>
+      <div class="cid" id="profile-cid"></div>
+    </div>
+
+    <!-- FOAF RDF Output -->
+    <div class="card hidden" id="foaf-card">
+      <h2>FOAF RDF (Turtle)</h2>
+      <div class="foaf-data" id="foaf-output"></div>
+      <button class="btn btn-green" onclick="copyFOAF()">Copy FOAF</button>
+    </div>
+
+    <!-- Status -->
+    <div class="card" id="status-card">
+      <h2>Status</h2>
+      <div id="status-text">Ready</div>
+    </div>
+  </div>
+
+  <script type="module">
+    // IPFS configuration
+    const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
+    const IPFS_API = 'https://ipfs.io/api/v0/add';
+
+    // FOAF namespace
+    const FOAF = 'http://xmlns.com/foaf/0.1/';
+    const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+    const DC = 'http://purl.org/dc/elements/1.1/';
+
+    // Load profile from localStorage
+    function loadProfile() {
+      try {
+        const data = localStorage.getItem('kant-profile');
+        return data ? JSON.parse(data) : null;
+      } catch { return null; }
+    }
+
+    function saveProfile(profile) {
+      localStorage.setItem('kant-profile', JSON.stringify(profile));
+    }
+
+    // Set status
+    function setStatus(msg, isError = false) {
+      const el = document.getElementById('status-text');
+      el.textContent = msg;
+      el.className = isError ? 'error' : 'status';
+    }
+
+    // Generate FOAF RDF Turtle from profile
+    function generateFOAF(profile) {
+      const lid = `_${Math.random().toString(36).substr(2, 9)}`;
+      const name = profile.username || profile.displayName || 'unknown';
+      const uri = `did:ipfs:${profile.ipfsCid || lid}`;
+      
+      return `@prefix foaf: <${FOAF}> .
+@prefix rdf: <${RDF}> .
+@prefix dc: <${DC}> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<${uri}>
+  rdf:type foaf:Person ;
+  foaf:name "${name}" ;
+  foaf:accountName "${profile.username || ''}" ;
+  foaf:img <${profile.avatar || ''}> ;
+  foaf:publicKey "${profile.publicKey || ''}" ;
+  dc:description "${profile.bio || ''}" ;
+  foaf:homepage <https://ipfs.io/ipfs/${profile.ipfsCid || ''}> ;
+  foaf:made ${lid} ;
+  foaf:knows [] .
+
+_${lid}
+  rdf:type foaf:Person ;
+  foaf:name "${profile.displayName || name}" .
+`;
+    }
+
+    // Publish profile to IPFS
+    window.publishProfile = async function() {
+      const profile = {
+        username: document.getElementById('username').value,
+        displayName: document.getElementById('displayName').value,
+        bio: document.getElementById('bio').value,
+        avatar: document.getElementById('avatar').value,
+        publicKey: document.getElementById('publicKey').value,
+        created: new Date().toISOString(),
+        updated: new Date().toISOString()
+      };
+
+      if (!profile.username && !profile.displayName) {
+        setStatus('Set a username or display name first', true);
+        return;
+      }
+
+      setStatus('Publishing to IPFS...');
+
+      try {
+        // Add to IPFS via gateway
+        const resp = await fetch(IPFS_API, {
+          method: 'POST',
+          body: JSON.stringify(profile, null, 2),
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await resp.json();
+        profile.ipfsCid = data.Hash;
+        
+        saveProfile(profile);
+        displayProfile(profile);
+        displayFOAF(profile);
+        setStatus(`Published to IPFS: ${profile.ipfsCid}`);
+      } catch (e) {
+        // Fallback: store locally, generate CID placeholder
+        profile.ipfsCid = 'local-' + Date.now();
+        saveProfile(profile);
+        displayProfile(profile);
+        displayFOAF(profile);
+        setStatus('Stored locally (IPFS unavailable). CID: ' + profile.ipfsCid);
+      }
+    };
+
+    // Display profile
+    window.displayProfile = function(profile) {
+      document.getElementById('profile-card').classList.remove('hidden');
+      document.getElementById('avatar-display').textContent = 
+        (profile.displayName || profile.username || '?').charAt(0).toUpperCase();
+      document.getElementById('profile-username').textContent = 
+        profile.displayName || profile.username || '—';
+      document.getElementById('profile-bio').textContent = profile.bio || '—';
+      document.getElementById('profile-details').innerHTML = `
+        <div class="field" style="margin-top:1rem">
+          <label>Avatar</label>
+          <div class="cid">${profile.avatar || '—'}</div>
+        </div>
+        <div class="field">
+          <label>Public Key</label>
+          <div class="cid">${profile.publicKey || '—'}</div>
+        </div>
+      `;
+      document.getElementById('profile-cid').textContent = 
+        profile.ipfsCid ? `IPFS CID: ${profile.ipfsCid}` : '';
+      
+      // Fill form
+      document.getElementById('username').value = profile.username || '';
+      document.getElementById('displayName').value = profile.displayName || '';
+      document.getElementById('bio').value = profile.bio || '';
+      document.getElementById('avatar').value = profile.avatar || '';
+      document.getElementById('publicKey').value = profile.publicKey || '';
+    };
+
+    // Display FOAF RDF
+    window.displayFOAF = function(profile) {
+      document.getElementById('foaf-card').classList.remove('hidden');
+      document.getElementById('foaf-output').textContent = generateFOAF(profile);
+    };
+
+    // Show my profile
+    window.showMyProfile = function() {
+      const profile = loadProfile();
+      if (profile) {
+        displayProfile(profile);
+        displayFOAF(profile);
+        setStatus('Loaded profile');
+      } else {
+        setStatus('No profile found. Create one first.', true);
+      }
+    };
+
+    // Copy FOAF to clipboard
+    window.copyFOAF = function() {
+      const foaf = document.getElementById('foaf-output').textContent;
+      navigator.clipboard.writeText(foaf).then(() => setStatus('FOAF copied!'));
+    };
+
+    // Fetch profile from IPFS
+    window.fetchProfile = async function(cid) {
+      setStatus('Fetching from IPFS...');
+      try {
+        const resp = await fetch(IPFS_GATEWAY + cid);
+        const profile = await resp.json();
+        displayProfile(profile);
+        displayFOAF(profile);
+        setStatus(`Fetched from IPFS: ${cid}`);
+      } catch (e) {
+        setStatus('Failed to fetch: ' + e.message, true);
+      }
+    };
+
+    // Init: load saved profile
+    const saved = loadProfile();
+    if (saved) displayProfile(saved);
+  </script>
+</body>
+</html>
