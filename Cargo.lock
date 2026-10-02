@@ -1551,7 +1551,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding 2.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "syn 1.0.109",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2731,6 +2731,7 @@ dependencies = [
  "actix-files",
  "actix-multipart",
  "actix-web",
+ "anyhow",
  "bzip2",
  "chromiumoxide",
  "chrono",
@@ -2762,9 +2763,12 @@ dependencies = [
  "tar",
  "tempfile",
  "tera",
+ "thiserror 1.0.69 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
+ "tracing",
  "utoipa",
  "utoipa-swagger-ui",
+ "uuid",
  "walkdir",
  "xz2",
  "zip 2.4.2",
@@ -5105,6 +5109,17 @@ dependencies = [
  "serde_json",
  "utoipa",
  "zip 0.6.6",
+]
+
+[[package]]
+name = "uuid"
+version = "1.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce"
+dependencies = [
+ "getrandom 0.4.3",
+ "js-sys",
+ "wasm-bindgen",
 ]
 
 [[package]]
