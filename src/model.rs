@@ -1,47 +1,30 @@
-// paste.rs — data structures for the Kant pastebin server
+// Model - Data structures for kant-pastebin
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-// === Existing models ===
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct Paste {
-    pub id: String,
-    pub content: String,
-    pub created: u64,
-    pub expires: Option<u64>,
-    pub tags: Vec<String>,
-    pub owner: Option<String>,
+    pub content: Option<String>,
+    pub cid: Option<String>,
     pub title: Option<String>,
+    pub description: Option<String>,
+    pub keywords: Option<Vec<String>>,
     pub reply_to: Option<String>,
-    pub cid: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, ToSchema)]
 pub struct Response {
-    pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Paste>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cid: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub witness: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: String,
+    pub cid: String,
     pub ipfs_cid: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub permalink: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub uucp_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub witness: String,
+    pub url: String,
+    pub permalink: String,
+    pub uucp_path: String,
     pub reply_to: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct PasteIndex {
     pub id: String,
     pub title: String,
@@ -51,7 +34,7 @@ pub struct PasteIndex {
     pub witness: String,
     pub timestamp: String,
     pub filename: String,
-    pub ngrams: Vec<String>,
+    pub ngrams: Vec<(String, usize)>,
     pub ipfs_cid: Option<String>,
     pub reply_to: Option<String>,
     pub size: usize,
@@ -59,99 +42,201 @@ pub struct PasteIndex {
     pub root: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SplitProfile {
-    pub name: String,
-    pub label: String,
-    pub context_window: usize,
-    pub unit: SplitUnit,
-    pub chunk_size: usize,
-    pub overlap: usize,
-    pub max_output_tokens: usize,
-    pub split_mode: SplitMode,
-    pub builtin: bool,
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ThreadPost {
+    pub id: String,
+    pub title: String,
     pub description: Option<String>,
+    pub reply_to: Option<String>,
+    pub timestamp: String,
+    pub size: usize,
+    pub url: String,
+    pub depth: usize,
+    pub content_excerpt: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SplitUnit { Byte, Word, Token }
+// ─── Split Profiles ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SplitMode { Line, Word, Exact }
+/// How to split at chunk boundaries.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitUnit {
+    /// Byte-based chunking.
+    Byte,
+    /// Word-count chunking.
+    Word,
+    /// Token-estimate chunking.
+    Token,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitMode {
+    /// Break on newline boundaries
+    Line,
+    /// Break on word boundaries (default)
+    Word,
+    /// Break at exact byte offset
+    Exact,
+}
+
+/// A split profile defines how content is chunked for a specific LLM platform.
+///
+/// Each platform has different context window sizes and output limits.
+/// The profile encodes these as chunk_size (input) and overlap (for
+/// maintaining context across chunk boundaries).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SplitProfile {
+    /// Unique profile name (e.g. "openai", "grok", "perplexity", "custom")
+    pub name: String,
+    /// Display label (e.g. "OpenAI GPT-4o")
+    pub label: String,
+    /// Maximum input context window in the profile unit
+    pub context_window: usize,
+    /// Chunk size unit: bytes, words, or estimated tokens.
+    pub unit: SplitUnit,
+    /// Chunk size in `unit`.
+    pub chunk_size: usize,
+    /// Overlap in `unit` between consecutive chunks (for context continuity)
+    pub overlap: usize,
+    /// Maximum output tokens the platform can generate per request
+    pub max_output_tokens: usize,
+    /// Split boundary mode
+    pub split_mode: SplitMode,
+    /// Whether this is a built-in preset (cannot be deleted)
+    pub builtin: bool,
+    /// Optional description
+    pub description: Option<String>,
+}
 
 impl SplitProfile {
     /// Built-in platform presets based on current API limits.
     pub fn presets() -> Vec<Self> {
         vec![
             Self {
-                name: "openai".to_string(),
-                label: "OpenAI GPT-4o".to_string(),
+                name: "notebooklm".into(),
+                label: "NotebookLM".into(),
+                context_window: 666_667,
+                chunk_size: 500_000,
+                unit: SplitUnit::Word,
+                overlap: 20_000,
+                max_output_tokens: 50_000,
+                split_mode: SplitMode::Word,
+                builtin: true,
+                description: Some("NotebookLM: up to about 500K words per input".into()),
+            },
+            Self {
+                name: "openai".into(),
+                label: "OpenAI GPT-4o / GPT-4.1".into(),
+                context_window: 1_000_000,
+                chunk_size: 750_000,
+                unit: SplitUnit::Word,
+                overlap: 30_000,
+                max_output_tokens: 16_384,
+                split_mode: SplitMode::Word,
+                builtin: true,
+                description: Some(
+                    "OpenAI large-context models: about 750K words, with output headroom".into(),
+                ),
+            },
+            Self {
+                name: "gemini".into(),
+                label: "Gemini 1.5 / 2.0".into(),
+                context_window: 2_000_000,
+                chunk_size: 1_500_000,
+                unit: SplitUnit::Word,
+                overlap: 50_000,
+                max_output_tokens: 8_192,
+                split_mode: SplitMode::Word,
+                builtin: true,
+                description: Some(
+                    "Gemini large-context models: about 1.5M words, with output headroom".into(),
+                ),
+            },
+            Self {
+                name: "claude".into(),
+                label: "Claude 3.5 Sonnet".into(),
+                context_window: 200_000,
+                chunk_size: 150_000,
+                unit: SplitUnit::Word,
+                overlap: 8_000,
+                max_output_tokens: 16_384,
+                split_mode: SplitMode::Word,
+                builtin: true,
+                description: Some(
+                    "Claude 3.5 Sonnet: about 150K words, with overlap for continuity".into(),
+                ),
+            },
+            Self {
+                name: "llama".into(),
+                label: "Llama 3 128K".into(),
                 context_window: 128_000,
-                unit: SplitUnit::Token,
-                chunk_size: 8_000,
-                overlap: 500,
+                chunk_size: 96_000,
+                unit: SplitUnit::Word,
+                overlap: 4_000,
                 max_output_tokens: 4_096,
                 split_mode: SplitMode::Word,
                 builtin: true,
-                description: Some("OpenAI GPT-4o with 128k context window".to_string()),
+                description: Some("Llama 3 128K: about 96K words".into()),
             },
             Self {
-                name: "grok".to_string(),
-                label: "Grok 3".to_string(),
-                context_window: 131_072,
-                unit: SplitUnit::Token,
-                chunk_size: 8_000,
-                overlap: 500,
-                max_output_tokens: 8_192,
-                split_mode: SplitMode::Word,
-                builtin: true,
-                description: Some("Grok 3 with 131k context window".to_string()),
-            },
-            Self {
-                name: "perplexity".to_string(),
-                label: "Perplexity Pro".to_string(),
-                context_window: 127_000,
-                unit: SplitUnit::Token,
-                chunk_size: 8_000,
-                overlap: 500,
-                max_output_tokens: 8_192,
-                split_mode: SplitMode::Word,
-                builtin: true,
-                description: Some("Perplexity Pro with 127k context window".to_string()),
-            },
-            Self {
-                name: "notebooklm".to_string(),
-                label: "NotebookLM".to_string(),
-                context_window: 1_000_000,
-                unit: SplitUnit::Token,
-                chunk_size: 32_000,
+                name: "openai_16k".into(),
+                label: "OpenAI 16K".into(),
+                context_window: 16_000,
+                chunk_size: 12_000,
+                unit: SplitUnit::Word,
                 overlap: 1_000,
-                max_output_tokens: 10_000,
+                max_output_tokens: 4_096,
                 split_mode: SplitMode::Word,
                 builtin: true,
-                description: Some("NotebookLM with 1M context window".to_string()),
+                description: Some("OpenAI 16K context: about 12K words".into()),
             },
             Self {
-                name: "custom".to_string(),
-                label: "Custom".to_string(),
-                context_window: 4_096,
-                unit: SplitUnit::Token,
-                chunk_size: 1_000,
-                overlap: 100,
-                max_output_tokens: 1_000,
+                name: "grok".into(),
+                label: "Grok 3".into(),
+                context_window: 131_072,
+                chunk_size: 98_000,
+                unit: SplitUnit::Word,
+                overlap: 4_000,
+                max_output_tokens: 8_192,
                 split_mode: SplitMode::Word,
                 builtin: true,
-                description: Some("Custom profile".to_string()),
+                description: Some("Grok 3: about 98K words".into()),
+            },
+            Self {
+                name: "perplexity".into(),
+                label: "Perplexity".into(),
+                context_window: 128_000,
+                chunk_size: 96_000,
+                unit: SplitUnit::Word,
+                overlap: 3_000,
+                max_output_tokens: 4_096,
+                split_mode: SplitMode::Word,
+                builtin: true,
+                description: Some("Perplexity: about 96K words".into()),
+            },
+            Self {
+                name: "local".into(),
+                label: "Local (8K)".into(),
+                context_window: 8_192,
+                chunk_size: 6_144,
+                unit: SplitUnit::Token,
+                overlap: 512,
+                max_output_tokens: 2_048,
+                split_mode: SplitMode::Line,
+                builtin: true,
+                description: Some("Local LLM: 8K tokens, about 6K words".into()),
             },
         ]
     }
 
-    /// Find a built-in preset by name
+    /// Find a preset by name.
     pub fn find_preset(name: &str) -> Option<Self> {
         Self::presets().into_iter().find(|p| p.name == name)
     }
 }
 
+/// Request body for creating/updating a custom split profile.
 #[derive(Debug, Deserialize)]
 pub struct SplitProfileRequest {
     pub name: String,
@@ -165,15 +250,13 @@ pub struct SplitProfileRequest {
     pub description: Option<String>,
 }
 
-// === New: Avatar / Identity models ===
-
-/// A user avatar (stored as base64 or IPFS CID)
+/// An avatar, stored locally as a data URL and/or on IPFS for p2p sharing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Avatar {
     pub id: String,
     pub owner: String,
-    pub data_url: Option<String>,   // base64 data URL for local storage
-    pub ipfs_cid: Option<String>,   // IPFS CID for p2p sharing
+    pub data_url: Option<String>, // base64 data URL for local storage
+    pub ipfs_cid: Option<String>, // IPFS CID for p2p sharing
     pub mime_type: String,
     pub size_bytes: usize,
     pub created: u64,
@@ -187,7 +270,7 @@ pub struct Identity {
     pub display_name: Option<String>,
     pub avatar_id: Option<String>,
     pub bio: Option<String>,
-    pub relays: Vec<String>,       // known relays for mesh networking
+    pub relays: Vec<String>, // known relays for mesh networking
     pub created: u64,
     pub updated: u64,
 }
@@ -203,14 +286,18 @@ pub struct MeshPeer {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MeshPeerStatus { Online, Offline, Unknown }
+pub enum MeshPeerStatus {
+    Online,
+    Offline,
+    Unknown,
+}
 
 /// A mesh network message (relay-to-relay)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshMessage {
     pub id: String,
     pub from: String,
-    pub to: Option<String>,   // None = broadcast
+    pub to: Option<String>, // None = broadcast
     pub kind: MeshMessageKind,
     pub payload: String,
     pub timestamp: u64,
