@@ -397,9 +397,12 @@ pub async fn create_paste_form(form: web::Form<Paste>) -> Result<HttpResponse> {
     create_paste_inner(form.into_inner()).await
 }
 
+/// Largest paste accepted, applied per field while streaming so an oversized body is
+/// rejected mid-upload instead of after being buffered whole.
+pub const MAX_PASTE_BYTES: usize = 256 * 1024 * 1024;
+
 /// POST /paste - Create paste (multipart form body — e.g. curl -F)
 pub async fn create_paste_multipart(mut payload: actix_multipart::Multipart) -> Result<HttpResponse> {
-    use actix_web::web::BytesMut;
     use futures_util::StreamExt as _;
 
     let mut content = String::new();
@@ -413,6 +416,11 @@ pub async fn create_paste_multipart(mut payload: actix_multipart::Multipart) -> 
         let mut buf: Vec<u8> = Vec::new();
         while let Some(chunk) = field.next().await {
             let data = chunk.map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+            if buf.len() + data.len() > MAX_PASTE_BYTES {
+                return Ok(HttpResponse::PayloadTooLarge().json(serde_json::json!({
+                    "error": format!("field '{field_name}' exceeds {MAX_PASTE_BYTES} bytes"),
+                })));
+            }
             buf.extend_from_slice(&data);
         }
         let val = String::from_utf8_lossy(&buf).to_string();
@@ -438,6 +446,32 @@ pub async fn create_paste_multipart(mut payload: actix_multipart::Multipart) -> 
         reply_to,
     };
     create_paste_inner(paste).await
+}
+
+/// Cap a spool filename so it always fits a single path component.
+///
+/// The filename doubles as the paste id and as a URL path segment, and ext4 caps a path
+/// component at 255 bytes. Auto-tagging is unbounded — `auto_tag` emits a `repo:...` tag for
+/// every line mentioning github.com/gitlab.com plus a `meta:...` tag per `<meta>` line — so a
+/// large paste can push the slug past 1400 bytes. `fs::write` below swallows that
+/// ENAMETOOLONG, so the paste is acknowledged with an id that 404s forever. Bound it here and
+/// keep the title prefix, which is the part that carries meaning.
+const MAX_FILENAME_BYTES: usize = 240;
+
+fn bound_filename(filename: String) -> String {
+    const SUFFIX: &str = ".txt";
+    if filename.len() <= MAX_FILENAME_BYTES {
+        return filename;
+    }
+    let mut end = MAX_FILENAME_BYTES - SUFFIX.len();
+    while end > 0 && !filename.is_char_boundary(end) {
+        end -= 1;
+    }
+    // Slice by bytes, not chars: `end` is a byte index, and slugify keeps alphanumeric
+    // Unicode letters, so `chars().take(end)` would overrun on multibyte input.
+    let mut bounded = filename[..end].to_string();
+    bounded.push_str(SUFFIX);
+    bounded
 }
 
 async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
@@ -513,6 +547,7 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
     } else {
         format!("{}_{}_{}.txt", ts, slug_title, slug_keywords)
     };
+    let filename = bound_filename(filename);
 
     let id = filename.trim_end_matches(".txt").to_string();
     let uucp = format!("{}/{}", uucp_dir, filename);
@@ -528,8 +563,20 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
         id, title, description, keywords.join(", "), local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), dasl_cid, reply_to_str,
         erdfa_publish::sheaf::sheaf_header(&section),
         content, section.to_rdfa());
-    fs::write(&uucp, paste_content).ok();
-    fs::write(&cid_file, &id).ok();
+
+    // Fail loudly. These writes used to be `.ok()`, which turned every spool error into a
+    // success response — a paste that could not be written was acknowledged with an id that
+    // then 404'd forever, and the content was silently lost. Surface the error instead.
+    fs::write(&uucp, &paste_content).map_err(|e| {
+        actix_web::error::ErrorInternalServerError(format!(
+            "failed to write paste {uucp}: {e}"
+        ))
+    })?;
+    fs::write(&cid_file, &id).map_err(|e| {
+        actix_web::error::ErrorInternalServerError(format!(
+            "failed to write cid file {cid_file}: {e}"
+        ))
+    })?;
 
     let ngrams = tagging::extract_ngrams(content, 3, 10);
 
@@ -5871,6 +5918,51 @@ mod tests {
         std::fs::write(&path, stored).unwrap();
         let got = read_paste_content(path.to_str().unwrap()).unwrap();
         assert_eq!(got, "<div>user content here</div>");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn bound_filename_leaves_short_names_alone() {
+        assert_eq!(bound_filename("20261003_120000_probe.txt".to_string()), "20261003_120000_probe.txt");
+    }
+
+    #[test]
+    fn bound_filename_keeps_the_title_prefix_when_keywords_blow_up() {
+        // Regression: auto_tag emits a repo:... tag per line mentioning github.com, so a
+        // real 40MB paste produced a 1412-byte slug. That overran ext4's 255-byte
+        // NAME_MAX, the write failed, and — because the write was `.ok()` — the API
+        // answered 200 with an id that 404'd forever.
+        let keywords = (0..200)
+            .map(|i| format!("repo_leanprover_community_mathlib4_{i}"))
+            .collect::<Vec<_>>()
+            .join("_");
+        let bounded = bound_filename(format!("20261003_120000_my_title_{keywords}.txt"));
+
+        assert!(bounded.len() <= 240, "filename must fit a path component: {}", bounded.len());
+        assert!(bounded.ends_with(".txt"));
+        assert!(bounded.starts_with("20261003_120000_my_title_"), "title prefix preserved");
+    }
+
+    #[test]
+    fn bound_filename_never_splits_a_multibyte_char() {
+        // slugify keeps alphanumeric Unicode letters, so the cut point can land mid-char.
+        let bounded = bound_filename(format!("20261003_120000_{}.txt", "\u{4e2d}".repeat(200)));
+        assert!(bounded.len() <= 240);
+        assert!(bounded.ends_with(".txt"));
+        // valid UTF-8 with no replacement/panic means we cut on a char boundary
+        assert!(std::str::from_utf8(bounded.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn bounded_filename_survives_a_real_filesystem_write() {
+        let dir = std::env::temp_dir().join("kant-paste-test-bound");
+        let _ = std::fs::create_dir_all(&dir);
+        let keywords = (0..300).map(|i| format!("repo_{i}")).collect::<Vec<_>>().join("_");
+        let filename = bound_filename(format!("20261003_120000_title_{keywords}.txt"));
+        let path = dir.join(&filename);
+
+        std::fs::write(&path, b"x").expect("bounded filename must be writable");
+        assert!(path.exists());
         let _ = std::fs::remove_file(&path);
     }
 }
