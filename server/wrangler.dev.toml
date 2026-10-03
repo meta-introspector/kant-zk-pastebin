@@ -1,9 +1,8 @@
 # wrangler.dev.toml — the dev/integrated relay as its own Cloudflare Worker.
 #
-# A copy of wrangler.toml with a different worker name and its own Durable
-# Object namespace, so deploying dev work cannot touch the live
-# kant-relay-v1. Same source (worker.js) and same ../web assets: what differs
-# is where it lands, not what it is.
+# A copy of wrangler.toml with a different worker name, so deploying dev
+# work cannot touch the live kant-relay-v1. Same source (worker.js) and same
+# ../web assets: what differs is where it lands, not what it is.
 #
 # Deploy with the token in ~/.cloudflare:
 #
@@ -20,23 +19,19 @@ account_id = "2c5da35f915a13c131bead97f3f7bc75"
 compatibility_date = "2025-01-01"
 
 # Same protocol as the Node relay, so a client cannot tell the twins apart.
-# The class is prefixed `Dev` because Durable Object classes are addressed by
-# name within the worker, but the SQLite storage is separate per worker anyway
-# — the prefix keeps the two namespaces unmistakable in the Cloudflare
-# dashboard and in any error message.
-[[durable_objects.bindings]]
-name = "ROOMS"
-class_name = "Room"
+#
+# There is no Durable Object here, and that is the point. The DO free tier
+# bills storage DURATION, and a 10s poll loop with a 10s long poll held
+# every room open permanently — which is what exhausted the budget (PB-19).
+# Rooms and IPFS blocks now live in isolate memory and the bytes travel over
+# the p2p relay, so a recycled isolate costs latency, not correctness.
+# Pass spend counters do reset with the isolate; the relay is a rendezvous
+# point, not an authority.
+#
+# Storage is deliberately in-memory only: no DO binding, no KV, no R2. An
+# R2 bucket would cost nothing at this volume but needs an API token with
+# R2 scope, and the token in ~/.cloudflare does not have it.
 
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["Room"]
-
-# The browser client from the same origin, so the page and its relay share a
-# host and no CORS is needed. This is what makes the whole file-share capture
-# runnable against the worker, including the IPFS checks — those need the
-# page's own /ipfs-rpc, which the worker does not provide, so expect those
-# five to report "via unreachable" here and pass only behind nginx.
 [assets]
 directory = "../web"
 binding = "ASSETS"

@@ -26,7 +26,7 @@ const VERSION = "1.0.0";
 // (`wrangler deploy --var` / deploy-cloudflare-worker.sh). Without it a
 // stale twin is indistinguishable from a current one — both used to answer
 // version "1.0.0" while serving different wasm.
-const COMMIT = "__KANT_COMMIT__";
+const COMMIT = "88c142a9";
 const MAX_LINE = 262144;
 const MAX_LINES = 4096;
 const MAX_BODY = 1048576;
@@ -43,6 +43,159 @@ const json = (obj, status = 200) =>
     status,
     headers: { "content-type": "application/json", ...CORS },
   });
+
+// --------------------------------------------------------------- IPFS store
+//
+// web/kant-ipfs.mjs derives both endpoints from `location.origin` with no
+// path prefix, so a page served from this worker asks for
+// `${origin}/ipfs-rpc` and `${origin}/ipfs-gw`. Without routes for them the
+// page cannot reach a daemon and the capture harness reports the five IPFS
+// checks as "via unreachable" — 17/22 instead of 22/22.
+//
+// There is deliberately NO upstream proxy here. An earlier version fetched
+// ${origin}/ipfs-rpc from solana.solfunmeme.com and every route 403'd with
+// Cloudflare error 1002: that name resolves publicly to 192.168.68.62, a
+// LAN address on the machine that serves it, and kubo itself listens only
+// on 127.0.0.1. Cloudflare's edge has no route to either. No amount of
+// tuning fixes that; it needs a tunnel or a real public address.
+//
+// So the Worker *is* the store. It does not need a daemon because the
+// client already did the hard part: CIDs are computed CLIENT-SIDE as
+// CIDv1/raw/sha2-256 (kant-ipfs.mjs `rawCidOf`), one `add` per 256 KiB
+// chunk, and the read path fetches each chunk back through the gateway.
+// The bytes are verified by `decryptFile` against the Kant WITNESS, not
+// against the CID — so this only has to hand back the right bytes at the
+// right CID, which is a content-addressed blob map.
+//
+// This is a tiny IPFS server for the chat, not an IPFS node: no blocks, no
+// pinning, no DHT, no exchange. And like the rooms it is in isolate memory,
+// so a chunk a peer has not fetched yet is lost on recycle. That is the
+// intended trade — the bytes also ride the p2p relay, which is the real
+// transport, and losing the server's cache costs latency, not correctness.
+
+/** Blobs on this isolate: cid -> bytes. Bounded so a chat cannot OOM it. */
+const BLOBS = new Map();
+const MAX_BLOB_BYTES = 1024 * 1024;      // 1 MiB, one 256 KiB chunk plus slack
+const MAX_BLOB_TOTAL = 16 * 1024 * 1024;  // whole-store ceiling
+let blobBytes = 0;
+
+/** RFC4648 base32, lowercase, no padding — the multibase identity for `b`. */
+function base32NoPad(bytes) {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
+  let bits = 0, value = 0, out = "";
+  for (const b of bytes) {
+    value = (value << 8) | b;
+    bits += 8;
+    while (bits >= 5) { out += alphabet[(value >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += alphabet[(value << (5 - bits)) & 31];
+  return out;
+}
+
+/** CIDv1, codec raw (0x55), multihash sha2-256 (0x12, len 0x20). */
+async function rawCidOf(bytes) {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const id = new Uint8Array(4 + d.length);
+  id[0] = 0x01; id[1] = 0x55; id[2] = 0x12; id[3] = 0x20;
+  id.set(d, 4);
+  return "b" + base32NoPad(id);
+}
+
+/** Kubo methods the page is allowed to call. Anything else is refused. */
+const IPFS_ALLOWED = new Set(["version", "id", "add", "cat", "stat", "block/stat"]);
+
+const refuse = (why, status = 403) =>
+  new Response(JSON.stringify({ ok: false, error: why }), {
+    status,
+    headers: { "content-type": "application/json", ...CORS },
+  });
+
+/** Pull the single uploaded file out of a multipart body. */
+async function multipartBytes(request) {
+  const form = await request.formData();
+  for (const [, v] of form.entries()) {
+    if (typeof v === "object" && v && typeof v.arrayBuffer === "function") {
+      return { name: v.name ?? "chunk.bin", bytes: new Uint8Array(await v.arrayBuffer()) };
+    }
+  }
+  return null;
+}
+
+async function ipfsStore(request, url) {
+  // Same-origin only. The page and its RPC share a host, so no CORS is
+  // involved and no other site can drive this store through the worker.
+  const origin = request.headers.get("origin");
+  if (origin && origin !== url.origin) return refuse("cross-origin");
+
+  // ---- gateway: GET /ipfs-gw/ipfs/<cid> ----
+  if (url.pathname.startsWith("/ipfs-gw")) {
+    const m = url.pathname.match(/^\/ipfs-gw\/ipfs\/([^/]+)$/);
+    if (!m) return refuse("only /ipfs-gw/ipfs/ is served", 404);
+    const cid = decodeURIComponent(m[1]);
+    const got = BLOBS.get(cid);
+    if (!got) return refuse("no such block", 404);
+    return new Response(got, {
+      headers: {
+        "content-type": "application/octet-stream",
+        "access-control-allow-origin": CORS["access-control-allow-origin"],
+      },
+    });
+  }
+
+  // ---- rpc: POST /ipfs-rpc/api/v0/<method> ----
+  const m = url.pathname.match(/^\/ipfs-rpc\/api\/v0\/([a-z/-]+)$/);
+  if (!m) return refuse("not found", 404);
+  const method = m[1];
+  if (!IPFS_ALLOWED.has(method)) {
+    console.log("IPFS_REFUSE", method);
+    return refuse(`method not allowed: ${method}`);
+  }
+
+  if (method === "version") {
+    return json({ Version: "kant-ipfs/1.0.0", Commit: COMMIT, Repo: "17", System: "cloudflare" });
+  }
+  if (method === "id") {
+    return json({ ID: "kant-ipfs-store", PublicKey: "", Addresses: [] });
+  }
+  if (method === "add") {
+    const got = await multipartBytes(request);
+    if (!got) return refuse("add expects a multipart file field", 400);
+    if (got.bytes.length > MAX_BLOB_BYTES) {
+      return refuse(`block too large (${got.bytes.length} > ${MAX_BLOB_BYTES})`, 413);
+    }
+    const cid = await rawCidOf(got.bytes);
+    if (!BLOBS.has(cid)) {
+      // Evict oldest first once over the ceiling. Insertion order is the
+      // Map's, so the first key is the least recently added.
+      while (blobBytes + got.bytes.length > MAX_BLOB_TOTAL && BLOBS.size > 0) {
+        const oldest = BLOBS.keys().next().value;
+        blobBytes -= BLOBS.get(oldest).length;
+        BLOBS.delete(oldest);
+      }
+      BLOBS.set(cid, got.bytes);
+      blobBytes += got.bytes.length;
+    }
+    console.log("IPFS_ADD", cid, "size=", got.bytes.length, "stored=", BLOBS.size);
+    // The shape kant-ipfs.mjs parses: one JSON object per line, Hash read
+    // off the last one.
+    return json({ Name: got.name, Hash: cid, Size: String(got.bytes.length) });
+  }
+  if (method === "cat" || method === "stat" || method === "block/stat") {
+    const cid = url.searchParams.get("arg");
+    const got = cid ? BLOBS.get(cid) : null;
+    if (!got) return refuse("no such block", 404);
+    if (method === "cat") {
+      return new Response(got, {
+        headers: {
+          "content-type": "application/octet-stream",
+          "access-control-allow-origin": CORS["access-control-allow-origin"],
+        },
+      });
+    }
+    return json({ Hash: cid, Size: got.length, CumulativeSize: got.length, Blocks: 1 });
+  }
+  return refuse("not found", 404);
+}
 
 // ------------------------------------------------------------ kzpass
 //
@@ -138,6 +291,14 @@ function senderOfLine(line) {
 const PEER_LIMIT = 10;
 const PEER_WINDOW_MS = 10 * 60 * 1000;
 
+/** Rooms on this isolate. No Durable Object, so this is the whole store. */
+const ROOMS = new Map();
+const roomFor = (name) => {
+  let r = ROOMS.get(name);
+  if (!r) { r = new Room(name); ROOMS.set(name, r); }
+  return r;
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -153,6 +314,13 @@ export default {
       return json({ ok: true, name: "kant-zk-relay", version: VERSION, commit: COMMIT, platform: "cloudflare" });
     }
 
+    // Before the room match, which would 404 these: the page's IPFS client
+    // derives both endpoints from location.origin with no path prefix, so
+    // they arrive at the root of this worker.
+    if (url.pathname.startsWith("/ipfs-rpc") || url.pathname.startsWith("/ipfs-gw")) {
+      return ipfsStore(request, url);
+    }
+
     const m = url.pathname.match(/^\/(room|ws)\/([^/]+)$/);
     if (!m) {
       console.log("404", request.url, "method=", request.method);
@@ -161,11 +329,11 @@ export default {
 
     const [, kind, roomRaw] = m;
     const room = decodeURIComponent(roomRaw);
-    const id = env.ROOMS.idFromName(room);
+    const rm = roomFor(room);
     console.log("ROUTE", kind, room, "url=", request.url, "method=", request.method);
 
     try {
-      const resp = await env.ROOMS.get(id).fetch(request);
+      const resp = await rm.fetch(request);
       const ms = Date.now() - start;
       console.log("RESPONSE", kind, room, "status=", resp.status, "ms=", ms);
       return resp;
@@ -176,47 +344,61 @@ export default {
   },
 };
 
-/** One room: an append-only log, some pollers, some sockets. */
+/**
+ * One room: an append-only log, some pollers, some sockets — all in memory.
+ *
+ * There is no Durable Object. The log lives in a plain Map on the isolate,
+ * so it is lost when the isolate is recycled; that is the deliberate trade.
+ * The room log is not the system of record for a file share: every line
+ * carries its own witness, `web/kant-net.mjs` re-checks each one against
+ * the client's own key, and the bytes themselves ride the p2p relay
+ * (the `pinned:false` + `b64` embed path in kant-ipfs.mjs). A peer that
+ * reconnects re-derives what it needs from the other peers, so losing the
+ * server's copy degrades latency, not correctness.
+ *
+ * What this buys: no Durable Object duration bill at all, which is what
+ * exhausted the free tier in the first place (PB-19). The cost: a room
+ * that nobody polls is gone, and pass spend counters reset with the
+ * isolate, so a pass can be spent again after a recycle. The relay is a
+ * convenience and a rendezvous point, not an authority.
+ */
 export class Room {
-  constructor(state) {
-    this.state = state;
+  constructor(name = "") {
+    this.name = name;
     this.base = 0;
     this.lines = [];
     this.sockets = new Set(); // { ws, cursor }
     this.waiters = new Set();
-    this.loaded = this.state.blockConcurrencyWhile(async () => {
-      const kept = await this.state.storage.get("log");
-      if (kept) { this.base = kept.base; this.lines = kept.lines; }
-    });
-    console.log("ROOM_INIT", "loaded=", this.lines.length, "base=", this.base);
+    this.peerPosts = new Map(); // sender -> [timestamps]
+    this.passes = new Map();   // pass id hex -> { spent, limit }
+    this.loaded = Promise.resolve();
+    console.log("ROOM_INIT", name || "(unnamed)", "base=", this.base);
   }
 
-  async persist() {
-    await this.state.storage.put("log", { base: this.base, lines: this.lines });
-    console.log("ROOM_PERSIST", "lines=", this.lines.length, "base=", this.base);
-  }
+  /** A no-op kept so call sites read the same and a DO can return later. */
+  async persist() {}
 
   /**
-   * Admit one POST under the pass rules.  Pass spends live in DO
-   * storage (`pass:<id>` -> { spent, limit }), the passless rate
-   * limit in `peerPosts` (sender -> timestamps).  Same rules as the
-   * Node relay's PassStore: the twins agree on what a pass buys.
+   * Admit one POST under the pass rules.  Pass spends and the passless
+   * per-sender rate limit both live in Maps on this instance, so both
+   * reset when the isolate does — see the class comment for why that is
+   * accepted. Same rules as the Node relay's PassStore, so the twins
+   * agree on what a pass buys while it lasts.
    */
   async admitPass(pass, lines, roomName) {
     const now = Date.now();
     if (pass && pass.limit > 0) {
-      const key = "pass:" + pass.id.map((b) => b.toString(16).padStart(2, "0")).join("");
-      const cur = (await this.state.storage.get(key)) ?? { spent: 0, limit: pass.limit };
+      const key = pass.id.map((b) => b.toString(16).padStart(2, "0")).join("");
+      const cur = this.passes.get(key) ?? { spent: 0, limit: pass.limit };
       if (cur.spent >= cur.limit) {
         return { ok: false, status: 429, error: `pass spent (${cur.limit} post(s) allowed)` };
       }
       cur.spent += 1;
-      await this.state.storage.put(key, cur);
+      this.passes.set(key, cur);
       return { ok: true, remaining: cur.limit - cur.spent };
     }
     // No pass (or the owner's unlimited invite): per-sender rate limit.
     const sender = lines.map(senderOfLine).find((s) => s != null) ?? "anonymous";
-    this.peerPosts ??= new Map();
     const win = this.peerPosts.get(sender) ?? [];
     const kept = win.filter((t) => t >= now - PEER_WINDOW_MS);
     if (kept.length + lines.length > PEER_LIMIT) {
