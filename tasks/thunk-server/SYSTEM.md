@@ -87,6 +87,18 @@ they are referenced rather than embedded. The wrapper for those references is
 `scripts/kant-codec.mjs`, with `ref`/`annot` and a full 64-hex `valHash`.
 See [IPFS-IPDL.md](IPFS-IPDL.md).
 
+**Compilers are thunks too.** `lake`, `cargo` and `nix` are content-addressed
+refs, not ambient `$PATH`. The pattern already runs at scale in
+`aristotle-manager-src/splitter-engine`: the splitter applied to itself produced
+**2,761 declarations, 2,761 `flake.nix` files, and 175 independent flakes** —
+a source file, its dependencies, and a per-declaration build. That is the thunk
+shape; it just predates the name. Because the Lean toolchain is formalised and
+the kernel is reachable by reflection in `aristotle`, the Lean chain terminates
+in something *verifiable* rather than a pinned binary, while the Rust chain only
+terminates in a pinned `rustc`. So "verified" and "pinned" are different claims
+and the refs should be able to tell them apart. See
+[TOOLCHAIN-THUNKS.md](TOOLCHAIN-THUNKS.md).
+
 The short version, measured rather than argued: `web/kant_kernel.wasm` is 799
 bytes with **zero imports**, so isolation is a property of the artifact instead
 of a policy around it, and the payload is 5% of one 16 KiB swarm frame. Three

@@ -73,8 +73,8 @@ dag.json written (117204 lines)
 ```
 
 **That is the compiler-as-thunk pattern, already working.** Every declaration
-became a `flake.nix` — a content-addressed build unit with its dependencies as
-refs — and `doc-index.md` records **175 independent flakes**. A sample:
+became a `flake.nix` — a build unit with its dependencies as refs — and
+`doc-index.md` records **175 independent flakes**. A sample:
 
 ```lean
 -- Split/absurd.lean
@@ -87,6 +87,13 @@ def absurd : ... := fun {a} {b} (h₁ : a) (h₂ : Not a) => False.rec ... (h₂
 exists and already runs: **a source file, its dependencies, and a per-declaration
 build.** What is missing is only the naming — nothing calls these "thunks" or
 gives them IPDL refs, because they predate the vocabulary.
+
+One caveat from reading their own numbers: `TEST_RESULTS.md` claims **2,761**
+declarations and 2,761 `flake.nix` files, but the `find … -name "*.lean"` output
+in the same document says **2,759**. Two files are accounted for in one count
+and not the other, and nothing says why. Small, but it is exactly the kind of
+discrepancy that a content-addressed scheme would make impossible — which is a
+small argument for the whole idea rather than against these results.
 
 This also sharpens the recursion question. I claimed the Lean chain "bottoms out
 in something small enough to check by hand" as a *hypothetical*. If the Lean

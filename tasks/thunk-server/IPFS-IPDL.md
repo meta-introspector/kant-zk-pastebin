@@ -140,6 +140,15 @@ turns `flake.nix:17-23` from prose config into a document the swarm can carry.
 Phases 4–5 are where the real complexity lives, because crates and nix *do*
 resolve versions and a resolver that disagrees with cargo is worse than none.
 
+## Related
+
+[TOOLCHAIN-THUNKS.md](TOOLCHAIN-THUNKS.md) takes the third group further: the
+toolchains that consume `lean`/`rust`/`nix` inputs are themselves thunks. Because
+the Lean toolchain is formalised and the kernel is reachable by reflection in
+`aristotle`, the Lean chain terminates in something **verifiable**; the Rust
+chain only terminates in a pinned `rustc`. So "verified" and "pinned" are
+different claims and a ref should be able to distinguish them.
+
 ## Open
 
 - **Does `refs` belong in the thunk id?** I argue yes — two peers with the same

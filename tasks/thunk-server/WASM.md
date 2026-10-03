@@ -235,6 +235,10 @@ than an artifact. It reuses `valHash` from `scripts/kant-codec.mjs` as the thunk
 id, so phase 1 and the IPDL resolver should be built together rather than
 sequenced.
 
+[TOOLCHAIN-THUNKS.md](TOOLCHAIN-THUNKS.md) then takes it one step further: the
+compilers are thunks too, and the Lean chain terminates in a kernel rather than a
+pinned binary — so "verified" and "pinned" become distinguishable claims.
+
 ## Decisions needed
 
 **Does the swarm carry `js` thunks at all?** Phase 6 is blocked on this. Either
