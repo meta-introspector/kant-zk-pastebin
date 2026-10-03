@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { CLAIMS, evaluate, resolveInput, runClaims } from "./thunk-claims.mjs";
+import { CLAIMS, evaluate, resolveInput, runClaims, Thunk } from "./thunk-claims.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p, enc = "utf8") => readFileSync(resolve(ROOT, p), enc);
@@ -129,11 +129,28 @@ t("args-hash-sorts-keys goes red under insertion order", () =>
       return ab === ba;
     }));
 
-t("codec-has-a-float goes red when int and float share a tag", () =>
-  mustFlipProbe("codec-has-a-float", "one tag for every number",
+t("codec-has-no-float goes red when a seventh type appears", () =>
+  // I added a float to this codec and it passed every JS-side test. It was
+  // wrong: `Kant.Codec.Val` has six constructors, `canonEnc_injective` is proved
+  // over them, and IPDL drops floats for binary compatibility while proving the
+  // projection LOSSLESS. So this claim has to notice the type coming back.
+  mustFlipProbe("codec-has-no-float", "a float constructor",
     async () => {
       const C = await import(`${ROOT}/scripts/kant-codec.mjs`);
-      return C.valHash(C.vInt(1)) === C.valHash(C.vFloat(1));
+      return typeof C.vFloat === "function";
+    }));
+
+t("fractional-argument-refused goes red when a fraction is hashed", () =>
+  mustFlipProbe("fractional-argument-refused", "1.5 rounded to an int",
+    async () => {
+      const t = await Thunk.load(
+        "module.exports.initialState = {};\n" +
+        "module.exports.reduce = function reduce(s, i) { return { state: s, effects: [] }; };",
+        "c", "1.0.0");
+      // The coercion this claim exists to prevent.
+      let threw = false;
+      try { t.argsHash({ n: Math.trunc(1.5) }); } catch { threw = true; }
+      return threw;
     }));
 
 t("apply-unwraps goes red when the transducer is called as a method", () =>

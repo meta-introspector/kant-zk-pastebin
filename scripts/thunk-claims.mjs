@@ -39,10 +39,10 @@ const RUN = () => ({ kind: "run" });
 // The identity claims below run a real thunk rather than reading its source,
 // because a claim written as "this line contains X" describes a spelling and
 // stops holding the moment the code is rewritten correctly.
-const { Thunk } = await import(`${ROOT}/server/thunk.mjs`);
+export const { Thunk } = await import(`${ROOT}/server/thunk.mjs`);
 
 /** The smallest source `Thunk.load` accepts, in the dialect it accepts. */
-const THUNK_SRC = `module.exports.initialState = {};
+export const THUNK_SRC = `module.exports.initialState = {};
 module.exports.reduce = function reduce(s, i) {
   return { state: { n: s.n + (i.by ?? 1) }, effects: [] };
 };`;
@@ -247,26 +247,28 @@ export const CLAIMS = [
     probe: async () => {
       const t = await Thunk.load(THUNK_SRC, "c", "1.0.0");
       return t.argsHash({ a: 1, b: 2 }) === t.argsHash({ b: 2, a: 1 })
-        && t.argsHash({ a: 1 }) !== t.argsHash({ a: 2 })
-        && t.argsHash({ n: 0 }) !== t.argsHash({ n: -0 });
+        && t.argsHash({ a: 1 }) !== t.argsHash({ a: 2 });
     },
   },
   {
-    id: "codec-has-a-float",
-    claim: "the codec encodes a finite double as its own type, distinct from an int",
-    doc: "WASM.md, SYSTEM.md",
+    id: "codec-has-no-float",
+    claim: "the codec has exactly the six value types that Kant.Codec.Val defines",
+    doc: "SYSTEM.md",
     kind: "health",
     input: RUN(),
     expect: true,
     probe: async () => {
       const C = await import(`${ROOT}/scripts/kant-codec.mjs`);
-      if (C.valHash(C.vInt(1)) === C.valHash(C.vFloat(1))) return false;
-      if (C.valHash(C.vFloat(1)) === C.valHash(C.vFloat(1.5))) return false;
-      // -0 is not 0: `1 / -0` is -Infinity.
-      if (C.valHash(C.vFloat(0)) === C.valHash(C.vFloat(-0))) return false;
-      // And it survives all five projections that enumerate value types.
-      for (const n of [1.5, 0, -0, 1e21, -2.5]) {
-        const v = C.vFloat(n);
+      // Lean proves `canonEnc_injective` over six constructors, and IPDL drops
+      // floats for binary compatibility while proving the projection LOSSLESS.
+      // A seventh type here would be a value the wire format is specified to
+      // discard, and the JS codec would stop being a transcription.
+      if (typeof C.vFloat === "function") return false;
+      const six = [C.vNull, C.vBool(true), C.vInt(-7), C.vStr("x"),
+        C.vList([C.vInt(1)]), C.vObj([["k", C.vInt(1)]])];
+      if (six.length !== 6) return false;
+      // All six still round-trip through all five projections.
+      for (const v of six) {
         const back = [
           C.canonDecode(C.canonEnc(v)),
           C.yamlDecode(C.yamlEnc(v)),
@@ -275,27 +277,31 @@ export const CLAIMS = [
           C.ipdlRead(C.ipdlText(C.embed(v))),
         ];
         for (const b of back) {
-          if (!b || b.t !== "float" || !Object.is(b.n, n)) return false;
+          if (!b || C.canonEnc(b) !== C.canonEnc(v)) return false;
         }
       }
-      return true;
+      // Injectivity, which is what Lean actually proves: distinct tags.
+      const tags = six.map((v) => C.canonEnc(v)[0]);
+      return new Set(tags).size === tags.length;
     },
   },
   {
-    id: "codec-refuses-non-finite",
-    claim: "the codec refuses NaN and Infinity rather than encoding them",
-    doc: "WASM.md",
+    id: "fractional-argument-refused",
+    claim: "argsHash refuses a non-integer number and -0, because Val has no float",
+    doc: "SYSTEM.md, THUNK-CYCLE.md",
     kind: "health",
     input: RUN(),
     expect: true,
     probe: async () => {
-      const C = await import(`${ROOT}/scripts/kant-codec.mjs`);
-      for (const n of [NaN, Infinity, -Infinity]) {
+      const t = await Thunk.load(THUNK_SRC, "c", "1.0.0");
+      for (const n of [1.5, -0.25, 1e-7, -0]) {
         let threw = false;
-        try { C.vFloat(n); } catch { threw = true; }
+        try { t.argsHash({ n }); } catch { threw = true; }
         if (!threw) return false;
       }
-      return true;
+      // Integers still work, and 1 is 1.
+      return t.argsHash({ n: 1 }) === t.argsHash({ n: 1 })
+        && t.argsHash({ n: 1 }) !== t.argsHash({ n: 2 });
     },
   },
   {
@@ -307,7 +313,7 @@ export const CLAIMS = [
     expect: true,
     probe: async () => {
       const t = await Thunk.load(THUNK_SRC, "c", "1.0.0");
-      for (const v of [undefined, NaN, Infinity, () => 1, new Date(0), new Map()]) {
+      for (const v of [undefined, NaN, Infinity, 1.5, -0, () => 1, new Date(0), new Map()]) {
         let threw = false;
         try { t.argsHash({ v }); } catch { threw = true; }
         if (!threw) return false;

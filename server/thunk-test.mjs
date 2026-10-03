@@ -281,14 +281,22 @@ t("argsHash is insensitive to key order and sensitive to values", async () => {
   if (thunk.argsHash({ a: 1 }) === thunk.argsHash({ a: 2 })) {
     throw new Error("a changed value did not change the args hash");
   }
-  // The int/float distinction, which is why the codec grew a float type.
-  if (thunk.argsHash({ n: 1 }) === thunk.argsHash({ n: 1.5 })) {
-    throw new Error("1 and 1.5 share an args hash");
+  // `Kant.Codec.Val` has no float constructor, so a fractional number has no
+  // canonical form and therefore no content address. Coercing it to `1` would
+  // let two different calls share one cache entry.
+  if (thunk.argsHash({ n: 1 }) !== thunk.argsHash({ n: 1 })) {
+    throw new Error("1 does not hash to itself");
   }
-  // -0 is not 0: `1 / -0` is -Infinity.
-  if (thunk.argsHash({ n: 0 }) === thunk.argsHash({ n: -0 })) {
-    throw new Error("0 and -0 share an args hash");
+  for (const fractional of [1.5, -0.25, 1e-7]) {
+    let threw = false;
+    try { thunk.argsHash({ n: fractional }); } catch { threw = true; }
+    if (!threw) throw new Error(`${fractional} was hashed; Kant.Codec.Val has no float`);
   }
+  // -0 is not 0 (`1 / -0` is -Infinity), but there is no tag to separate them
+  // under, so it is refused rather than silently merged with 0.
+  let threw = false;
+  try { thunk.argsHash({ n: -0 }); } catch { threw = true; }
+  if (!threw) throw new Error("-0 was hashed as 0, which BigInt would have done");
 });
 
 t("an input with no content address is refused, not coerced", async () => {
@@ -300,6 +308,8 @@ t("an input with no content address is refused, not coerced", async () => {
     undefined: undefined,
     NaN: NaN,
     Infinity: Infinity,
+    "a fraction": 1.5,
+    "-0": -0,
     "a function": () => 1,
     "a Date": new Date(0),
     "a Map": new Map(),
@@ -321,13 +331,20 @@ t("an input with no content address is refused, not coerced", async () => {
   if (!threw) throw new Error("a cycle was hashed");
 });
 
-t("a float survives every codec projection", async () => {
-  // The codec grew `t: "float"` so that a non-integer number has an id at all.
-  // Five encoders enumerate value types; a new type that only worked in one of
-  // them would be a value that could be hashed but not stored.
+t("the codec has exactly the six value types Lean has", async () => {
+  // `RequestProject/Kant/Codec/Val.lean` defines `Val` with six constructors and
+  // proves `canonEnc_injective` over them. IPDL drops floats for binary
+  // compatibility and proves the projection is LOSSLESS. So a seventh type here
+  // would be a value the wire format is specified to discard, and the JS codec
+  // would no longer be a transcription of the Lean one.
   const C = await import("../scripts/kant-codec.mjs");
-  for (const n of [1.5, 0, -0, 1e21, 1 / 3, -2.5]) {
-    const v = C.vFloat(n);
+  if (typeof C.vFloat === "function") {
+    throw new Error("the codec has a float; Kant.Codec.Val has no float constructor");
+  }
+  // The six that do exist, still round-tripping through all five projections.
+  const values = [C.vNull, C.vBool(true), C.vInt(-7), C.vStr("x"),
+    C.vList([C.vInt(1)]), C.vObj([["k", C.vInt(1)]])];
+  for (const v of values) {
     const projections = {
       canon: C.canonDecode(C.canonEnc(v)),
       yaml: C.yamlDecode(C.yamlEnc(v)),
@@ -336,15 +353,14 @@ t("a float survives every codec projection", async () => {
       ipdl: C.ipdlRead(C.ipdlText(C.embed(v))),
     };
     for (const [fmt, back] of Object.entries(projections)) {
-      if (!back || back.t !== "float" || !Object.is(back.n, n)) {
-        throw new Error(`${fmt} lost the float ${n}: ${JSON.stringify(back)}`);
+      if (C.canonEnc(back) !== C.canonEnc(v)) {
+        throw new Error(`${fmt} lost ${v.t}: ${JSON.stringify(back)}`);
       }
     }
   }
-  // And 1 the integer and 1.0 the float stay distinct values.
-  if (C.valHash(C.vInt(1)) === C.valHash(C.vFloat(1))) {
-    throw new Error("int 1 and float 1 collide");
-  }
+  // And the tags are distinct, which is what makes injectivity hold.
+  const tags = values.map((v) => C.canonEnc(v)[0]);
+  if (new Set(tags).size !== tags.length) throw new Error(`tag collision: ${tags}`);
 });
 
 for (const [name, fn] of tests) {

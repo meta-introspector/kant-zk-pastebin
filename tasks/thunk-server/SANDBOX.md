@@ -117,7 +117,7 @@ someone makes it.
 was written — the 16-char id — were phase 1, which landed 2026-10-03.
 
 The default-deny rule here turned out to apply to identity as well as
-capability, and that is where the codec's new float type came from: a thunk
-argument with no canonical spelling is refused rather than coerced, because a
-coerced hash would let two different calls share one cache entry. See the phase
-1 section of [SYSTEM.md](SYSTEM.md).
+capability: a thunk argument with no canonical spelling is refused rather than
+coerced, because a coerced hash would let two different calls share one cache
+entry. `Kant.Codec.Val` having no float is the case that forced the rule — see
+the phase 1 section of [SYSTEM.md](SYSTEM.md).

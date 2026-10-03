@@ -68,7 +68,8 @@ Three defect claims have now done their job. `thunk-load-throws` and
 went red when phase 1 landed — all three were rewritten as health claims, and
 replacements took their place: `sandbox-has-no-require`, `sandbox-refuses-console`
 and `sandbox-refuses-dynamic-import` for phase 0; thirteen more for phase 1,
-covering the content hash, the call id and the float type.
+covering the content hash, the call id, and the refusal of an argument that has
+no content address.
 
 `thunk-id-truncated` is the one worth dwelling on. Its probe was
 `/\.slice\(0,\s*16\)/.test(src)` — a claim about a *spelling*. When phase 1
@@ -82,6 +83,20 @@ requires different ids — no implementation detail appears in it at all.
 That is the whole lesson of the three mistakes, applied to the checker: a claim
 written as "this line contains X" stops holding when the code is fixed, and the
 failure looks identical to a regression.
+
+**And a claim written only in JS cannot see a divergence from Lean.** The first
+version of `codec-has-a-float` asserted that the codec had a float type, and it
+was right about the JS and wrong about the format: `RequestProject/Kant/Codec/
+Val.lean` has six constructors, no float, and a proof of `canonEnc_injective`
+over them, and IPDL drops floats for binary compatibility while proving the
+projection `LOSSLESS`. Every JS test passed. The claim is now `codec-has-no-float`,
+and it reads the codec rather than the Lean source — because the Lean source is
+three git worktrees away and not part of this repository, so there was nothing
+here to disagree with it.
+
+That is the same shape as the three mistakes, one level up: I had a picture of
+the codec that was true of the JS and had stopped being true of the thing the JS
+is a transcription of.
 
 The CLI says which kind of red you are looking at, so a fix does not get mistaken
 for a regression:

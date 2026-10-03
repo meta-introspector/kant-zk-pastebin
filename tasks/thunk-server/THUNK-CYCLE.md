@@ -71,16 +71,19 @@ did not say:
   `valHash` takes a canonical `Val`, and a plain `{by: 1}` throws
   `CodecError: not a canonical value`. The conversion sorts object keys, because
   `canonEnc` walks fields in order and JS key order is not part of the value.
-- **The codec needed a float.** It encoded null/bool/int/str/list/obj, and
-  `vInt(1.5)` throws from `BigInt`, so a thunk taking a fractional number had no
-  addressable call id. `{ t: "float", n }` now exists, in all five projections
-  that enumerate value types, and `1` is not `1.0`. `NaN` and `±Infinity` are
-  refused rather than encoded.
-- **Unaddressable inputs are refused, not coerced.** `undefined`, functions,
-  symbols, `Date`, `Map`, cycles: none has a spelling that reads back as itself,
-  so a coerced hash would claim two different calls are one. This is the
-  default-deny rule from [SANDBOX.md](SANDBOX.md), applied to identity rather
-  than to capability.
+- **The codec has no float, so a fractional argument is refused.**
+  `Kant.Codec.Val` defines six constructors — null, bool, int, str, list, obj —
+  and `Val.lean:422` proves `canonEnc_injective` over exactly those six. IPDL
+  drops floats for binary compatibility and proves its projection `LOSSLESS`.
+  Adding a seventh type here would have made the JS `valHash` agree with the
+  Lean one on everything both can name and silently disagree on everything else,
+  so `argsHash` throws on `1.5` instead. The cost is real: no thunk taking a
+  fractional number has a call id yet.
+- **Unaddressable inputs are refused, not coerced.** `undefined`, `NaN`,
+  `Infinity`, fractions, `-0`, functions, symbols, `Date`, `Map`, cycles: none
+  has a spelling that reads back as itself, so a coerced hash would claim two
+  different calls are one. This is the default-deny rule from
+  [SANDBOX.md](SANDBOX.md), applied to identity rather than to capability.
 
 ## 2. `apis + sops + args ⇒ results`
 
@@ -104,7 +107,7 @@ Three properties, in the order they matter:
 - **Args are content-addressed.** `argsHash` is `valHash` from
   `scripts/kant-codec.mjs`, which returns a full 64-hex digest and is stable
   across serialization. It needed a conversion from plain values to canonical
-  ones and a float type to exist at all — see point 1.
+  ones — see point 1 — and it covers the six types `Val` has, no more.
 
 The wasm case from [WASM.md](WASM.md) is the degenerate one and worth naming: a
 wasm thunk with zero imports needs no apis and no sops, because it cannot reach

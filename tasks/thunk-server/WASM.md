@@ -233,7 +233,7 @@ Three rules, each earned from a defect this cycle:
 | # | phase | done when |
 |---|---|---|
 | 0 | **`loadSource` works, and the sandbox policy is decided** | `Thunk.load` accepts a trivial thunk; `apply` does not double-wrap; the two capability tests pass for a real reason. Today it throws on everything. |
-| 1 | Content addressing | **done.** `id` is `valHash({ bytes, refs })`, 64 hex, no prefix; `callId` is a separate key; the codec has a float type so a fractional argument has an address |
+| 1 | Content addressing | **done.** `id` is `valHash({ bytes, refs })`, 64 hex, no prefix; `callId` is a separate key. A fractional argument is refused, because `Kant.Codec.Val` has no float and IPDL drops them |
 | 2 | wasm backend | a `format: "wasm"` thunk loads, applies, snapshots, resumes |
 | 3 | Kernel as a thunk | the 21 `KERNEL_EXPORTS` are reachable through `apply(input)` |
 | 4 | Swarm transport | a thunk crosses `web/kant-libp2p.mjs` frames; JS and Rust agree byte-for-byte |

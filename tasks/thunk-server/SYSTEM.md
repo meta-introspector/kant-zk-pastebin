@@ -220,27 +220,39 @@ cache does. `secretRefs` name slots and never carry contents; `apiRefs` is there
 because a result computed with a narrow api set must not be served to a caller
 holding a wide one.
 
-**The codec grew a float type.** `argsHash` is `valHash` over the args, and
-`valHash` only encoded null/bool/int/str/list/obj — while `vInt(1.5)` throws a
-`RangeError` from `BigInt`. A thunk taking a non-integer number therefore had no
-addressable call id at all. `{ t: "float", n }` fixes that, in all five
-projections that enumerate value types (canonical, YAML, XML, CSV, IPDL), with
-`1` and `1.0` as distinct values under distinct tags. `-0` is spelled explicitly
-because `String(-0)` is `"0"` and `BigInt(-0)` is `0n`: it is not `0`, since
-`1 / -0` is `-Infinity`.
+**A fractional argument has no address, and that is the codec's decision, not
+ours.** `argsHash` is `valHash` over the args, and `valHash` encodes
+null/bool/int/str/list/obj — while `vInt(1.5)` throws a `RangeError` from
+`BigInt`. So a thunk taking a non-integer number has no content-addressable call
+id.
 
-`NaN` and `±Infinity` are **refused** rather than encoded — `NaN` is not equal to
-itself, so a canonical form containing one would not be a fixed point. So are
-`undefined`, functions, symbols, `Date`, `Map`, and anything non-plain. Each has
-no spelling that reads back as itself, so a coerced hash would claim two
-different calls are one. An unaddressable input is a loud failure at the call
-site, which is recoverable; a wrong cache hit is not. This is the same
-default-deny logic as the sandbox, applied to identity instead of capability.
+I added a `{ t: "float", n }` type to fix that. It passed every JS-side test,
+and it was wrong. `RequestProject/Kant/Codec/Val.lean` defines `Val` with six
+constructors and no float, and `Val.lean:422` proves `canonEnc_injective` over
+exactly those six. IPDL **drops floats for binary compatibility** and proves the
+projection is `LOSSLESS` (`project_embed`). So the JS codec would have been
+encoding a seventh value that the wire format is specified to discard and that
+no Lean proof covers — the JS `valHash` would agree with the Lean one on
+everything both can name and silently disagree on everything else.
+
+The float is reverted. A non-integer argument is now **refused**, alongside
+`NaN`, `±Infinity`, `undefined`, functions, symbols, `Date`, `Map`, cycles, and
+`-0` (which has no tag to separate it from `0`, since `BigInt(-0)` is `0n`, while
+`1 / -0` is `-Infinity`). Each has no spelling that reads back as itself, so a
+coerced hash would claim two different calls are one. An unaddressable input is
+a loud failure at the call site, which is recoverable; a wrong cache hit is not.
+This is the same default-deny logic as the sandbox, applied to identity instead
+of capability.
+
+The cost is real and worth naming: **no thunk taking a fractional number has a
+call id.** A metric, a rate, a probability — none of those can be cached yet.
+When they need to be, the fix belongs in Lean first, with `canonEnc_injective`
+re-proved over seven constructors, and only then here.
 
 Three rules that were collisions before they were rules, each with a test:
 object keys are **sorted** (`canonEnc` walks fields in order and JS key order is
-not part of the value); `1` and `1.5` are **distinct**; `-0` and `0` are
-**distinct**.
+not part of the value); differing arguments get **different** hashes; and the
+codec still has exactly the **six** value types `Kant.Codec.Val` defines.
 
 `server/example-compactor.mjs`, the one concrete thunk, is still written in the
 ESM form and does not parse under this policy. `apply()` accepts both shapes, so
@@ -287,12 +299,13 @@ the example rather than about the sandbox.
    `web/wasm-test.mjs`, which reads the gitignored `dist/` and so fails in a
    fresh checkout even though the embedded copy is byte-identical.
 1. ~~**Phase 1: content addressing.**~~ Done 2026-10-03. The id is the full
-   64-hex `valHash({ bytes, refs })`, the call id is a separate key, and the
-   codec grew a float type so a non-integer argument has an address at all. Two
+   64-hex `valHash({ bytes, refs })`, and the call id is a separate key. Two
    defects fixed on the way, one of which (two thunks with different URLs
-   sharing an id) was not in scope and was found by measuring. See the phase 1
-   section above and `scripts/thunk-claims.mjs`. Still open from this item:
-   convert `server/example-compactor.mjs` to the `module.exports` dialect, which
+   sharing an id) was not in scope and was found by measuring. A third — adding a
+   float to the codec — was introduced and then reverted, because
+   `Kant.Codec.Val` has no float and IPDL drops them. See the phase 1 section
+   above and `scripts/thunk-claims.mjs`. Still open from this item: convert
+   `server/example-compactor.mjs` to the `module.exports` dialect, which
    `apply()` already accepts in both forms.
 2. Write `server/schedule.mjs` and the systemd driver `server/scheduler.mjs`;
    update `kant-relay.service` so the systemd service runs the scheduler loop.

@@ -15,7 +15,7 @@
 // definition cache. Collapsing them is how you serve a cached result computed
 // from different arguments to someone who asked for these.
 
-import { valHash, vObj, vList, vStr, vInt, vFloat, vNull, vBool } from "../scripts/kant-codec.mjs";
+import { valHash, vObj, vList, vStr, vInt, vNull, vBool } from "../scripts/kant-codec.mjs";
 import { stripComments } from "./js-scan.mjs";
 
 /** Thrown when a value has no content address, so no id can be computed for it.
@@ -36,9 +36,14 @@ const MAX_DEPTH = 64;
  *    differently while being the same value. JS object key order is insertion
  *    order, which is not part of the value.
  *
- *  - **Integers and floats stay distinct.** `1` is `vInt(1)`, `1.5` is
- *    `vFloat(1.5)`, and they get different tags and different hashes. That is
- *    what the codec's float type is for.
+ *  - **A non-integer number is refused, not rounded and not made a string.**
+ *    `Kant.Codec.Val` has six constructors -- null, bool, int, str, list, obj
+ *    -- and no float, so there is no canonical form for `1.5` to hash into.
+ *    IPDL drops floats for binary compatibility, and the Lean side proves
+ *    `project_embed` is `LOSSLESS`, so a float carried here would be a value the
+ *    wire format is specified to discard. Coercing it to `1` would let two
+ *    genuinely different calls share one cache entry, which is the failure this
+ *    whole module exists to prevent.
  *
  *  - **Anything else is refused, not coerced.** `undefined`, functions, symbols,
  *    `NaN`, `Infinity`, class instances. There is no spelling of those that
@@ -72,12 +77,22 @@ function convert(x, path, depth) {
       if (!Number.isFinite(x)) {
         throw new UnaddressableError(`${path}: ${String(x)} has no content address`);
       }
-      // Negative zero goes down the float path even though it is an integer,
-      // because `vInt` holds a BigInt and `BigInt(-0)` is `0n`: routing it
-      // there would make `-0` and `0` the same value. They are not -- a thunk
-      // can tell them apart with `1 / x` -- so they get different hashes.
-      if (Object.is(x, -0)) return vFloat(x);
-      return Number.isInteger(x) ? vInt(x) : vFloat(x);
+      if (!Number.isInteger(x)) {
+        throw new UnaddressableError(
+          `${path}: ${x} is not an integer, and Kant.Codec.Val has no float -- ` +
+          `a fractional argument has no content address`,
+        );
+      }
+      // Negative zero is refused too, and for a sharper reason than "no float":
+      // `vInt` holds a BigInt and `BigInt(-0)` is `0n`, so routing `-0` there
+      // would make it the same value as `0`. They are not -- a thunk can tell
+      // them apart with `1 / x`, which is `-Infinity` -- and there is no tag to
+      // separate them under, so this is an unaddressable value rather than a
+      // value hashed wrongly.
+      if (Object.is(x, -0)) {
+        throw new UnaddressableError(`${path}: -0 has no content address`);
+      }
+      return vInt(x);
     case "undefined":
       throw new UnaddressableError(`${path}: undefined has no content address`);
     case "function":
