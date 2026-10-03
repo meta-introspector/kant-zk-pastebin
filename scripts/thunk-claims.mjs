@@ -286,6 +286,26 @@ export const CLAIMS = [
     },
   },
   {
+    id: "js-codec-matches-lean-source",
+    claim: "the JS codec encodes exactly the value types Kant.Codec defines",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    // Reads `RequestProject/Kant/Codec/Val.lean` out of this repository's own
+    // `feature/lean` at a pinned commit. Red when the object is unreachable,
+    // not skipped: a checker that skips quietly when it cannot see the thing it
+    // checks reads as a green run, which is the exact failure it exists to
+    // catch. The message says how to fix it.
+    probe: async () => {
+      const { compare } = await import(`${ROOT}/scripts/lean-codec-types.mjs`);
+      const out = await compare();
+      return out.rows.every((r) => r.ok)
+        ? true
+        : `JS/Lean type mismatch: ${out.rows.filter((r) => !r.ok).map((r) => r.detail).join(" | ")}`;
+    },
+  },
+  {
     id: "thunk-id-is-lean-representable",
     claim: "a thunk id is a valHash of a value naming only shapes Kant.Codec defines",
     doc: "VERIFICATION.md, SYSTEM.md",

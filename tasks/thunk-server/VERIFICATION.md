@@ -100,6 +100,21 @@ is a transcription of.
 
 ### The guard that closes it
 
+`LEAN_VAL_TAGS` is the list of shapes `RequestProject.Kant.Codec` can name — the
+six `Val` constructors plus `ref` and `annot` from `Ipdl`. `isLeanRepresentable()`
+walks a canonical value and answers whether Lean could have built it, and
+`thunkDefinitionVal()` exposes what a thunk id is actually hashed over so
+something can check.
+
+A thunk id that Lean cannot reproduce is an id the swarm cannot verify against a
+proof, so this gates the id rather than the codec.
+
+### The check that keeps the list honest
+
+`LEAN_VAL_TAGS` is a hand-transcribed list, which is the same failure mode one
+level down — a claim about the tree that can stop being true. So
+`scripts/lean-codec-types.mjs` re-derives it from the Lean source and compares.
+
 `LEAN_VAL_TAGS` in `server/thunk-id.mjs` is the list of shapes
 `RequestProject.Kant.Codec` can name — the six `Val` constructors plus `ref` and
 `annot` from `Ipdl`. `isLeanRepresentable()` walks a canonical value and answers
@@ -116,18 +131,43 @@ Two things this guard is honest about:
 
 - It knows the tag list, not the Lean proofs. It cannot tell you `Val` changed;
   it can only tell you that JS is using a shape the recorded list does not
-  contain. The list is transcribed by hand from `Val.lean:37` and `Ipdl.lean`,
-  and nothing in this repository re-derives it.
-- **The Lean source is not in this repository and not a flake input.** It lives
-  in git worktrees under `~/projects/worktrees/*/RequestProject/Kant/`, so the
-  guard cannot read it in CI and the list can go stale silently.
+  contain.
 
-What *is* checkable, and was checked by hand on 2026-10-03: `Tests.lean` defines
-`gSample` as "the value both implementations serialise" and pins all six outputs
-with `#guard`. The JS `codec-test.mjs` golden vector produces the identical
-`canonEnc`, `valHash` (`3c796f2f…`), `ipdlText`, `yamlEnc`, `xmlEnc` and
-`csvEncode`. So the transcription is currently faithful — verified once, by
-reading both sides, and not verifiable by any test in this tree.
+**Both of those limits are now gone**, because the Lean source turned out to be
+in *this repository* — on `feature/lean`, not on this branch and not a flake
+input. An earlier reading of the tree concluded it was external and
+unverifiable; that was wrong, and `find` was the reason.
+
+`scripts/lean-codec-types.mjs` reads `RequestProject/Kant/Codec/Val.lean` and
+`Ipdl.lean` with `git show` at a pinned commit (`a3cd85b4`, on `origin`) and
+parses the constructors out of the declarations, so a constructor added to Lean
+shows up without this file being edited. It then compares three things: the tags
+`canonEnc` encodes, Lean's constructors, and `LEAN_VAL_TAGS`. All three agree —
+six canonical types plus `ref` and `annot`.
+
+It reads the `switch (v.t)` in `canonEnc` rather than calling the constructors,
+because calling them does not work: `vInt(null)` throws from `BigInt` and
+`vStr(null)` returns the tag `str` for a value that was never a string, so a
+probe both misses types and invents them. That was the first version, and it
+reported three types.
+
+**It has teeth.** Re-adding `case "float":` to `canonEnc` — the exact phase 1
+mistake — turns two of the four checks red and names `float` in both.
+`thunk-claims-test.mjs` does this on every run and restores the file.
+
+**It does not false-pass.** With an unreachable pin it exits 2 and prints
+`git fetch origin feature/lean` rather than reporting success. That is the whole
+design constraint: a checker that skips quietly when it cannot see the thing it
+checks reads as a green run, which is the failure it exists to catch.
+
+What remains unverified, and cannot be verified from here: constructor
+*semantics* drifting, a `#guard` vector changing, or a Lean proof being weakened.
+It compares declarations, not proofs. On 2026-10-03 the `gSample` vectors were
+compared by hand — `Tests.lean` defines it as "the value both implementations
+serialise" and pins all six outputs, and `codec-test.mjs` produces the
+identical `canonEnc`, `valHash` (`3c796f2f…`), `ipdlText`, `yamlEnc`, `xmlEnc`
+and `csvEncode`. That check is real but manual, and reading the vectors out of
+`Tests.lean` the same way the types are read would make it automatic.
 
 The CLI says which kind of red you are looking at, so a fix does not get mistaken
 for a regression:

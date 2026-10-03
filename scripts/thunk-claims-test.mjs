@@ -9,7 +9,7 @@
 // No network. scripts/relay-telemetry.mjs only runs its collector when invoked
 // directly, so importing readBudget() here costs nothing.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { CLAIMS, evaluate, resolveInput, runClaims, Thunk } from "./thunk-claims.mjs";
@@ -139,6 +139,41 @@ t("codec-has-no-float goes red when a seventh type appears", () =>
       const C = await import(`${ROOT}/scripts/kant-codec.mjs`);
       return typeof C.vFloat === "function";
     }));
+
+t("js-codec-matches-lean-source goes red when the codec grows a type", async () => {
+  // The end-to-end mutation: re-add the float to `canonEnc`, exactly as phase 1
+  // did, and require the whole comparison to notice. This is the check that
+  // would have prevented that commit.
+  const codec = `${ROOT}/scripts/kant-codec.mjs`;
+  const before = readFileSync(codec, "utf8");
+  const { compare } = await import(`${ROOT}/scripts/lean-codec-types.mjs`);
+  try {
+    if (!(await compare()).rows.every((r) => r.ok)) {
+      throw new Error("js-codec-matches-lean-source does not hold to begin with");
+    }
+    const withFloat = before.replace(
+      '    case "str": return `S${encStr(v.s)}`;',
+      '    case "float": return `D${String(v.n)};`;\n    case "str": return `S${encStr(v.s)}`;',
+    );
+    if (withFloat === before) throw new Error("the mutation did not apply");
+    writeFileSync(codec, withFloat, "utf8");
+    try {
+      const after = await compare();
+      if (after.rows.every((r) => r.ok)) {
+        throw new Error("still passed with a float in canonEnc");
+      }
+      // And it must name the offender, not just go red.
+      const detail = after.rows.filter((r) => !r.ok).map((r) => r.detail).join(" ");
+      if (!detail.includes("float")) {
+        throw new Error(`went red without naming the float: ${detail}`);
+      }
+    } finally {
+      writeFileSync(codec, before, "utf8");
+    }
+  } finally {
+    writeFileSync(codec, before, "utf8");
+  }
+});
 
 t("thunk-id-is-lean-representable goes red when float joins the tag list", () =>
   // The mutation is my float, re-admitted as if Lean had it. A seventh tag
