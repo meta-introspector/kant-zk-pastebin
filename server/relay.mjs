@@ -71,7 +71,40 @@ export const CONFIG = {
   gasWindowMs: Number(args.get("gas-window") ?? 60 * 60 * 1000),
   archiveDir: args.get("archive-dir") ?? process.env.KANT_ARCHIVE ?? "",
   version: "1.0.0",
+  commit: process.env.KANT_COMMIT ?? "",
 };
+
+// Which build is this? The twins speak one protocol but are deployed
+// independently, so a stale twin is otherwise invisible: both reported
+// version "1.0.0" while serving different wasm. Stamp the commit at build
+// time (KANT_COMMIT) or read it from the checkout, and let the operator
+// override so a deployed artifact can be labelled without a rebuild.
+function resolveCommit() {
+  if (CONFIG.commit) return CONFIG.commit;
+  try {
+    // "." is the directory holding this file (server/); the checkout is its
+    // parent. Note `new URL("..", import.meta.url)` would resolve above the
+    // repo, which is why the path is joined explicitly.
+    const here = fs.realpathSync(new URL(".", import.meta.url).pathname);
+    const root = path.resolve(here, "..");
+    let ref = fs.readFileSync(path.join(root, ".git", "HEAD"), "utf8").trim();
+    if (ref.startsWith("ref: ")) {
+      const name = ref.slice(5).trim();
+      try {
+        ref = fs.readFileSync(path.join(root, ".git", name), "utf8").trim();
+      } catch {
+        // unborn or packed ref
+        const packed = fs.readFileSync(path.join(root, ".git", "packed-refs"), "utf8");
+        ref = (packed.split("\n").find((l) => l.endsWith(" " + name)) ?? "").split(" ")[0] ?? "";
+      }
+    }
+    return /^[0-9a-f]{7,40}$/.test(ref) ? ref.slice(0, 12) : "";
+  } catch {
+    return "";
+  }
+}
+
+const COMMIT = resolveCommit();
 
 // ------------------------------------------------------------- the log
 
@@ -403,7 +436,8 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
 
     if (url.pathname === "/health") {
       sendJson(res, cfg, 200, {
-        ok: true, name: "kant-zk-relay", version: cfg.version, ...rooms.stats(),
+        ok: true, name: "kant-zk-relay", version: cfg.version,
+        commit: COMMIT, platform: "systemd", ...rooms.stats(),
       });
       return;
     }

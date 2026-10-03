@@ -185,6 +185,11 @@ EOF
 deploy_lean_wasm_relay() {
   log "=== Deploying Lean WASM Relay Worker ==="
 
+  # Step 0: Stamp the commit so /health can name the build being served.
+  local commit
+  commit="$(git -C "${PASTEBIN_DIR}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+  log "Deploying commit: ${commit}"
+
   # Step 1: Build Lean to WASM
   log "Step 1: Building Lean kernel to WASM..."
   cd /home/mdupont/projects/pastebin-lean
@@ -209,17 +214,19 @@ deploy_lean_wasm_relay() {
   local worker_dir="$(mktemp -d)"
   trap "rm -rf '$worker_dir'" EXIT
 
-  cp "${PASTEBIN_DIR}/server/lean-relay.mjs" "$worker_dir/"
+  # The checked-in worker.js is the real relay (server/wrangler.toml points
+  # at it). Stamp the commit placeholder so the deployed Worker answers
+  # /health with the build it is serving.
+  cp "${PASTEBIN_DIR}/server/worker.js" "$worker_dir/worker.js"
+  sed -i "s|__KANT_COMMIT__|${commit}|g" "$worker_dir/worker.js"
+  # Ship the same web/ tree the systemd twin serves, so the wasm core,
+  # the JS CID reference and p2p.html cannot drift apart.
+  cp -r "${PASTEBIN_DIR}/web" "$worker_dir/web"
 
-  # Create kv-namespaces config
   cat > "$worker_dir/wrangler.toml" <<EOF
 name = "kant-zk-relay-wasm"
-main = "lean-relay.mjs"
+main = "worker.js"
 compatibility_date = "2025-01-01"
-
-[[kv_namespaces]]
-binding = "WASM_KV"
-id = "your-kv-namespace-id"
 
 [[durable_objects.bindings]]
 name = "ROOMS"
@@ -230,7 +237,7 @@ tag = "v1"
 new_sqlite_classes = ["Room"]
 
 [assets]
-directory = "../web"
+directory = "./web"
 binding = "ASSETS"
 EOF
 
@@ -294,28 +301,42 @@ deploy() {
 }
 
 verify() {
-  log "=== Verifying Cloudflare Workers ==="
+  log "=== Verifying the twin trio ==="
 
-  # Check Lean WASM relay
-  local relay_url="https://kant-zk-relay-wasm.workers.dev/health"
-  log "Checking ${relay_url}..."
-  local relay_status
-  relay_status=$(curl -sf -o /dev/null -w "%{http_code}" "$relay_url" 2>>"$LOG_FILE" || echo "000")
-  if [ "$relay_status" = "200" ]; then
-    log_success "Lean WASM relay: healthy (${relay_status})"
+  # The deployed Worker lives on the kant account (purple-fire-b881), not
+  # the default jmikedupont2 subdomain — see docs/WASM_P2P_AND_CI_2026-10-01.md.
+  local relay_url="https://kant-zk-relay-wasm.purple-fire-b881.workers.dev/health"
+  local systemd_url="${KANT_SYSTEMD_RELAY:-http://127.0.0.1:8796}/health"
+
+  local head systemd_head
+  head="$(curl -sf "$relay_url" 2>>"$LOG_FILE" || echo '{}')"
+  systemd_head="$(curl -sf "$systemd_url" 2>>"$LOG_FILE" || echo '{}')"
+  log "cloudflare : ${head}"
+  log "systemd    : ${systemd_head}"
+
+  local cf_commit sys_commit
+  cf_commit=$(echo "$head" | grep -o '"commit":"[^"]*"' | cut -d'"' -f4)
+  sys_commit=$(echo "$systemd_head" | grep -o '"commit":"[^"]*"' | cut -d'"' -f4)
+
+  if [ -z "$cf_commit" ]; then
+    log_warn "cloudflare twin reports no commit (stale deploy?)"
+  elif [ -z "$sys_commit" ]; then
+    log_warn "systemd twin reports no commit"
+  elif [ "$cf_commit" != "$sys_commit" ]; then
+    log_warn "TWIN DRIFT: cloudflare=${cf_commit} systemd=${sys_commit}"
   else
-    log_warn "Lean WASM relay: ${relay_status}"
+    log_success "both twins serve ${cf_commit}"
   fi
 
-  # Check Rust WASM pastebin
-  local pastebin_url="https://kant-zk-pastebin-wasm.workers.dev/health"
-  log "Checking ${pastebin_url}..."
-  local pastebin_status
-  pastebin_status=$(curl -sf -o /dev/null -w "%{http_code}" "$pastebin_url" 2>>"$LOG_FILE" || echo "000")
-  if [ "$pastebin_status" = "200" ]; then
-    log_success "Rust WASM pastebin: healthy (${pastebin_status})"
+  # The wasm core is the shared artifact: same bytes on both legs, or peers
+  # on different twins compute different CIDs.
+  local cf_wasm sys_wasm
+  cf_wasm=$(curl -sf "${relay_url%/health}/pastebin_wasm_bg.wasm" 2>>"$LOG_FILE" | sha256sum | cut -d' ' -f1)
+  sys_wasm=$(curl -sf "${systemd_url%/health}/pastebin_wasm_bg.wasm" 2>>"$LOG_FILE" | sha256sum | cut -d' ' -f1)
+  if [ -n "$cf_wasm" ] && [ "$cf_wasm" = "$sys_wasm" ]; then
+    log_success "wasm core identical on both twins (${cf_wasm:0:12})"
   else
-    log_warn "Rust WASM pastebin: ${pastebin_status}"
+    log_warn "WASM DRIFT: cloudflare=${cf_wasm:0:12} systemd=${sys_wasm:0:12} — redeploy the stale leg"
   fi
 }
 

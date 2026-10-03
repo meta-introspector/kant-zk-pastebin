@@ -21,6 +21,12 @@
 // Deploy:  cd server && npx wrangler deploy
 
 const VERSION = "1.0.0";
+// Which build is this? The systemd twin reads its checkout, but a Worker
+// has no filesystem, so the commit is injected at build time
+// (`wrangler deploy --var` / deploy-cloudflare-worker.sh). Without it a
+// stale twin is indistinguishable from a current one — both used to answer
+// version "1.0.0" while serving different wasm.
+const COMMIT = "__KANT_COMMIT__";
 const MAX_LINE = 262144;
 const MAX_LINES = 4096;
 const MAX_BODY = 1048576;
@@ -144,7 +150,7 @@ export default {
 
     if (url.pathname === "/health") {
       console.log("HEALTH", request.url);
-      return json({ ok: true, name: "kant-zk-relay", version: VERSION, platform: "cloudflare" });
+      return json({ ok: true, name: "kant-zk-relay", version: VERSION, commit: COMMIT, platform: "cloudflare" });
     }
 
     const m = url.pathname.match(/^\/(room|ws)\/([^/]+)$/);
