@@ -12,6 +12,7 @@ serde_json = "1.0"
 tera = "1"
 env_logger = "0.11"
 log = "0.4"
+tracing = "0.1"
 chrono = "0.4"
 sha2 = "0.10"
 hex = "0.4"
@@ -26,7 +27,13 @@ quick-protobuf = { version = "0.8", registry = "nora" }
 ipld-core = "0.4.1"
 multibase = "0.9"
 actix-multipart = "0.7"
+anyhow = "1.0"
 mime_guess = "2"
+thiserror = "1.0"
+# mesh.rs (lib code) needs both of these; they were previously absent
+# or misfiled under [dev-dependencies], so the lib failed to compile.
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
 futures-util = "0.3"
 utoipa = { version = "4", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "6", features = ["actix-web"] }
@@ -35,6 +42,18 @@ clap = { version = "4", features = ["derive"] }
 walkdir = "2"
 libloading = "0.8"
 regex-lite = "0.1"
+
+# libp2p gossipsub, for file chunks (src/libp2p_transport.rs). The wire format
+# lives in src/libp2p_frames.rs and matches web/kant-libp2p.mjs byte for byte.
+# Chat is unaffected: it stays on the HTTP relay.
+#
+# Versions are pinned to what was read from the crate source rather than
+# remembered -- gossipsub 0.50 has no AsyncSubscription (messages arrive as
+# swarm events), `Behaviour::new` returns Result<Self, &'static str>, and
+# `Strict` validation is incompatible with anonymous authenticity. Those three
+# are all silent-until-runtime, so the pin is load-bearing, not tidiness.
+libp2p = { version = "0.57", features = ["gossipsub", "tokio", "macros", "noise", "yamux", "tcp"] }
+libp2p-gossipsub = "0.50"
 
 lazy_static = "1.4"
 tar = "0.4"
@@ -46,8 +65,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 chromiumoxide = "0.7"
 futures = "0.3"
-tokio = { version = "1", features = ["full"] }
 tempfile = "3"
+tokio = { version = "1", features = ["full"] }
 
 [[bin]]
 name = "kant-pastebin"

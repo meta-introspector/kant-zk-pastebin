@@ -72,6 +72,28 @@ ok("reportText carries the block",
     "--- machine-readable, paste into the diagnostics page ---\n")[1]) !== null);
 ok("reportText is readable", D.reportText(report).includes("relay post failed"));
 
+// --------------------------------------------------- where the relay is
+
+// `servedBase` decides which URL the page probes for a relay, and getting it
+// wrong is silent: the probe 404s and the client reports that nobody can join
+// while the relay is answering one path down. These are the shapes that decide
+// it, so they are pinned rather than reasoned about again later.
+eq("servedBase at the root", D.servedBase("http://127.0.0.1:8787/index.html"),
+  "http://127.0.0.1:8787");
+eq("servedBase under a sub-path", D.servedBase("https://solana.solfunmeme.com/p2p-relay/"),
+  "https://solana.solfunmeme.com/p2p-relay");
+eq("servedBase drops the file", D.servedBase("https://solana.solfunmeme.com/p2p-relay/index.html"),
+  "https://solana.solfunmeme.com/p2p-relay");
+eq("servedBase keeps query and hash out of it",
+  D.servedBase("https://h.example/p2p-relay/index.html?room=x#frag"),
+  "https://h.example/p2p-relay");
+// Without the trailing slash the last segment is a *file*, so the base is the
+// parent. Standard URL resolution, and the reason the mount must redirect
+// `/p2p-relay` to `/p2p-relay/`.
+eq("servedBase: no trailing slash means a file", D.servedBase("https://h.example/p2p-relay"),
+  "https://h.example");
+eq("servedBase refuses nonsense rather than throwing", D.servedBase("not a url"), "");
+
 // ----------------------------------------------------------------- the log
 
 {
@@ -190,6 +212,29 @@ if (relay) {
     const res = await fetch(`${base}/${file}`).catch(() => null);
     ok(`the relay serves ${what}`, !!res && res.ok, res ? `status ${res.status}` : "no answer");
   }
+
+  // The real page derives its probe base from where it was served, so the
+  // self-hosting case has to survive that round trip and not just work when
+  // the base is handed in directly.
+  const derived = await D.resolveReachability({
+    configured: "", origin: D.servedBase(`${base}/index.html`), log: new D.DiagLog({ cap: 100 }),
+  });
+  ok("a base derived from location finds the relay", derived.originIsRelay === true);
+  eq("…and it is the relay we started", D.effectiveRelay(derived), base);
+
+  // A configured relay that is DOWN. `effectiveRelay` still hands it back —
+  // that is the spec: a configured relay wins, and it is `relayUsable` that
+  // says whether it answered. The banner used to read `used` for its wording
+  // and so announced this dead host as up; it must read `relayUsable`.
+  const deadCfg = await D.resolveReachability({
+    configured: "https://kant-relay.cicada71.net", origin: base,
+    log: new D.DiagLog({ cap: 100 }),
+  });
+  ok("a configured-but-dead relay is not usable", D.relayUsable(deadCfg) === false);
+  ok("…even though effectiveRelay still names it",
+    D.effectiveRelay(deadCfg) === "https://kant-relay.cicada71.net");
+  ok("…which is exactly the pair the banner must not confuse",
+    D.effectiveRelay(deadCfg) !== "" && !D.relayUsable(deadCfg));
 
   // A configured relay that is not there is reported, not swallowed.
   const log2 = new D.DiagLog({ cap: 100 });

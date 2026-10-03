@@ -8,6 +8,7 @@ name: Build and publish kant CLI
 on:
   push:
     branches: [main, master, feature/wip]
+    tags: ["v*"]
     paths:
       - "scripts/kant-cli.mjs"
       - "scripts/build-cli.mjs"
