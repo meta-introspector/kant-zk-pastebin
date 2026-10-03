@@ -159,8 +159,88 @@ asserts a pure thunk still works — a sandbox that refuses everything is an
 outage, not a sandbox. It has teeth: reintroducing the host-object bridge makes
 two of its cases fail.
 
-`server/thunk-test.mjs` is 8/10 green. The two red gates are phase 1 — the id is
-still a 16-char prefix where `asWitness` wants 64.
+`server/thunk-test.mjs` is 20/20 green.
+
+## Phase 1: content addressing
+
+The id is now `valHash({ bytes, refs })` from `scripts/kant-codec.mjs` — the full
+64-hex digest, the same function file witnesses use, so `asWitness` accepts a
+thunk id and the two are the same kind of thing. Two bugs turned up while
+measuring this, and the second was worse than the truncation phase 1 was meant
+to fix.
+
+**The old id collided.** It ran the source through
+`src.replace(/\/\/.*$/gm, "")`, which is a substring stripper, not a comment
+stripper: it cuts from the first `//` to end of line *wherever it finds one*,
+including inside a string literal. A URL is a `//`. Two thunks fetching
+different URLs hashed identically:
+
+```
+fetcher@1.0.0:23e5f2ab254649ad  ->  {"url":"http://alpha.example/x"}
+fetcher@1.0.0:23e5f2ab254649ad  ->  {"url":"http://BRAVO.evil.example/steal"}
+```
+
+One id, one cache entry, two behaviours. `server/js-scan.mjs` replaces it with a
+scanner that tracks string, template and regex state, so a `//` in a string is a
+string and a comment is a comment. It is a single left-to-right pass that throws
+rather than guesses: a wrong guess here is a wrong id, and a wrong id is silent.
+
+**Comments still do not change the id**, which is why the scanner exists at all.
+It normalizes comments, indentation and blank-line runs. It deliberately does
+*not* normalize spacing between tokens on a line, or line structure — joining two
+lines can change what an automatic-semicolon-insertion rule does, and removing
+the space in `return x` would make it `returnx`. Both need a full tokenizer with
+an adjacency table, and a wrong table merges two genuinely different thunks. An
+id that is sensitive to reformatting costs a cache entry; an id that collides
+costs correctness.
+
+**`refs` are in the id.** A thunk built against a different dependency is a
+different thunk even with identical source, and `Thunk.load` now takes them
+(`refs = []`). They are sorted, so listing them in another order is the same
+set. This is TOOLCHAIN-THUNKS.md's argument — a pinned `flake.lock` beats a
+version string, exactly the way the yanked `core2 0.4.0` had to be discovered
+the hard way.
+
+**`name` and `version` are not in the id.** They are labels: every thunk in this
+tree was `0.0.0` or `1.0.0` while the code underneath changed. `id` still reads
+`name@version:<contentHash>` so a log stays legible, but `contentHash` is the
+identity and the test pins the two apart.
+
+**The call id is separate, and is the second half of the phase.**
+
+```
+thunk id = valHash({ bytes, refs })
+call id  = valHash({ thunkId, argsHash, secretRefs, apiRefs })
+```
+
+The same bytes with different arguments are the same thunk and a *different
+call*. A result cache keyed by the thunk id hands back a result computed from
+arguments the caller never passed, so the distinction has to exist before the
+cache does. `secretRefs` name slots and never carry contents; `apiRefs` is there
+because a result computed with a narrow api set must not be served to a caller
+holding a wide one.
+
+**The codec grew a float type.** `argsHash` is `valHash` over the args, and
+`valHash` only encoded null/bool/int/str/list/obj — while `vInt(1.5)` throws a
+`RangeError` from `BigInt`. A thunk taking a non-integer number therefore had no
+addressable call id at all. `{ t: "float", n }` fixes that, in all five
+projections that enumerate value types (canonical, YAML, XML, CSV, IPDL), with
+`1` and `1.0` as distinct values under distinct tags. `-0` is spelled explicitly
+because `String(-0)` is `"0"` and `BigInt(-0)` is `0n`: it is not `0`, since
+`1 / -0` is `-Infinity`.
+
+`NaN` and `±Infinity` are **refused** rather than encoded — `NaN` is not equal to
+itself, so a canonical form containing one would not be a fixed point. So are
+`undefined`, functions, symbols, `Date`, `Map`, and anything non-plain. Each has
+no spelling that reads back as itself, so a coerced hash would claim two
+different calls are one. An unaddressable input is a loud failure at the call
+site, which is recoverable; a wrong cache hit is not. This is the same
+default-deny logic as the sandbox, applied to identity instead of capability.
+
+Three rules that were collisions before they were rules, each with a test:
+object keys are **sorted** (`canonEnc` walks fields in order and JS key order is
+not part of the value); `1` and `1.5` are **distinct**; `-0` and `0` are
+**distinct**.
 
 `server/example-compactor.mjs`, the one concrete thunk, is still written in the
 ESM form and does not parse under this policy. `apply()` accepts both shapes, so
@@ -170,10 +250,14 @@ the example rather than about the sandbox.
 ## Design summary (see `DESIGN.md`)
 
 **Thunk** — serializable state machine:
-- `definition`: { name, version, initialState, transducers: [{name, source}] }
+- `definition`: { name, version, source, refs, initialState }
 - `state`: plain serializable snapshot
 - `apply(input)`: runs transducer, returns { state, effects }
-- `manifest()`: { id, name, version, hash } — shareable without state
+- `contentHash`: 64-hex `valHash({ bytes, refs })` — the identity
+- `id`: `name@version:<contentHash>` — the same hash, labelled for logs
+- `callId(args, { secretRefs, apiRefs })`: 64-hex hash of one invocation
+- `argsHash(args)`: 64-hex hash of the arguments alone
+- `manifest()`: { id, contentHash, name, version, refs, schema } — no state
 
 **Store** — `ThunkStore`:
 - `store(def) -> id`
@@ -202,13 +286,14 @@ the example rather than about the sandbox.
    `server/sandbox-test.mjs`. Still open from the original item: fix
    `web/wasm-test.mjs`, which reads the gitignored `dist/` and so fails in a
    fresh checkout even though the embedded copy is byte-identical.
-1. **Phase 1: content addressing.** The id is a 16-char prefix where `asWitness`
-   wants 64. Make it the full sha256 of the module bytes, and add the second key
-   `callId = {thunkId, argsHash, secretRefs}` while doing it — every later phase
-   depends on that distinction and getting it wrong retrofits a key change
-   through the cache, the sharing and the scheduler. `server/thunk-store.mjs`
-   with one example transducer in the `module.exports` dialect, plus converting
-   `server/example-compactor.mjs`.
+1. ~~**Phase 1: content addressing.**~~ Done 2026-10-03. The id is the full
+   64-hex `valHash({ bytes, refs })`, the call id is a separate key, and the
+   codec grew a float type so a non-integer argument has an address at all. Two
+   defects fixed on the way, one of which (two thunks with different URLs
+   sharing an id) was not in scope and was found by measuring. See the phase 1
+   section above and `scripts/thunk-claims.mjs`. Still open from this item:
+   convert `server/example-compactor.mjs` to the `module.exports` dialect, which
+   `apply()` already accepts in both forms.
 2. Write `server/schedule.mjs` and the systemd driver `server/scheduler.mjs`;
    update `kant-relay.service` so the systemd service runs the scheduler loop.
 3. Extend `relay.mjs` to host thunks and expose an API for scheduling.

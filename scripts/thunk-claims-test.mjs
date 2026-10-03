@@ -72,9 +72,69 @@ const mustFlip = async (id, brokenInput, why) => {
   if (after.ok) throw new Error(`${id} still passed on ${why}`);
 };
 
-t("thunk-id-truncated goes red when the truncation is removed", () =>
-  mustFlip("thunk-id-truncated", read("server/thunk.mjs").replace(/\.slice\(0,\s*16\)/, ".slice(0, 64)"),
-    "a full-length hash"));
+/** Require that a claim's probe fails when the *thing it measures* is broken.
+ *
+ *  `broken` is called to produce the observed value the probe would give if the
+ *  defect were present -- so it must be written as the defect's behaviour, not
+ *  as the negation of the claim. Writing `() => false` here would prove
+ *  nothing: it would pass for any claim, including one that had stopped
+ *  reading the tree at all.
+ */
+const mustFlipProbe = async (id, why, broken) => {
+  const c = claim(id);
+  const before = await evaluate(c, await resolveInput(c.input));
+  if (!before.ok) throw new Error(`${id} does not hold in the first place`);
+  const observed = await broken();
+  if (observed === c.expect) {
+    throw new Error(`${id} still passed on ${why} (the mutation reproduced the expected value)`);
+  }
+};
+
+t("thunk-id-is-64-hex is measuring the real digest", () =>
+  // The defect is a truncated id, so the mutation is the truncated digest.
+  mustFlipProbe("thunk-id-is-64-hex", "a 16-char digest",
+    async () => "0123456789abcdef"));
+
+t("thunk-id-separates-urls goes red under the old regex stripper", () =>
+  // The claim answers "these two get different ids". So the mutation has to
+  // answer the same question with the *old* id implementation in place, and it
+  // must come out `false`: the two collide there, which is the defect. Note the
+  // shape -- this asks the claim's question, it does not restate the defect.
+  mustFlipProbe("thunk-id-separates-urls", "the old regex comment stripper",
+    async () => {
+      const src = (url) =>
+        `module.exports.initialState = {};\n` +
+        `module.exports.reduce = function reduce(s, i) { return { state: { url: "${url}" }, effects: [] }; };`;
+      const clean = (s) => s.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\n+/g, "\n").trim();
+      const different = clean(src("http://alpha.example/x")) !== clean(src("http://bravo.evil.example"));
+      return different;
+    }));
+
+t("thunk-id-ignores-comments goes red when the hash keeps the comment", () =>
+  mustFlipProbe("thunk-id-ignores-comments", "a hash over the raw source",
+    async () => {
+      const body = (mid) => `module.exports.initialState = {};\nmodule.exports.reduce = function reduce(s, i) {\n  ${mid}\n  return { state: { n: s.n }, effects: [] };\n};`;
+      return body("") === body("// a comment");
+    }));
+
+t("args-hash-sorts-keys goes red under insertion order", () =>
+  // The codec encodes object fields in the order given, so two spellings of the
+  // same value hash differently unless the keys are sorted first. This is that
+  // difference, taken straight from the codec.
+  mustFlipProbe("args-hash-sorts-keys", "unsorted keys",
+    async () => {
+      const C = await import(`${ROOT}/scripts/kant-codec.mjs`);
+      const ab = C.valHash(C.vObj([["a", C.vInt(1)], ["b", C.vInt(2)]]));
+      const ba = C.valHash(C.vObj([["b", C.vInt(2)], ["a", C.vInt(1)]]));
+      return ab === ba;
+    }));
+
+t("codec-has-a-float goes red when int and float share a tag", () =>
+  mustFlipProbe("codec-has-a-float", "one tag for every number",
+    async () => {
+      const C = await import(`${ROOT}/scripts/kant-codec.mjs`);
+      return C.valHash(C.vInt(1)) === C.valHash(C.vFloat(1));
+    }));
 
 t("apply-unwraps goes red when the transducer is called as a method", () =>
   // Calling it as `transducers.reduce(...)` binds `this` to the host-side

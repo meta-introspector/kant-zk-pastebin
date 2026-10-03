@@ -157,6 +157,196 @@ t("manifest carries a content hash and no state", async () => {
   if (String(hash).length !== 64) throw new Error(`hash is ${String(hash).length} chars`);
 });
 
+// ── the collisions phase 1 had to remove ────────────────────────────────
+// Each of these was a real defect, found by measurement rather than by reading
+// the code. They are here because a content hash is only worth having if the
+// things it must separate are actually separated.
+
+t("a `//` inside a string does not merge two thunks", async () => {
+  // This is the bug that motivated the rewrite. The old id ran the source
+  // through `src.replace(/\/\/.*$/gm, "")`, which strips from the first `//`
+  // to end of line *wherever it finds one*, including inside a string. Both
+  // thunks below cleaned down to `... "http:` and hashed the same, so two
+  // thunks fetching different URLs shared one id and one cache entry.
+  const withUrl = (url) => `
+module.exports.initialState = {};
+module.exports.reduce = function reduce(state, input) {
+  return { state: { url: "${url}" }, effects: [] };
+};
+`;
+  const a = await Thunk.load(withUrl("http://alpha.example/x"), "fetcher", "1.0.0");
+  const b = await Thunk.load(withUrl("http://bravo.evil.example/steal"), "fetcher", "1.0.0");
+  if (a.contentHash === b.contentHash) {
+    throw new Error(`different URLs share the id ${a.contentHash}`);
+  }
+  // And the two really are different thunks, so this is not a false alarm.
+  if (JSON.stringify(a.apply({}).state) === JSON.stringify(b.apply({}).state)) {
+    throw new Error("these two thunks behave identically; the fixture is wrong");
+  }
+});
+
+t("a comment does not change the id", async () => {
+  // The other direction. Comments are not identity, so this must NOT change the
+  // id -- that is the whole reason `server/js-scan.mjs` exists.
+  const body = (mid) => `
+module.exports.initialState = {};
+module.exports.reduce = function reduce(state, input) {
+  ${mid}
+  return { state: { n: state.n }, effects: [] };
+};
+`;
+  const plain = body("");
+  const commented = body("// a comment");
+  const blocky = body("/* another */");
+  const h = await Thunk.load(plain, "r", "1.0.0");
+  if (h.contentHash !== (await Thunk.load(commented, "r", "1.0.0")).contentHash) {
+    throw new Error("a line comment changed the id");
+  }
+  if (h.contentHash !== (await Thunk.load(blocky, "r", "1.0.0")).contentHash) {
+    throw new Error("a block comment changed the id");
+  }
+});
+
+t("refs are part of the id", async () => {
+  // A thunk built against a different ref is a different thunk even with
+  // identical source. Refs are sorted, so listing them in another order is the
+  // same set and the same id.
+  const base = await Thunk.load(CJS_THUNK, "counter", "1.0.0", {}, []);
+  const withRef = await Thunk.load(CJS_THUNK, "counter", "1.0.0", {}, ["lake"]);
+  if (base.contentHash === withRef.contentHash) throw new Error("refs did not change the id");
+  const ab = await Thunk.load(CJS_THUNK, "counter", "1.0.0", {}, ["a", "b"]);
+  const ba = await Thunk.load(CJS_THUNK, "counter", "1.0.0", {}, ["b", "a"]);
+  if (ab.contentHash !== ba.contentHash) throw new Error("ref order changed the id");
+  if (!Array.isArray(base.refs)) throw new Error("refs is not an array");
+});
+
+t("name and version are labels, not identity", async () => {
+  // Deliberate, and worth pinning: every thunk in this tree was `0.0.0` or
+  // `1.0.0` while the code under it changed, so a version cannot be identity.
+  const a = await Thunk.load(CJS_THUNK, "counter", "0.0.0");
+  const b = await Thunk.load(CJS_THUNK, "totally-different-name", "9.9.9");
+  if (a.contentHash !== b.contentHash) {
+    throw new Error("a rename changed the content hash");
+  }
+  // The readable id still carries them, so a log is still legible.
+  if (!b.id.includes("totally-different-name@9.9.9")) throw new Error(`id lost its label: ${b.id}`);
+});
+
+// ── the call id ──────────────────────────────────────────────────────────
+
+t("callId differs from the thunk id and from other calls", async () => {
+  const thunk = await Thunk.load(CJS_THUNK, "counter", "0.0.0");
+  const a = thunk.callId({ by: 1 });
+  const b = thunk.callId({ by: 2 });
+  if (a === b) throw new Error("different arguments share a call id");
+  if (a === thunk.contentHash) throw new Error("call id is the thunk id");
+  if (!/^[0-9a-f]{64}$/.test(a)) throw new Error(`call id is not a witness: ${a}`);
+});
+
+t("secretRefs name slots and never carry contents", async () => {
+  const thunk = await Thunk.load(CJS_THUNK, "counter", "0.0.0");
+  const none = thunk.callId({ by: 1 });
+  const named = thunk.callId({ by: 1 }, { secretRefs: ["OPENAI_API_KEY"] });
+  if (none === named) throw new Error("declaring a secret slot did not change the call id");
+  // Order is not identity: two callers listing the same slots are the same call.
+  if (thunk.callId({ by: 1 }, { secretRefs: ["a", "b"] })
+      !== thunk.callId({ by: 1 }, { secretRefs: ["b", "a"] })) {
+    throw new Error("secretRef order changed the call id");
+  }
+  // The secret's *contents* cannot appear, because there is nowhere to put them:
+  // only names are accepted.
+  const withContents = thunk.callId({ by: 1 }, { secretRefs: ["sk-live-abc123"] });
+  if (typeof withContents !== "string" || withContents.length !== 64) {
+    throw new Error("call id shape changed");
+  }
+});
+
+t("the api set is part of the call id", async () => {
+  // A result computed with a narrow api set must not be served to a caller
+  // holding a wide one, because the wide one can do more with it.
+  const thunk = await Thunk.load(CJS_THUNK, "counter", "0.0.0");
+  if (thunk.callId({ by: 1 }) === thunk.callId({ by: 1 }, { apiRefs: ["fs"] })) {
+    throw new Error("widening the api set did not change the call id");
+  }
+});
+
+t("argsHash is insensitive to key order and sensitive to values", async () => {
+  const thunk = await Thunk.load(CJS_THUNK, "counter", "0.0.0");
+  // `canonEnc` walks object fields in order, so unsorted keys would hash two
+  // spellings of the same value differently -- and JS key order is not part of
+  // the value.
+  if (thunk.argsHash({ a: 1, b: 2 }) !== thunk.argsHash({ b: 2, a: 1 })) {
+    throw new Error("key order changed the args hash");
+  }
+  if (thunk.argsHash({ a: 1 }) === thunk.argsHash({ a: 2 })) {
+    throw new Error("a changed value did not change the args hash");
+  }
+  // The int/float distinction, which is why the codec grew a float type.
+  if (thunk.argsHash({ n: 1 }) === thunk.argsHash({ n: 1.5 })) {
+    throw new Error("1 and 1.5 share an args hash");
+  }
+  // -0 is not 0: `1 / -0` is -Infinity.
+  if (thunk.argsHash({ n: 0 }) === thunk.argsHash({ n: -0 })) {
+    throw new Error("0 and -0 share an args hash");
+  }
+});
+
+t("an input with no content address is refused, not coerced", async () => {
+  // Every one of these has no spelling that reads back as itself, so a coerced
+  // hash would claim two different calls are one. A loud failure at the call
+  // site is recoverable; a wrong cache hit is not.
+  const thunk = await Thunk.load(CJS_THUNK, "counter", "0.0.0");
+  const cases = {
+    undefined: undefined,
+    NaN: NaN,
+    Infinity: Infinity,
+    "a function": () => 1,
+    "a Date": new Date(0),
+    "a Map": new Map(),
+  };
+  for (const [what, value] of Object.entries(cases)) {
+    let threw = null;
+    try { thunk.argsHash({ v: value }); } catch (e) { threw = e; }
+    if (!threw) throw new Error(`${what} was hashed instead of refused`);
+    // The message must name the path, or a deeply nested refusal is unusable.
+    if (!threw.message.includes("args.v")) {
+      throw new Error(`${what} refused without naming the path: ${threw.message}`);
+    }
+  }
+  // A cycle would otherwise recurse until the stack dies.
+  const cyclic = {};
+  cyclic.self = cyclic;
+  let threw = null;
+  try { thunk.argsHash(cyclic); } catch (e) { threw = e; }
+  if (!threw) throw new Error("a cycle was hashed");
+});
+
+t("a float survives every codec projection", async () => {
+  // The codec grew `t: "float"` so that a non-integer number has an id at all.
+  // Five encoders enumerate value types; a new type that only worked in one of
+  // them would be a value that could be hashed but not stored.
+  const C = await import("../scripts/kant-codec.mjs");
+  for (const n of [1.5, 0, -0, 1e21, 1 / 3, -2.5]) {
+    const v = C.vFloat(n);
+    const projections = {
+      canon: C.canonDecode(C.canonEnc(v)),
+      yaml: C.yamlDecode(C.yamlEnc(v)),
+      xml: C.xmlDecode(C.xmlEnc(v)),
+      csv: C.csvDecode(C.csvEncode(v)),
+      ipdl: C.ipdlRead(C.ipdlText(C.embed(v))),
+    };
+    for (const [fmt, back] of Object.entries(projections)) {
+      if (!back || back.t !== "float" || !Object.is(back.n, n)) {
+        throw new Error(`${fmt} lost the float ${n}: ${JSON.stringify(back)}`);
+      }
+    }
+  }
+  // And 1 the integer and 1.0 the float stay distinct values.
+  if (C.valHash(C.vInt(1)) === C.valHash(C.vFloat(1))) {
+    throw new Error("int 1 and float 1 collide");
+  }
+});
+
 for (const [name, fn] of tests) {
   try {
     await fn();

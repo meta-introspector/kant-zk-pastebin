@@ -64,13 +64,33 @@ definition = { name, version, format, bytes, exports, initialState }
 
 ### 2. Identity is the hash of the bytes
 
-`server/thunk.mjs:70` currently derives `id` from
-`name@version:hash(cleanSource(source))` — a 16-hex-char prefix of sha256 over
-*source text*.
+**Done 2026-10-03.** The id is `valHash({ bytes, refs })` — the full 64-hex
+digest from the same hash function file witnesses use, so `asWitness` accepts a
+thunk id and the two are the same kind of thing.
 
-That becomes the hash of the module bytes, and it should be the **full 64-hex
-digest, not a 16-char prefix**. `web/kant-libp2p.mjs:111` already has the
-convention and the reason:
+I wrote this section proposing the full digest and not noticing that the
+16-char prefix was hiding a collision underneath it. `cleanSource` stripped
+comments with a regex, which also strips `//` inside a string literal, so any two
+thunks mentioning a URL hashed the same:
+
+```
+fetcher@1.0.0:23e5f2ab254649ad  ->  {"url":"http://alpha.example/x"}
+fetcher@1.0.0:23e5f2ab254649ad  ->  {"url":"http://BRAVO.evil.example/steal"}
+```
+
+One id, one cache entry, two behaviours. The prefix was the smaller problem.
+`server/js-scan.mjs` is now a real scanner that tracks string, template and
+regex state, and it still ignores comments — that part was the original intent
+and it is worth keeping. `SYSTEM.md` has the details and the three tests.
+
+`refs` are in the id, `name` and `version` are not, and there is a second key:
+
+```
+thunk id = valHash({ bytes, refs })
+call id  = valHash({ thunkId, argsHash, secretRefs, apiRefs })
+```
+
+The original proposal, for the record:
 
 ```js
 export const asWitness = (s) => {
@@ -213,7 +233,7 @@ Three rules, each earned from a defect this cycle:
 | # | phase | done when |
 |---|---|---|
 | 0 | **`loadSource` works, and the sandbox policy is decided** | `Thunk.load` accepts a trivial thunk; `apply` does not double-wrap; the two capability tests pass for a real reason. Today it throws on everything. |
-| 1 | Content addressing | `id` is the full sha256 of module bytes; the 16-char prefix is gone; `asWitness` accepts it |
+| 1 | Content addressing | **done.** `id` is `valHash({ bytes, refs })`, 64 hex, no prefix; `callId` is a separate key; the codec has a float type so a fractional argument has an address |
 | 2 | wasm backend | a `format: "wasm"` thunk loads, applies, snapshots, resumes |
 | 3 | Kernel as a thunk | the 21 `KERNEL_EXPORTS` are reachable through `apply(input)` |
 | 4 | Swarm transport | a thunk crosses `web/kant-libp2p.mjs` frames; JS and Rust agree byte-for-byte |

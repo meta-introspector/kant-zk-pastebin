@@ -53,23 +53,35 @@ decorative.
 | **health** | something regressed. Investigate. |
 | **defect** | a known defect got **fixed**. The claim is now wrong and needs rewriting. |
 
-Seven claims are defects on purpose. They assert that something is still broken,
+Five claims are defects on purpose. They assert that something is still broken,
 which is the only way a fix can announce itself:
 
 | defect claim | asserts | goes red when |
 |---|---|---|
-| `thunk-id-truncated` | the id is still a 16-char prefix | the id becomes full sha256 (phase 1) |
 | `schedule-has-no-constraint` | the scheduler has no budget vocabulary | phase 6 lands |
 | `ref-never-resolved` | nothing calls a resolver on a ref target | the IPDL resolver lands |
 | `nora-wildcard-version` | `rust-unixfs` is still `version = "*"` | the version is pinned |
 | `wasm-test-reads-gitignored-dist` | the test still reads gitignored `dist/` | the test reads the embedded copy |
 
-Two defect claims already did their job. `thunk-load-throws` and
-`apply-double-wraps` went red the moment phase 0 landed, were rewritten as
-health claims (`thunk-loads`, `apply-unwraps`), and three new claims took their
-place for the sandbox: `sandbox-has-no-require`, `sandbox-refuses-console`,
-`sandbox-refuses-dynamic-import`. That is the ledger working as intended rather
-than as decoration.
+Three defect claims have now done their job. `thunk-load-throws` and
+`apply-double-wraps` went red the moment phase 0 landed, and `thunk-id-truncated`
+went red when phase 1 landed — all three were rewritten as health claims, and
+replacements took their place: `sandbox-has-no-require`, `sandbox-refuses-console`
+and `sandbox-refuses-dynamic-import` for phase 0; thirteen more for phase 1,
+covering the content hash, the call id and the float type.
+
+`thunk-id-truncated` is the one worth dwelling on. Its probe was
+`/\.slice\(0,\s*16\)/.test(src)` — a claim about a *spelling*. When phase 1
+replaced that line with a `valHash` call, the claim had nothing left to read,
+and the mutation that tested it had nothing left to break. The thirteen
+replacement claims are written the other way round: they run the real code and
+assert behaviour, so rewriting the implementation correctly does not invalidate
+them. `thunk-id-separates-urls` loads two thunks that differ only in a URL and
+requires different ids — no implementation detail appears in it at all.
+
+That is the whole lesson of the three mistakes, applied to the checker: a claim
+written as "this line contains X" stops holding when the code is fixed, and the
+failure looks identical to a regression.
 
 The CLI says which kind of red you are looking at, so a fix does not get mistaken
 for a regression:

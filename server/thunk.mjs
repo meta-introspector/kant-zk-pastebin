@@ -11,24 +11,13 @@
 //   t.resume(snap);
 //   const m  = t.manifest();      // shareable fingerprint, no state
 
-import crypto from "node:crypto";
+import { thunkContentHash, argsHash as hashArgs, callHash } from "./thunk-id.mjs";
 
 // ── helpers ─────────────────────────────────────────────────────
 
-const hash = (s) => {
-  const d = crypto.createHash("sha256").update(s).digest("hex");
-  return d.slice(0, 16);
-};
-
-/** Escape a source so it round-trips through JSON safely. */
-const esc = (s) => s.replaceAll("\\", "\\\\").replaceAll("`", "\\`").replaceAll("${", "\\${");
-
-/** Strip export/import noise for a compact canonical source. */
-const cleanSource = (src) => src
-  .replace(/\/\/.*$/gm, "")
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/\n+/g, "\n")
-  .trim();
+// The id is not computed here. `server/thunk-id.mjs` owns it, because it is a
+// content hash over the codec's canonical form, and nothing about the loader
+// should be able to change what a thunk is identified by.
 
 // ── Thunk class ─────────────────────────────────────────────────
 
@@ -38,19 +27,27 @@ export class Thunk {
   #compiled;
 
   /**
-   * @param {{ name: string, version: string, source: string,
+   * @param {{ name: string, version: string, source: string, refs?: string[],
    *           initialState: object, schema?: object }} definition
    * @param {object} state
    * @param {{ transducers?: object }} compiled  — vm-compiled lambdas
    */
   constructor(definition, state, compiled) {
-    this.#definition = { ...definition };
+    this.#definition = { ...definition, refs: definition.refs ?? [] };
     this.#state = state;
     this.#compiled = compiled ?? {};
   }
 
-  /** Re-create from the module returned by `loadSource`. */
-  static async load(source, name, version, schema = {}) {
+  /**
+   * Re-create from the module returned by `loadSource`.
+   *
+   * @param {string} source
+   * @param {string} name
+   * @param {string} version
+   * @param {object} [schema]
+   * @param {string[]} [refs]  dependency names; part of the id
+   */
+  static async load(source, name, version, schema = {}, refs = []) {
     const m = await loadSource(source);
     const initialState = m.initialState ?? {};
     const transducers = {};
@@ -60,15 +57,49 @@ export class Thunk {
     }
     if (!transducers.reduce) throw new Error("thunk needs a `reduce(state, input)` transducer");
     return new Thunk(
-      { name, version, source, initialState, schema },
+      { name, version, source, refs, initialState, schema },
       { ...initialState },
       { transducers }
     );
   }
 
-  // id built from name + version + hash of canonical source
+  /** The content hash: 64 hex chars, the full digest, never truncated.
+   *
+   *  `name` and `version` are deliberately *not* in it. They are labels a human
+   *  reads; two peers that agree on this hash are provably running the same
+   *  bytes and the same refs, which is the property the swarm needs, and a
+   *  version string cannot promise that -- every thunk in this tree was `0.0.0`
+   *  or `1.0.0` while the code underneath it changed. */
+  get contentHash() {
+    return thunkContentHash(this.#definition.source, this.#definition.refs);
+  }
+
+  /** `name@version:<contentHash>` — readable in a log, and the hash is the id. */
   get id() {
-    return `${this.#definition.name}@${this.#definition.version}:${hash(cleanSource(this.#definition.source))}`;
+    return `${this.#definition.name}@${this.#definition.version}:${this.contentHash}`;
+  }
+
+  get refs() { return [...this.#definition.refs]; }
+
+  /**
+   * The id of one *call* to this thunk, distinct from the thunk's own id.
+   *
+   * The same bytes with different arguments are the same thunk and a different
+   * call, which is why this cannot be the thunk id: a result cache keyed by the
+   * thunk id would hand back a result computed from arguments the caller never
+   * passed.
+   *
+   * @param {object} [args]  the input that will be passed to `apply`
+   * @param {{ secretRefs?: string[], apiRefs?: string[] }} [opts]
+   * @returns {string} 64 hex chars
+   */
+  callId(args = {}, { secretRefs = [], apiRefs = [] } = {}) {
+    return callHash({ thunkId: this.contentHash, args, secretRefs, apiRefs });
+  }
+
+  /** The content hash of a call's arguments on their own. */
+  argsHash(args) {
+    return hashArgs(args);
   }
 
   get name() { return this.#definition.name; }
@@ -80,9 +111,10 @@ export class Thunk {
   manifest() {
     return {
       id: this.id,
+      contentHash: this.contentHash,
       name: this.#definition.name,
       version: this.#definition.version,
-      sourceHash: hash(this.#definition.source),
+      refs: this.refs,
       schema: this.#definition.schema ?? null,
     };
   }
@@ -133,7 +165,13 @@ export class Thunk {
 
   /** Restore a bundle produced by `share()`. */
   static async restore(bundle, schema = {}) {
-    const t = await Thunk.load(bundle.source, bundle.manifest.name, bundle.manifest.version, schema);
+    const t = await Thunk.load(
+      bundle.source,
+      bundle.manifest.name,
+      bundle.manifest.version,
+      schema,
+      bundle.manifest.refs ?? [],
+    );
     t.resume(bundle.state);
     return t;
   }

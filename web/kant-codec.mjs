@@ -30,6 +30,14 @@ import { witness } from "./kantzk.mjs";
 export const vNull = { t: "null" };
 export const vBool = (b) => ({ t: "bool", b: !!b });
 export const vInt = (n) => ({ t: "int", n: BigInt(n) });
+
+/** A finite double. Non-finite is refused rather than encoded. */
+export const vFloat = (n) => {
+  if (typeof n !== "number" || !Number.isFinite(n)) {
+    throw new CodecError(`not a finite number: ${String(n)}`);
+  }
+  return { t: "float", n };
+};
 export const vStr = (s) => ({ t: "str", s: String(s) });
 export const vList = (xs) => ({ t: "list", xs: xs.slice() });
 export const vObj = (fs) => ({ t: "obj", fs: fs.map(([k, v]) => [String(k), v]) });
@@ -73,6 +81,16 @@ class Cursor {
     return true;
   }
   need(lit) { if (!this.strip(lit)) throw new CodecError(`expected ${JSON.stringify(lit)}`); }
+  /** Read up to the next `;`, consuming it. Used for the float body, whose
+   *  spelling is variable-length where an int's is fixed. */
+  readSemi() {
+    let out = "";
+    for (;;) {
+      const c = this.next();
+      if (c === ";") return out;
+      out += c;
+    }
+  }
 }
 
 /** A decode failure.  Never thrown out of the exported decoders: they
@@ -93,6 +111,31 @@ export const encStr = (s) => `${cpLength(s)};${s}`;
 /** `Kant.Codec.encInt`: an explicit sign, the digits, then `;`. */
 export const encInt = (n) => `${BigInt(n) < 0n ? "-" : "+"}${(BigInt(n) < 0n ? -BigInt(n) : BigInt(n)).toString(10)};`;
 
+/** The canonical spelling of a finite double: `String(n)`, which is the shortest
+ *  representation that reads back to the same double, plus an explicit `-0`
+ *  because `String(-0)` is `"0"` and would collide with positive zero.
+ *  `-0` and `0` compare equal with `===` but not with `1/x`, so a thunk can
+ *  tell them apart and an id that merged them would be wrong. */
+export const encFloat = (n) => (Object.is(n, -0) ? "-0" : String(n));
+
+/** A decimal float literal: optional sign, digits, optional fraction,
+ *  optional exponent. Deliberately *not* `Number()` alone -- that also accepts
+ *  `"Infinity"`, `"NaN"`, `"0x10"` and `""`, none of which is a finite double. */
+const FLOAT_LITERAL = /^-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
+
+/** Read a float back from text. Only the *value* has to match, not the exact
+ *  spelling: the YAML and XML projections legitimately spell an integral float
+ *  as `1.0` where the canonical form says `1`. Injectivity is a property of
+ *  `encFloat` alone, and `decFloat(encFloat(n))` always round-trips. */
+export function decFloat(s) {
+  if (!FLOAT_LITERAL.test(s)) {
+    throw new CodecError(`not a decimal float: ${JSON.stringify(s)}`);
+  }
+  const n = Number(s);
+  if (!Number.isFinite(n)) throw new CodecError(`not a finite float: ${JSON.stringify(s)}`);
+  return n;
+}
+
 /** `Kant.Codec.canonEnc`: the deterministic serialization, suitable for
  *  hashing. */
 export function canonEnc(v) {
@@ -100,6 +143,9 @@ export function canonEnc(v) {
     case "null": return "Z";
     case "bool": return v.b ? "T" : "F";
     case "int": return `I${encInt(v.n)}`;
+    // `D`, not `I`: 1 and 1.0 are different canonical values with different
+    // hashes, which is what makes `argsHash` able to tell them apart.
+    case "float": return `D${encFloat(v.n)};`;
     case "str": return `S${encStr(v.s)}`;
     case "list": return `L${v.xs.length};${v.xs.map(canonEnc).join("")}`;
     case "obj": return `O${v.fs.length};${v.fs.map(([k, x]) => encStr(k) + canonEnc(x)).join("")}`;
@@ -134,6 +180,7 @@ function pVal(cur) {
     case "T": return vBool(true);
     case "F": return vBool(false);
     case "I": return vInt(readIntC(cur));
+    case "D": return vFloat(decFloat(cur.readSemi()));
     case "S": return vStr(readStrC(cur));
     case "L": {
       const n = Number(readNat(cur));
@@ -200,6 +247,9 @@ export function yamlEnc(v) {
     case "null": return "null";
     case "bool": return v.b ? "true" : "false";
     case "int": return encNumY(v.n);
+    // An integral float must still read back as a float, so it keeps a `.0`
+    // suffix rather than being spelled as a bare integer.
+    case "float": return /[.eE]/.test(encFloat(v.n)) ? encFloat(v.n) : `${encFloat(v.n)}.0`;
     case "str": return `"${yesc(v.s)}"`;
     case "list": return `[${v.xs.map(yamlEnc).join(", ")}]`;
     case "obj": return `{${v.fs.map(([k, x]) => `"${yesc(k)}": ${yamlEnc(x)}`).join(", ")}}`;
@@ -255,6 +305,20 @@ function yVal(cur) {
   if (digitVal(cur.peek()) === null) throw new CodecError("not a value");
   let acc = 0n;
   while (digitVal(cur.peek()) !== null) acc = acc * 10n + BigInt(digitVal(cur.next()));
+  // A `.` or an exponent means this was never an integer. Take the rest of the
+  // literal as text and hand it to the float parser, so `1.5` does not decode
+  // as the int 1 with `.5` left over to fail the whole-input check.
+  if (cur.peek() === "." || cur.peek() === "e" || cur.peek() === "E") {
+    let rest = "";
+    if (cur.peek() === ".") rest += cur.next();
+    while (digitVal(cur.peek()) !== null) rest += cur.next();
+    if (cur.peek() === "e" || cur.peek() === "E") {
+      rest += cur.next();
+      if (cur.peek() === "+" || cur.peek() === "-") rest += cur.next();
+      while (digitVal(cur.peek()) !== null) rest += cur.next();
+    }
+    return vFloat(decFloat((sign < 0n ? "-" : "") + acc.toString() + rest));
+  }
   return vInt(sign * acc);
 }
 
@@ -274,6 +338,7 @@ export function xmlEnc(v) {
     case "null": return "<null/>";
     case "bool": return v.b ? "<bool>true</bool>" : "<bool>false</bool>";
     case "int": return `<int>${encNumY(v.n)}</int>`;
+    case "float": return `<float>${encFloat(v.n)}</float>`;
     case "str": return `<str>${xesc(v.s)}</str>`;
     case "list": return `<list>${v.xs.map(xmlEnc).join("")}</list>`;
     case "obj":
@@ -313,6 +378,7 @@ function xVal(cur) {
   if (cur.strip("<bool>true</bool>")) return vBool(true);
   if (cur.strip("<bool>false</bool>")) return vBool(false);
   if (cur.strip("<int>")) { const n = readXNumber(cur); cur.need("</int>"); return vInt(n); }
+  if (cur.strip("<float>")) { const s = readXUntil(cur, "<"); cur.need("</float>"); return vFloat(decFloat(s)); }
   if (cur.strip("<str>")) { const s = readXUntil(cur, "<"); cur.need("</str>"); return vStr(s); }
   if (cur.strip("<list>")) {
     const xs = [];
@@ -353,6 +419,7 @@ export function rowsVal(id, parent, field, v) {
     case "null": return [{ objectId: id, objectType: "value", field, value: "", valueType: "null", parentId: parent }];
     case "bool": return [{ objectId: id, objectType: "value", field, value: v.b ? "true" : "false", valueType: "bool", parentId: parent }];
     case "int": return [{ objectId: id, objectType: "value", field, value: encNumY(v.n), valueType: "integer", parentId: parent }];
+    case "float": return [{ objectId: id, objectType: "value", field, value: encFloat(v.n), valueType: "float", parentId: parent }];
     case "str": return [{ objectId: id, objectType: "value", field, value: v.s, valueType: "string", parentId: parent }];
     case "list": {
       const rows = [{ objectId: id, objectType: "list", field, value: natDigits(v.xs.length), valueType: "count", parentId: parent }];
@@ -401,6 +468,7 @@ function readRowVal(rows) {
   if (r.valueType === "null") return vNull;
   if (r.valueType === "bool") return vBool(r.value === "true");
   if (r.valueType === "integer") return vInt(BigInt(r.value));
+  if (r.valueType === "float") return vFloat(decFloat(r.value));
   if (r.valueType === "string") return vStr(r.value);
   if (r.valueType === "count") {
     const n = Number(r.value);

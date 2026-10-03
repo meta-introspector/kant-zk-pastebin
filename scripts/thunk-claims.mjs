@@ -36,6 +36,17 @@ const D = (id, fn) => ({ kind: "derive", id, fn });
 /** No input at all — the probe runs the thing it describes. */
 const RUN = () => ({ kind: "run" });
 
+// The identity claims below run a real thunk rather than reading its source,
+// because a claim written as "this line contains X" describes a spelling and
+// stops holding the moment the code is rewritten correctly.
+const { Thunk } = await import(`${ROOT}/server/thunk.mjs`);
+
+/** The smallest source `Thunk.load` accepts, in the dialect it accepts. */
+const THUNK_SRC = `module.exports.initialState = {};
+module.exports.reduce = function reduce(s, i) {
+  return { state: { n: s.n + (i.by ?? 1) }, effects: [] };
+};`;
+
 // ── the ledger ───────────────────────────────────────────────────
 
 export const CLAIMS = [
@@ -116,15 +127,197 @@ export const CLAIMS = [
     probe: (src) => /export function kernelBytes\s*\(/.test(src),
   },
 
-  // ── identity: the 16-char prefix vs the 64-hex witness ────────
+  // ── identity: the content hash and the call id ────────────────
+  // These run the real code rather than reading it. A claim written as "this
+  // line contains `.slice(0, 16)`" describes a spelling; these describe
+  // behaviour, and they would still hold if the implementation were rewritten.
   {
-    id: "thunk-id-truncated",
-    claim: "server/thunk.mjs truncates sha256 to 16 chars, which asWitness would reject",
+    id: "thunk-id-is-64-hex",
+    claim: "a thunk's contentHash is the full 64-hex digest, not a 16-char prefix",
     doc: "WASM.md, SYSTEM.md",
-    kind: "defect",
-    input: T("server/thunk.mjs"),
+    kind: "health",
+    input: RUN(),
     expect: true,
-    probe: (src) => /\.slice\(0,\s*16\)/.test(src),
+    probe: async () => {
+      const t = await Thunk.load(THUNK_SRC, "counter", "1.0.0");
+      return /^[0-9a-f]{64}$/.test(t.contentHash);
+    },
+  },
+  {
+    id: "thunk-id-avoids-name-and-version",
+    claim: "renaming a thunk or bumping its version does not change its contentHash",
+    doc: "WASM.md, SYSTEM.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const a = await Thunk.load(THUNK_SRC, "counter", "0.0.0");
+      const b = await Thunk.load(THUNK_SRC, "other-name", "9.9.9");
+      return a.contentHash === b.contentHash;
+    },
+  },
+  {
+    id: "thunk-id-separates-urls",
+    claim: "two thunks differing only in a `//` inside a string literal get different ids",
+    doc: "SYSTEM.md, SANDBOX.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      // The bug this pins: the old id stripped comments with a regex, which
+      // also stripped `//` inside a string, so a URL was cut at `http:` and
+      // every URL in the tree hashed the same.
+      const withUrl = (url) =>
+        `module.exports.initialState = {};\n` +
+        `module.exports.reduce = function reduce(s, i) { return { state: { url: "${url}" }, effects: [] }; };`;
+      const a = await Thunk.load(withUrl("http://alpha.example/x"), "f", "1.0.0");
+      const b = await Thunk.load(withUrl("http://bravo.evil.example"), "f", "1.0.0");
+      return a.contentHash !== b.contentHash;
+    },
+  },
+  {
+    id: "thunk-id-ignores-comments",
+    claim: "a comment or a reindent does not change a thunk's contentHash",
+    doc: "SYSTEM.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const body = (mid) =>
+        `module.exports.initialState = {};\n` +
+        `module.exports.reduce = function reduce(s, i) {\n  ${mid}\n  return { state: { n: s.n }, effects: [] };\n};`;
+      const a = await Thunk.load(body(""), "r", "1.0.0");
+      const b = await Thunk.load(body("// a comment"), "r", "1.0.0");
+      const c = await Thunk.load(body("/* another */"), "r", "1.0.0");
+      return a.contentHash === b.contentHash && a.contentHash === c.contentHash;
+    },
+  },
+  {
+    id: "comment-stripper-is-not-a-regex",
+    claim: "server/js-scan.mjs scans for comments rather than substituting a regex",
+    doc: "SYSTEM.md",
+    kind: "health",
+    input: T("server/js-scan.mjs"),
+    expect: true,
+    // The tell is the absence of the two `replace` calls the old version used.
+    // A hand-written scanner has no `//`-stripping regex at all.
+    probe: (src) => /export function stripComments/.test(src) && !/\.replace\(\/\\\/\.\*\$/.test(src),
+  },
+  {
+    id: "thunk-id-covers-refs",
+    claim: "refs are part of the contentHash, and their order is not",
+    doc: "TOOLCHAIN-THUNKS.md, IPFS-IPDL.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const a = await Thunk.load(THUNK_SRC, "c", "1.0.0", {}, []);
+      const b = await Thunk.load(THUNK_SRC, "c", "1.0.0", {}, ["lake"]);
+      const c = await Thunk.load(THUNK_SRC, "c", "1.0.0", {}, ["a", "b"]);
+      const d = await Thunk.load(THUNK_SRC, "c", "1.0.0", {}, ["b", "a"]);
+      return a.contentHash !== b.contentHash && c.contentHash === d.contentHash;
+    },
+  },
+  {
+    id: "call-id-exists",
+    claim: "Thunk.callId is distinct from the thunk id and varies with args, secretRefs and apiRefs",
+    doc: "THUNK-CYCLE.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const t = await Thunk.load(THUNK_SRC, "c", "1.0.0");
+      const base = t.callId({ a: 1 });
+      return /^[0-9a-f]{64}$/.test(base)
+        && base !== t.contentHash
+        && base !== t.callId({ a: 2 })
+        && base !== t.callId({ a: 1 }, { secretRefs: ["KEY"] })
+        && base !== t.callId({ a: 1 }, { apiRefs: ["fs"] })
+        && t.callId({ a: 1 }, { secretRefs: ["x", "y"] })
+           === t.callId({ a: 1 }, { secretRefs: ["y", "x"] });
+    },
+  },
+  {
+    id: "args-hash-sorts-keys",
+    claim: "argsHash ignores object key order, which canonEnc would otherwise encode",
+    doc: "THUNK-CYCLE.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const t = await Thunk.load(THUNK_SRC, "c", "1.0.0");
+      return t.argsHash({ a: 1, b: 2 }) === t.argsHash({ b: 2, a: 1 })
+        && t.argsHash({ a: 1 }) !== t.argsHash({ a: 2 })
+        && t.argsHash({ n: 0 }) !== t.argsHash({ n: -0 });
+    },
+  },
+  {
+    id: "codec-has-a-float",
+    claim: "the codec encodes a finite double as its own type, distinct from an int",
+    doc: "WASM.md, SYSTEM.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const C = await import(`${ROOT}/scripts/kant-codec.mjs`);
+      if (C.valHash(C.vInt(1)) === C.valHash(C.vFloat(1))) return false;
+      if (C.valHash(C.vFloat(1)) === C.valHash(C.vFloat(1.5))) return false;
+      // -0 is not 0: `1 / -0` is -Infinity.
+      if (C.valHash(C.vFloat(0)) === C.valHash(C.vFloat(-0))) return false;
+      // And it survives all five projections that enumerate value types.
+      for (const n of [1.5, 0, -0, 1e21, -2.5]) {
+        const v = C.vFloat(n);
+        const back = [
+          C.canonDecode(C.canonEnc(v)),
+          C.yamlDecode(C.yamlEnc(v)),
+          C.xmlDecode(C.xmlEnc(v)),
+          C.csvDecode(C.csvEncode(v)),
+          C.ipdlRead(C.ipdlText(C.embed(v))),
+        ];
+        for (const b of back) {
+          if (!b || b.t !== "float" || !Object.is(b.n, n)) return false;
+        }
+      }
+      return true;
+    },
+  },
+  {
+    id: "codec-refuses-non-finite",
+    claim: "the codec refuses NaN and Infinity rather than encoding them",
+    doc: "WASM.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const C = await import(`${ROOT}/scripts/kant-codec.mjs`);
+      for (const n of [NaN, Infinity, -Infinity]) {
+        let threw = false;
+        try { C.vFloat(n); } catch { threw = true; }
+        if (!threw) return false;
+      }
+      return true;
+    },
+  },
+  {
+    id: "unaddressable-input-refused",
+    claim: "argsHash throws on a value with no content address rather than coercing it",
+    doc: "THUNK-CYCLE.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const t = await Thunk.load(THUNK_SRC, "c", "1.0.0");
+      for (const v of [undefined, NaN, Infinity, () => 1, new Date(0), new Map()]) {
+        let threw = false;
+        try { t.argsHash({ v }); } catch { threw = true; }
+        if (!threw) return false;
+      }
+      const cyclic = {};
+      cyclic.self = cyclic;
+      let threw = false;
+      try { t.argsHash(cyclic); } catch { threw = true; }
+      return threw;
+    },
   },
   {
     id: "witness-needs-64",

@@ -113,5 +113,11 @@ conversion is a decision about the example rather than about the sandbox.
 `apply()` already accepts both shapes, so the conversion is mechanical when
 someone makes it.
 
-`server/thunk-test.mjs` remains 8/10 green. The two red gates are phase 1 — the
-id is still a 16-char prefix where `asWitness` wants 64.
+`server/thunk-test.mjs` is 20/20 green. The two red gates it had when this file
+was written — the 16-char id — were phase 1, which landed 2026-10-03.
+
+The default-deny rule here turned out to apply to identity as well as
+capability, and that is where the codec's new float type came from: a thunk
+argument with no canonical spelling is refused rather than coerced, because a
+coerced hash would let two different calls share one cache entry. See the phase
+1 section of [SYSTEM.md](SYSTEM.md).

@@ -45,14 +45,42 @@ So there are two keys:
 | key | covers | used for |
 |---|---|---|
 | **thunk id** | `{ bytes, refs }` | identity, sharing, cache of the *definition* |
-| **call id** | `{ thunk id, argsHash, secretRefs }` | cache of the *result* |
+| **call id** | `{ thunk id, argsHash, secretRefs, apiRefs }` | cache of the *result* |
 
 `secretRefs` names *which* sealed values were used, not their contents. Two calls
 with the same secret and different args get different call ids; two calls with the
 same secret under different names do not collide.
 
+`apiRefs` is here because this document contradicted itself for a while. The
+table above originally read `{ thunk id, argsHash, secretRefs }` while point 2
+below argued that the api set must be part of the call id. The argument is
+right and the table was incomplete: a result computed with a narrow api set must
+not be served to a caller holding a wide one, because the wide one can do more
+with it. Same shape as `secretRefs`, sharper reason.
+
 **This is the one genuinely new piece of machinery in the whole cycle.** Everything
 else is naming. This is a cache key.
+
+**Landed 2026-10-03.** Both keys are computed in `server/thunk-id.mjs` through
+`valHash` in `scripts/kant-codec.mjs`, which is the tree's one hash function, so
+a thunk id and a file witness are the same kind of 64-hex thing and `asWitness`
+accepts both. Three things the implementation had to decide that the prose above
+did not say:
+
+- **`argsHash` is `valHash` over a conversion, not over the raw args.**
+  `valHash` takes a canonical `Val`, and a plain `{by: 1}` throws
+  `CodecError: not a canonical value`. The conversion sorts object keys, because
+  `canonEnc` walks fields in order and JS key order is not part of the value.
+- **The codec needed a float.** It encoded null/bool/int/str/list/obj, and
+  `vInt(1.5)` throws from `BigInt`, so a thunk taking a fractional number had no
+  addressable call id. `{ t: "float", n }` now exists, in all five projections
+  that enumerate value types, and `1` is not `1.0`. `NaN` and `±Infinity` are
+  refused rather than encoded.
+- **Unaddressable inputs are refused, not coerced.** `undefined`, functions,
+  symbols, `Date`, `Map`, cycles: none has a spelling that reads back as itself,
+  so a coerced hash would claim two different calls are one. This is the
+  default-deny rule from [SANDBOX.md](SANDBOX.md), applied to identity rather
+  than to capability.
 
 ## 2. `apis + sops + args ⇒ results`
 
@@ -74,8 +102,9 @@ Three properties, in the order they matter:
 - **`sops` supplies secrets, never apis.** Separating them keeps "what can this
   do" (public, hashed, shareable) distinct from "what does this know" (sealed).
 - **Args are content-addressed.** `argsHash` is `valHash` from
-  `scripts/kant-codec.mjs`, which already returns a full 64-hex digest and is
-  stable across serialization. Nothing new to build.
+  `scripts/kant-codec.mjs`, which returns a full 64-hex digest and is stable
+  across serialization. It needed a conversion from plain values to canonical
+  ones and a float type to exist at all — see point 1.
 
 The wasm case from [WASM.md](WASM.md) is the degenerate one and worth naming: a
 wasm thunk with zero imports needs no apis and no sops, because it cannot reach
