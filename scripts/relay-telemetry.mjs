@@ -21,6 +21,8 @@
 // real numbers without touching the arithmetic.
 
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
 const SERIES = new URL("../.relay-telemetry.jsonl", import.meta.url).pathname;
 
@@ -199,10 +201,16 @@ const analyze = () => {
 
 const pad = (s, n) => String(s ?? "-").padEnd(n);
 
+// Only when run directly. Importing this module must not poll the fleet:
+// scripts/thunk-claims.mjs imports readBudget() from here to re-verify the
+// cadence claim, and a ledger that made three network requests per run would be
+// a ledger nobody runs offline.
 const argv = process.argv.slice(2);
 const cmd = argv.find((a) => a.startsWith("--")) ?? "--once";
-if (cmd === "--once") await once();
-else if (cmd === "--collect") await collect(Number(argv[1 + argv.indexOf("--collect")]) || 5,
-                                            Number(argv[2 + argv.indexOf("--collect")]) || 60);
-else if (cmd === "--analyze") analyze();
-else { console.log("usage: relay-telemetry.mjs [--once | --collect N SECONDS | --analyze]"); process.exit(1); }
+if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+  if (cmd === "--once") await once();
+  else if (cmd === "--collect") await collect(Number(argv[1 + argv.indexOf("--collect")]) || 5,
+                                              Number(argv[2 + argv.indexOf("--collect")]) || 60);
+  else if (cmd === "--analyze") analyze();
+  else { console.log("usage: relay-telemetry.mjs [--once | --collect N SECONDS | --analyze]"); process.exit(1); }
+}

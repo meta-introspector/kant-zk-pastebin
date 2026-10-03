@@ -150,6 +150,16 @@ nothing loads, and it is exploitable as soon as that is fixed.
 currently failing). Under wasm this whole class of question disappears: a module
 with zero imports cannot reach the host, so there is no policy to get wrong.
 
+**Every number in these five documents is re-checked by a ledger.**
+`scripts/thunk-claims.mjs` holds 23 claims, each a probe over one input with the
+value it expects; `scripts/thunk-claims-test.mjs` mutates twelve of them and
+asserts each goes red, because a probe that cannot fail is not a probe. Claims
+are either **health** (red means a regression) or **defect** (red means a known
+defect got fixed and the claim needs rewriting) — seven are defects on purpose,
+which is how a fix announces itself. What it cannot cover is stated there too:
+the fleet, the other repositories the lens numbers come from, and the
+judgements. See [VERIFICATION.md](VERIFICATION.md).
+
 ## Design summary (see `DESIGN.md`)
 
 **Thunk** — serializable state machine:

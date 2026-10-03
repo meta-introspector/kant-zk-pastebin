@@ -1,0 +1,439 @@
+// thunk-claims.mjs — re-verify every claim the thunk-server docs rest on.
+//
+// The five documents in tasks/thunk-server/ are only as good as the numbers in
+// them, and a number that was true when it was written is not evidence later.
+// Three mistakes this session all had the same cause: acting on a picture of the
+// tree that had stopped being true. So the claims get a checker.
+//
+//   node scripts/thunk-claims.mjs          table, exit 1 if any claim fails
+//   node scripts/thunk-claims.mjs --json   rows as JSON, for the test file
+//   node scripts/thunk-claims.mjs --list   ids and claims only
+//
+// Each claim is a probe over one input plus the value it expects. Keeping the
+// probe separable from the file read is what lets thunk-claims-test.mjs mutate
+// an input and watch the claim flip — otherwise a checker that always passes
+// looks exactly like a checker that is right.
+//
+// Claims are facts about the tree, not aspirations. Where a claim is a known
+// defect (the loader throws, the id is truncated) the claim asserts the defect
+// is still there, so this file going red is the signal that phase 0 landed.
+
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, relative, resolve } from "node:path";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** This file and its test, excluded from the scans that look for their own names. */
+const SELF = ["scripts/thunk-claims.mjs", "scripts/thunk-claims-test.mjs"];
+
+/** A text file in the repo, read as a string. */
+const T = (path) => ({ kind: "file", path, binary: false });
+/** A binary file in the repo, read as a Buffer. */
+const B = (path) => ({ kind: "file", path, binary: true });
+/** A value computed from the tree rather than read from one file. */
+const D = (id, fn) => ({ kind: "derive", id, fn });
+/** No input at all — the probe runs the thing it describes. */
+const RUN = () => ({ kind: "run" });
+
+// ── the ledger ───────────────────────────────────────────────────
+
+export const CLAIMS = [
+  // ── the payload: web/kant_kernel.wasm ─────────────────────────
+  {
+    id: "kernel-bytes",
+    claim: "web/kant_kernel.wasm is 799 bytes",
+    doc: "WASM.md, SYSTEM.md",
+    kind: "health",
+    input: B("web/kant_kernel.wasm"),
+    expect: 799,
+    probe: (b) => b.length,
+  },
+  {
+    id: "kernel-imports-zero",
+    claim: "the kernel imports nothing, so isolation is a property of the artifact",
+    doc: "WASM.md",
+    kind: "health",
+    input: B("web/kant_kernel.wasm"),
+    expect: 0,
+    probe: (b) => WebAssembly.Module.imports(new WebAssembly.Module(b)).length,
+  },
+  {
+    id: "kernel-exports-21",
+    claim: "the kernel exports 21 names, matching KERNEL_EXPORTS in web/kant-wasm.mjs",
+    doc: "WASM.md",
+    kind: "health",
+    input: B("web/kant_kernel.wasm"),
+    expect: 21,
+    probe: (b) => WebAssembly.Module.exports(new WebAssembly.Module(b)).length,
+  },
+  {
+    id: "kernel-frame-fraction",
+    claim: "the kernel is under 5% of one 16 KiB swarm frame",
+    doc: "WASM.md, THUNK-CYCLE.md",
+    kind: "health",
+    input: D("kernel bytes over FRAME_BYTES", () =>
+      read(ROOT, "web/kant_kernel.wasm").length / 16384),
+    expect: true,
+    probe: (fraction) => fraction < 0.05,
+  },
+  {
+    id: "kernel-embedded-identical",
+    claim: "the embedded fallback decodes to the same bytes as web/kant_kernel.wasm",
+    doc: "WASM.md",
+    kind: "health",
+    input: D("embedded base64", () => {
+      // KERNEL_BASE64 is a multi-line concatenation of string literals, so the
+      // only reliable way to read it is to take every literal in the assignment.
+      const src = read(ROOT, "web/kant-kernel-embedded.mjs", "utf8");
+      const body = src.split("KERNEL_BASE64")[1]?.split(";")[0] ?? "";
+      const parts = [...body.matchAll(/"([A-Za-z0-9+/=]*)"/g)].map((m) => m[1]);
+      if (!parts.length) return null;
+      return Buffer.from(parts.join(""), "base64");
+    }),
+    expect: true,
+    probe: (b) => b !== null && b.equals(read(ROOT, "web/kant_kernel.wasm")),
+  },
+  {
+    id: "kernel-length-constant",
+    claim: "KERNEL_LENGTH claims 799, the size of the binary it was generated from",
+    doc: "WASM.md",
+    kind: "health",
+    input: T("web/kant-kernel-embedded.mjs"),
+    expect: true,
+    probe: (src) => {
+      const m = src.match(/KERNEL_LENGTH\s*=\s*(\d+)/);
+      return !!m && Number(m[1]) === read(ROOT, "web/kant_kernel.wasm").length;
+    },
+  },
+  {
+    id: "kernel-bytes-is-function",
+    claim: "kernelBytes is exported as a function, not as a value",
+    doc: "WASM.md",
+    kind: "health",
+    input: T("web/kant-kernel-embedded.mjs"),
+    expect: true,
+    probe: (src) => /export function kernelBytes\s*\(/.test(src),
+  },
+
+  // ── identity: the 16-char prefix vs the 64-hex witness ────────
+  {
+    id: "thunk-id-truncated",
+    claim: "server/thunk.mjs truncates sha256 to 16 chars, which asWitness would reject",
+    doc: "WASM.md, SYSTEM.md",
+    kind: "defect",
+    input: T("server/thunk.mjs"),
+    expect: true,
+    probe: (src) => /\.slice\(0,\s*16\)/.test(src),
+  },
+  {
+    id: "witness-needs-64",
+    claim: "asWitness accepts only a 64-char hex string",
+    doc: "WASM.md",
+    kind: "health",
+    input: T("web/kant-libp2p.mjs"),
+    expect: true,
+    probe: (src) => /asWitness[\s\S]{0,200}length !== 64[\s\S]{0,120}\{64\}/.test(src),
+  },
+
+  // ── thunk mechanics, including the three known defects ────────
+  {
+    id: "thunk-load-throws",
+    claim: "Thunk.load throws on a valid source, so nothing loads today",
+    doc: "WASM.md, SYSTEM.md",
+    kind: "defect",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const { Thunk } = await import("../server/thunk.mjs");
+      try {
+        await Thunk.load("module.exports = { reduce: (s) => s };", "probe", "0.0.0");
+        return false;
+      } catch {
+        return true;
+      }
+    },
+  },
+  {
+    id: "apply-double-wraps",
+    claim: "apply() stores the transducer's {state, effects} return as the new state",
+    doc: "WASM.md, THUNK-CYCLE.md",
+    kind: "defect",
+    input: T("server/thunk.mjs"),
+    expect: true,
+    probe: (src) => /#state\s*=\s*this\.#compiled\.transducers\.reduce\(/.test(src),
+  },
+  {
+    id: "snapshot-deep-copies",
+    claim: "snapshot() deep-copies state through JSON.parse(JSON.stringify(...))",
+    doc: "THUNK-CYCLE.md §4",
+    kind: "health",
+    input: T("server/thunk.mjs"),
+    expect: true,
+    probe: (src) => /JSON\.parse\(JSON\.stringify\(/.test(src),
+  },
+
+  // ── the scheduler has no notion of a constraint ───────────────
+  {
+    id: "schedule-has-no-constraint",
+    claim: "server/schedule.mjs has no budget/limit/max/headroom/duration vocabulary",
+    doc: "THUNK-CYCLE.md §5",
+    kind: "defect",
+    input: T("server/schedule.mjs"),
+    expect: true,
+    probe: (src) => !/budget|limit|max|headroom|duration/i.test(src),
+  },
+  {
+    id: "schedule-api",
+    claim: "Schedule has add, remove, tick and installManifest",
+    doc: "THUNK-CYCLE.md §5",
+    kind: "health",
+    input: T("server/schedule.mjs"),
+    expect: true,
+    probe: (src) =>
+      ["add", "remove", "tick", "installManifest"].every((m) =>
+        new RegExp(`\\b${m}\\s*\\(`).test(src)),
+  },
+
+  // ── IPDL: ref is written and read, never resolved ─────────────
+  {
+    id: "ipdl-ref-three-sites",
+    claim: "IPDL_REF appears at exactly 3 sites: defined, projected, read back",
+    doc: "IPFS-IPDL.md",
+    kind: "health",
+    input: T("scripts/kant-codec.mjs"),
+    expect: 3,
+    probe: (src) => (src.match(/\bIPDL_REF\b/g) || []).length,
+  },
+  {
+    id: "ref-never-resolved",
+    claim: "nothing in scripts/, web/ or server/ ever calls a resolver on a ref target",
+    doc: "IPFS-IPDL.md",
+    kind: "defect",
+    input: D("all js sources", () =>
+      ["scripts", "web", "server"]
+        .flatMap((d) => walk(resolve(ROOT, d)))
+        // Excluded on purpose: this file and its test have to *name* a resolver
+        // in order to assert that nothing calls one. A claim that scans its own
+        // source for the word it is looking for is a claim that always fails.
+        .filter((f) => !SELF.includes(relative(ROOT, f)))
+        .map((f) => read(ROOT, relative(ROOT, f), "utf8"))
+        .join("\n")),
+    expect: true,
+    // Requires a call site, not just the name. Without the parens this claim
+    // trips over its own regex literal in this file, which is the kind of
+    // self-reference that makes a checker worthless.
+    probe: (src) => !/\b(resolveRef|iResolve|resolveTarget|fetchRef)\s*\(/.test(src),
+  },
+  {
+    id: "ipdl-ref-roundtrips",
+    claim: "a doc carrying iRef round-trips the target exactly and hashes stably",
+    doc: "IPFS-IPDL.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    // Uses the real nixpkgs pin from flake.nix rather than a made-up target, so
+    // the claim is about this tree's actual reference and not a fixture.
+    probe: async () => {
+      const c = await import("./kant-codec.mjs");
+      const flake = read(ROOT, "flake.nix", "utf8");
+      const target = flake.match(/nixpkgs\.url\s*=\s*"([^"]+)"/)?.[1];
+      if (!target) return false;
+      const annot = c.iAnnot("dep", "nixpkgs", c.iRef(target));
+      const canon = c.project(annot);
+      const back = c.recover(canon);
+      const viaText = c.ipdlRead(c.ipdlText(annot));
+      const h = c.valHash(canon);
+      const other = c.valHash(c.project(c.iAnnot("dep", "nixpkgs", c.iRef(target + "0"))));
+      return (
+        back.body.target === target &&
+        viaText?.body?.target === target &&
+        h === c.valHash(c.project(back)) &&
+        h !== other &&
+        h.length === 64
+      );
+    },
+  },
+
+  // ── build inputs are pinned, except one that is not ───────────
+  {
+    id: "flake-inputs-sha-pinned",
+    claim: "every flake input is a github: URL pinned to a 40-hex sha, never a branch",
+    doc: "IPFS-IPDL.md, TOOLCHAIN-THUNKS.md",
+    kind: "health",
+    input: T("flake.nix"),
+    expect: true,
+    probe: (src) => {
+      const urls = [...src.matchAll(/([\w-]+)\.url\s*=\s*"([^"]+)"/g)].map((m) => m[2]);
+      return (
+        urls.length >= 4 &&
+        urls.every((u) => /^github:[^/]+\/[^/]+\/[0-9a-f]{40}$/.test(u))
+      );
+    },
+  },
+  {
+    id: "nora-wildcard-version",
+    claim: "Cargo.toml pins rust-unixfs by version \"*\", a live name-vs-registry dependency",
+    doc: "IPFS-IPDL.md",
+    kind: "defect",
+    input: T("Cargo.toml"),
+    expect: true,
+    probe: (src) => /rust-unixfs\s*=\s*\{[^}]*version\s*=\s*"\*"/.test(src),
+  },
+
+  // ── the measured cadence ──────────────────────────────────────
+  {
+    id: "telemetry-11s",
+    claim: "the sustainable poll interval is every 11s per worker",
+    doc: "THUNK-CYCLE.md §5",
+    kind: "health",
+    input: D("sustainableIntervalSeconds", async () => {
+      const { sustainableIntervalSeconds } = await import("./relay-telemetry.mjs");
+      return sustainableIntervalSeconds().secondsBetweenPolls;
+    }),
+    expect: 11,
+    probe: (s) => s,
+  },
+  {
+    id: "telemetry-headroom-reserved",
+    claim: "half the Durable Object allowance is held back as headroom",
+    doc: "THUNK-CYCLE.md §5",
+    kind: "health",
+    input: D("readBudget", async () => {
+      const { readBudget } = await import("./relay-telemetry.mjs");
+      return readBudget().headroom;
+    }),
+    expect: 0.5,
+    probe: (h) => h,
+  },
+
+  // ── secrets ───────────────────────────────────────────────────
+  {
+    id: "sops-path-exists",
+    claim: "the sops entry point, its config and its registry all exist",
+    doc: "THUNK-CYCLE.md §1",
+    kind: "health",
+    input: D("sops paths", () =>
+      [".sops.yaml", ".sops/registry.sops.yaml", "scripts/sops-run.sh"]
+        .map((p) => exists(resolve(ROOT, p)))),
+    expect: [true, true, true],
+    probe: (found) => found,
+  },
+
+  // ── a latent false failure ────────────────────────────────────
+  {
+    id: "wasm-test-reads-gitignored-dist",
+    claim: "web/wasm-test.mjs reads dist/, which is gitignored, so it fails in a fresh checkout",
+    doc: "WASM.md",
+    kind: "defect",
+    input: D("wasm-test and gitignore", () => ({
+      test: read(ROOT, "web/wasm-test.mjs", "utf8"),
+      ignore: read(ROOT, ".gitignore", "utf8"),
+    })),
+    expect: true,
+    probe: ({ test, ignore }) =>
+      /["'`]dist\/kant_kernel\.wasm/.test(test) && /^dist\/?$/m.test(ignore),
+  },
+];
+
+// ── runner ──────────────────────────────────────────────────────
+
+function read(root, rel, enc) {
+  return enc ? readFileSync(resolve(root, rel), enc) : readFileSync(resolve(root, rel));
+}
+function exists(p) {
+  try {
+    readFileSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function walk(dir, out = []) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = resolve(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else if (/\.(mjs|js|ts)$/.test(e.name)) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Evaluate one claim against one input. Below this line there is no file
+ * access, which is the property the test file depends on.
+ */
+export async function evaluate(claim, raw) {
+  const base = { id: claim.id, kind: claim.kind, claim: claim.claim, doc: claim.doc, expect: claim.expect };
+  let observed;
+  try {
+    observed = await claim.probe(raw);
+  } catch (e) {
+    return { ...base, observed: `threw: ${e.message}`, ok: false };
+  }
+  return { ...base, observed, ok: deepEq(observed, claim.expect) };
+}
+
+function deepEq(a, b) {
+  if (Array.isArray(b))
+    return Array.isArray(a) && a.length === b.length && a.every((v, i) => deepEq(v, b[i]));
+  return a === b;
+}
+
+/** Resolve every claim's input and evaluate it against the real tree. */
+export async function runClaims() {
+  const rows = [];
+  for (const claim of CLAIMS) {
+    let raw;
+    try {
+      raw = await resolveInput(claim.input);
+    } catch (e) {
+      rows.push({
+        id: claim.id, kind: claim.kind, claim: claim.claim, doc: claim.doc, expect: claim.expect,
+        observed: `input failed: ${e.message}`, ok: false,
+      });
+      continue;
+    }
+    rows.push(await evaluate(claim, raw));
+  }
+  return rows;
+}
+
+export async function resolveInput(input) {
+  if (input.kind === "run") return undefined;
+  if (input.kind === "derive") return await input.fn();
+  return read(ROOT, input.path, input.binary ? undefined : "utf8");
+}
+
+// ── cli ─────────────────────────────────────────────────────────
+
+const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const argv = process.argv.slice(2);
+  if (argv.includes("--list")) {
+    for (const c of CLAIMS) console.log(`${c.id.padEnd(32)} ${c.claim}`);
+    process.exit(0);
+  }
+  const rows = await runClaims();
+  if (argv.includes("--json")) {
+    console.log(JSON.stringify(rows, null, 2));
+  } else {
+    const w = Math.max(...rows.map((r) => r.id.length));
+    for (const r of rows) {
+      const mark = r.ok ? "  ok" : "FAIL";
+      console.log(`${mark}  ${r.id.padEnd(w)}  ${r.claim}${r.kind === "defect" ? "   [defect]" : ""}`);
+      if (!r.ok)
+        console.log(`      expected ${JSON.stringify(r.expect)}, got ${JSON.stringify(r.observed)}`);
+    }
+    const bad = rows.filter((r) => !r.ok);
+    console.log(`\n${rows.length - bad.length}/${rows.length} claims hold`);
+    if (bad.length) {
+      const regressed = bad.filter((r) => r.kind === "health");
+      const fixed = bad.filter((r) => r.kind === "defect");
+      if (fixed.length)
+        console.log(`${fixed.length} defect claim(s) went red — that is progress; rewrite them.`);
+      if (regressed.length)
+        console.log(`${regressed.length} health claim(s) went red — that is a regression.`);
+    }
+  }
+  process.exit(rows.every((r) => r.ok) ? 0 : 1);
+}
