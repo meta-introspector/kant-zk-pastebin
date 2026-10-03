@@ -43,6 +43,59 @@ No network. `scripts/relay-telemetry.mjs` used to poll the fleet on import; it
 now only runs its collector when invoked directly, because a ledger that made
 three HTTP requests per run is a ledger nobody runs offline.
 
+## What actually runs it
+
+`npm run verify` (or `node scripts/check-all.mjs`). Until 2026-10-03 the
+repository had **fifty tracked `*-test.mjs` files and nothing that ran them**:
+`npm test` is a puppeteer test that needs a live server, and the Makefile has no
+test target. That is the mechanical reason a `float` constructor could be added
+to a shared codec with every suite green — nobody was running them.
+
+The runner executes 31 hermetic suites in about 15 seconds, including both Lean
+cross-checks and this ledger. Three properties it is built to keep:
+
+- **It does not hide failures.** Ten tracked suites are broken, and are listed
+  with the reason and their state rather than skipped quietly. A runner that
+  silently omits ten broken files reads as coverage.
+- **It cannot fall behind the tree.** Every tracked suite must be in `CORE` or
+  `EXCLUDED`; one in neither fails the run. This caught `web/sharelog-test.mjs`
+  on its first execution, which had been missed by hand.
+- **It runs what it claims to, every time.** No caching, no remembered results.
+
+It has teeth: changing one byte in the codec's `str` tag — `S` to `s` — turns
+**five independent suites** red and exits 1:
+
+```
+FAIL  scripts/codec-test.mjs           39 of 91 checks FAILED
+FAIL  server/thunk-test.mjs            20 passed, 1 failed
+FAIL  scripts/thunk-claims.mjs         exit 1
+FAIL  scripts/thunk-claims-test.mjs    21 passed, 4 failed
+FAIL  scripts/lean-codec-vectors.mjs   4/8 checks pass
+```
+
+### The ten broken suites
+
+Worth having in one place, since nothing had them:
+
+| suites | why |
+|---|---|
+| `scripts/{cli-page,diagpage,handpage,page,site}-test.mjs` | look for `scripts/index.html`; the pages live in `web/`. Broken duplicates of passing `web/` twins |
+| `scripts/wasm-test.mjs`, `web/wasm-test.mjs` | read gitignored `dist/` — the open `wasm-test-reads-gitignored-dist` claim |
+| `scripts/carddebug-test.mjs`, `web/carddebug-test.mjs` | import `scripts/kant-debug.mjs`, which does not exist |
+| `web/cli-page-test.mjs` | a genuine assertion failure: `box.querySelectorAll is not a function` |
+
+One more, found while building this: **`scripts/net-test.mjs` is not hermetic**
+despite looking like its `web/` twin. It binds a real port and posts to a live
+relay, so it 429s under repetition — it passed the first survey by luck and
+failed every run after. That is why the core set is a hand-written manifest with
+a stated reason per entry rather than something inferred by grepping for
+`fetch(`: a grep would have called it hermetic too.
+
+Known limitation: one run of `npm run verify` exited 1 with no failing suite
+printed, and four subsequent runs were clean. The failing suite was not
+captured, so the cause is unknown — most likely contention with the concurrent
+agent in the same tree, but that is a guess and not a measurement.
+
 ## The two kinds of claim
 
 This distinction is the whole reason the ledger is trustworthy rather than

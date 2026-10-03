@@ -2,7 +2,9 @@
   "name": "kant-pastebin-tests",
   "version": "0.1.0",
   "scripts": {
-    "test": "node test-pastebin.js"
+    "test": "node test-pastebin.js",
+    "verify": "node scripts/check-all.mjs",
+    "verify:all": "node scripts/check-all.mjs --all"
   },
   "dependencies": {
     "puppeteer": "^21.0.0"

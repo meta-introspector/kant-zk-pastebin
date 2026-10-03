@@ -286,6 +286,33 @@ export const CLAIMS = [
     },
   },
   {
+    id: "verify-entrypoint-runs-the-suites",
+    claim: "npm run verify runs the suites, including both Lean cross-checks",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    // The repository had 50 tracked suites and nothing that ran them: `npm test`
+    // is a puppeteer test needing a live server, and the Makefile has no test
+    // target. So a codec change could ship with nothing green-checked, which is
+    // how the float got in.
+    probe: async () => {
+      const { runOne, CORE, trackedSuites, EXCLUDED } =
+        await import(`${ROOT}/scripts/check-all.mjs`);
+      if (!CORE.includes("scripts/lean-codec-vectors.mjs")) return false;
+      if (!CORE.includes("scripts/lean-codec-types.mjs")) return false;
+      if (!CORE.includes("scripts/thunk-claims.mjs")) return false;
+      // Every tracked suite is in one list or the other, so a new one cannot be
+      // added and go unnoticed.
+      const known = new Set([...CORE, ...Object.keys(EXCLUDED)]);
+      if (trackedSuites().some((f) => !known.has(f))) return false;
+      // And the runner really runs them: a stubbed runner would pass the three
+      // checks above without executing a thing.
+      const r = runOne("scripts/lean-codec-vectors.mjs", 60000);
+      return r.ok;
+    },
+  },
+  {
     id: "js-codec-matches-lean-source",
     claim: "the JS codec encodes exactly the value types Kant.Codec defines",
     doc: "VERIFICATION.md",
