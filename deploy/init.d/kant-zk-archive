@@ -1,0 +1,78 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          kant-zk-archive
+# Required-Start:    $network $local_fs
+# Required-Stop:     $network $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Kant ZK Archive — room discussion → pastebin thread
+# Description:       Joins kant-zk rooms via invite and archives the
+#                    discussion as pastebin threads.
+### END INIT INFO
+#
+# Install:
+#   sudo cp kant-zk-archive /etc/init.d/
+#   sudo chmod +x /etc/init.d/kant-zk-archive
+#   sudo update-rc.d kant-zk-archive defaults
+#   sudo service kant-zk-archive start
+#
+# Config: /var/lib/kant-zk/rooms/*.json
+# State:  /var/lib/kant-zk/rooms/*.state.json
+
+set -e
+
+DAEMON=/usr/bin/node
+DAEMON_ARGS="server/archive.mjs --rooms /var/lib/kant-zk/rooms --relay https://solana.solfunmeme.com/relay --backend https://solana.solfunmeme.com/pastebin"
+DAEMON_DIR=/home/mdupont/projects/pastebin-lean
+PIDFILE=/var/run/kant-zk-archive.pid
+USER=mdupont
+GROUP=mdupont
+
+. /lib/lsb/init-functions
+
+do_start() {
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+        log_progress_msg "already running (pid $(cat $PIDFILE))"
+        return 1
+    fi
+    cd "$DAEMON_DIR"
+    start-stop-daemon --start --quiet --background \
+        --pidfile "$PIDFILE" --make-pidfile \
+        --chuid "$USER:$GROUP" --chdir "$DAEMON_DIR" \
+        --exec "$DAEMON" -- $DAEMON_ARGS
+    log_end_msg $?
+}
+
+do_stop() {
+    if [ ! -f "$PIDFILE" ]; then
+        log_progress_msg "not running"
+        return 1
+    fi
+    start-stop-daemon --stop --quiet --pidfile "$PIDFILE" --retry 5
+    rm -f "$PIDFILE"
+    log_end_msg $?
+}
+
+case "$1" in
+    start)
+        log_daemon_msg "Starting kant-zk-archive"
+        do_start
+        ;;
+    stop)
+        log_daemon_msg "Stopping kant-zk-archive"
+        do_stop
+        ;;
+    restart)
+        log_daemon_msg "Restarting kant-zk-archive"
+        do_stop
+        sleep 1
+        do_start
+        ;;
+    status)
+        status_of_proc -p "$PIDFILE" "$DAEMON" kant-zk-archive && exit 0 || exit $?
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}" >&2
+        exit 1
+        ;;
+esac

@@ -1,0 +1,84 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          kant-zk-forward
+# Required-Start:    $network $local_fs
+# Required-Stop:     $network $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Kant ZK Forward — bridge local relay to cloudflare relay
+# Description:       Bridges the room's lines from the local relay to the
+#                    Cloudflare worker relay for off-site mirroring.
+### END INIT INFO
+#
+# Install:
+#   sudo cp kant-zk-forward /etc/init.d/
+#   sudo chmod +x /etc/init.d/kant-zk-forward
+#   sudo update-rc.d kant-zk-forward defaults
+#   sudo service kant-zk-forward start
+#
+# Config: KANT_ZK_INVITE in /etc/default/kant-zk-forward (or inline below)
+# State:  /var/lib/kant-zk/forward-state.json
+
+set -e
+
+DAEMON=/usr/bin/node
+DAEMON_ARGS="server/forward.mjs --invite \"$KANT_ZK_INVITE\" --from https://solana.solfunmeme.com/relay --to https://kant-zk-relay.jmikedupont2.workers.dev --state /var/lib/kant-zk/forward-state.json"
+DAEMON_DIR=/home/mdupont/projects/pastebin-lean
+PIDFILE=/var/run/kant-zk-forward.pid
+USER=mdupont
+GROUP=mdupont
+
+# Read config from /etc/default/kant-zk-forward if present
+[ -f /etc/default/kant-zk-forward ] && . /etc/default/kant-zk-forward
+
+# Fallback invite if not set in /etc/default
+: "${KANT_ZK_INVITE:=https://solana.solfunmeme.com/relay/#6b7a696e76697465:68747470733a2f2f736f6c616e612e736f6c66756e6d656d652e636f6d2f72656c6179:f436f2a7fc1378621989a2121aed902a53fe120ee4be013e1d412ed9a279c792:6c65747461}"
+
+. /lib/lsb/init-functions
+
+do_start() {
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+        log_progress_msg "already running (pid $(cat $PIDFILE))"
+        return 1
+    fi
+    cd "$DAEMON_DIR"
+    start-stop-daemon --start --quiet --background \
+        --pidfile "$PIDFILE" --make-pidfile \
+        --chuid "$USER:$GROUP" --chdir "$DAEMON_DIR" \
+        --exec "$DAEMON" -- $DAEMON_ARGS
+    log_end_msg $?
+}
+
+do_stop() {
+    if [ ! -f "$PIDFILE" ]; then
+        log_progress_msg "not running"
+        return 1
+    fi
+    start-stop-daemon --stop --quiet --pidfile "$PIDFILE" --retry 5
+    rm -f "$PIDFILE"
+    log_end_msg $?
+}
+
+case "$1" in
+    start)
+        log_daemon_msg "Starting kant-zk-forward"
+        do_start
+        ;;
+    stop)
+        log_daemon_msg "Stopping kant-zk-forward"
+        do_stop
+        ;;
+    restart)
+        log_daemon_msg "Restarting kant-zk-forward"
+        do_stop
+        sleep 1
+        do_start
+        ;;
+    status)
+        status_of_proc -p "$PIDFILE" "$DAEMON" kant-zk-forward && exit 0 || exit $?
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}" >&2
+        exit 1
+        ;;
+esac

@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kant — a private room you share with one link</title>
+<style>
+  :root { --ink: #0f0; --dim: #7a7; --hi: #0ff; --bg: #0a0a0a; --panel: #111; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 640px; margin: 0 auto; padding: 0 14px 80px;
+         background: var(--bg); color: var(--ink); }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 0 6px;
+           position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  header h1 { font-size: 1.1rem; margin: 0; flex: 1; color: var(--hi); }
+  button { background: var(--ink); color: #000; border: none; border-radius: 8px;
+           padding: 10px 14px; margin: 4px 6px 4px 0; cursor: pointer;
+           font-family: inherit; font-size: 1rem; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  button.big { display: block; width: 100%; padding: 18px; font-size: 1.15rem; margin: 10px 0; }
+  button.stop { background: #f33; color: #fff; width: 100%; padding: 18px; font-size: 1.15rem; }
+  button.icon { background: transparent; color: var(--hi); border: 1px solid #333;
+                padding: 6px 10px; font-size: 1rem; }
+  input, textarea { width: 100%; background: var(--panel); color: var(--ink);
+                    border: 1px solid #2a2; border-radius: 8px; padding: 10px;
+                    font-family: ui-monospace, monospace; font-size: .95rem; }
+  section { display: none; }
+  section.on { display: block; }
+  .guide { background: #06210b; border: 1px solid #1a5; border-radius: 10px;
+           padding: 12px 14px; margin: 6px 0 12px; }
+  .guide p { margin: 0 0 6px; }
+  .steps { color: var(--dim); font-size: .85rem; letter-spacing: .3em; }
+  .meta { color: var(--dim); white-space: pre-wrap; font-size: .85rem;
+          font-family: ui-monospace, monospace; margin: 8px 0; }
+  .warn { color: #fb0; }
+  .bad { color: #f66; }
+  .card { background: var(--panel); border: 1px solid #222; border-radius: 10px;
+          padding: 12px; margin: 10px 0; }
+  #qr svg { width: 100%; height: auto; max-width: 380px; background: #000; border-radius: 8px; }
+  #chat { background: var(--panel); border: 1px solid #222; border-radius: 10px;
+          padding: 10px; min-height: 180px; max-height: 46vh; overflow-y: auto;
+          font-family: ui-monospace, monospace; font-size: .9rem; }
+  #chat .me { color: var(--hi); }
+  #cam { width: 100%; max-width: 420px; border-radius: 10px; background: #000; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { flex: 1; }
+  a { color: var(--hi); }
+  footer { color: var(--dim); font-size: .8rem; margin-top: 30px; }
+</style>
+</head>
+<body>
+
+<header>
+  <button class="icon" id="back" title="back">←</button>
+  <h1 id="title">Kant</h1>
+  <button class="icon" id="hush" title="turn the voice off">🔊</button>
+</header>
+
+<div class="guide">
+  <p id="prompt">…</p>
+  <div class="steps" id="steps"></div>
+  <button class="ghost" id="again">Say that again</button>
+</div>
+
+<!-- ------------------------------------------------------------ welcome -->
+<section id="s-welcome">
+  <p>A Kant room is a private conversation. You make one, you send one link,
+     and whoever opens that link is in the room with you. The link holds the
+     key, so nothing in the middle can read what you say.</p>
+  <button class="big" id="btn-open">Start a room</button>
+  <button class="big ghost" id="btn-join">Join with a link</button>
+  <button class="ghost" id="btn-scan">Scan a code</button>
+  <button class="ghost" id="btn-more">More</button>
+  <div class="meta" id="transport">checking how this copy can reach other devices…</div>
+</section>
+
+<!-- -------------------------------------------------------------- share -->
+<section id="s-share">
+  <p>One link. Send it in any chat, or let the other person point a camera at
+     the code.</p>
+  <div class="row">
+    <input id="link" readonly />
+  </div>
+  <button id="btn-copy">Copy the link</button>
+  <button class="ghost" id="btn-sharesys">Share…</button>
+  <button class="ghost" id="btn-openroom">Open the room →</button>
+
+  <div class="card">
+    <label class="meta" for="caption">The words printed under the code</label>
+    <input id="caption" />
+    <div class="row" style="margin-top:8px">
+      <label class="meta" for="icon">The picture in the middle of it</label>
+    </div>
+    <input id="icon" />
+    <div id="qr"></div>
+    <div class="meta" id="qrmeta"></div>
+    <button class="ghost" id="btn-savecode">Save the code as a picture</button>
+    <button class="ghost" id="btn-copycard">Copy the code as text</button>
+  </div>
+  <div class="meta" id="sharestatus"></div>
+</section>
+
+<!-- --------------------------------------------------------------- join -->
+<section id="s-join">
+  <p>Paste the link somebody sent you. It does not have to be tidy — leave the
+     rest of their message around it if you like.</p>
+  <textarea id="joinbox" rows="4" placeholder="https://…/#kzinvite… — or just paste the whole message"></textarea>
+  <button id="btn-dojoin">Join the room</button>
+  <button class="ghost" id="btn-scan2">Scan the code instead</button>
+  <div class="meta" id="joinmsg"></div>
+</section>
+
+<!-- --------------------------------------------------------------- scan -->
+<section id="s-scan">
+  <p>Point the camera at the other screen.</p>
+  <video id="cam" playsinline muted></video>
+  <button class="stop" id="btn-stop">Stop the camera</button>
+  <div class="meta" id="scanmsg"></div>
+</section>
+
+<!-- --------------------------------------------------------------- chat -->
+<section id="s-chat">
+  <div id="chat">(nothing said yet)</div>
+  <div class="row" style="margin-top:10px">
+    <input id="say" placeholder="say something" />
+    <button id="btn-send">Send</button>
+  </div>
+  <button class="ghost" id="btn-shareroom">Show the link and code</button>
+  <button class="ghost" id="btn-leave">Leave the room</button>
+  <div class="meta" id="chatstatus"></div>
+</section>
+
+<!-- --------------------------------------------------------------- more -->
+<section id="s-more">
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Copy a note as readable text</h2>
+    <p class="meta">Copying used to hand over the machine-readable envelope.
+       These give you the words, with the details optional.</p>
+    <input id="notetitle" placeholder="a title" value="a note" />
+    <textarea id="note" rows="4">The Critique of Pure Paste</textarea>
+    <button id="btn-copytext">Copy the text</button>
+    <button class="ghost" id="btn-copytextmeta">Copy the text + details</button>
+    <button class="ghost" id="btn-copynotelink">Copy a link to it</button>
+    <div class="meta" id="notemsg"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Reaching other devices</h2>
+    <p class="meta">Two tabs of one browser find each other with no server.
+       Two <em>devices</em> need a relay they can both reach.</p>
+    <input id="relay" placeholder="https://relay.example.org" />
+    <button class="ghost" id="btn-testrelay">Test this relay</button>
+    <div class="meta" id="relaymsg"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Diagnostics</h2>
+    <p class="meta">Everything the network does is written down: every probe, every
+       request, every refusal, every error. Nothing is swallowed.</p>
+    <p class="meta">Holding two codes that will not connect? The diagnostics page has
+       <em>What is this code?</em>: paste both and it says what each one is. A share card
+       or a page link names a page, never a room — only a <code>kzinvite</code> code can
+       join two clients.</p>
+    <div class="meta" id="verdict">…</div>
+    <pre class="meta" id="diagtail" style="max-height:34vh;overflow:auto;margin:8px 0"></pre>
+    <button id="btn-diagshare">Share the log</button>
+    <button class="ghost" id="btn-diagpost">Post the log to the store</button>
+    <button class="ghost" id="btn-diagcopy">Copy the whole run</button>
+    <button class="ghost" id="btn-diagsave">Save the run as a file</button>
+    <button class="ghost" id="btn-diagpage">Open the diagnostics page</button>
+    <div class="meta" id="diagmsg"></div>
+    <div class="meta" id="diagshare"></div>
+    <textarea id="diagparts" rows="4" readonly
+      placeholder="the run, cut into chat-sized messages"></textarea>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">No server at all</h2>
+    <p class="meta">Nothing to run, nothing to deploy: two people with any chat window
+       between them copy one code each way and end up holding the same conversation.
+       The steps, and the proof that they need no server, are in
+       <code>RequestProject/Kant/Handoff.lean</code>.</p>
+    <p><a href="./hand.html">Carry it by hand →</a></p>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;color:var(--hi);margin-top:0">Everything else</h2>
+    <p><a href="./lab.html">Open the workbench</a> — the pastebin, stego pictures,
+       the sneakernet, credits, code movies, the wasm kernel.</p>
+    <p><a href="../docs/UX-FLOW.md">How this flow is put together</a></p>
+  </div>
+</section>
+
+<footer>
+  The behaviour of this page is specified and proved in Lean 4 under
+  <code>RequestProject/Kant/</code>: the invite code carries the whole link
+  (<code>InviteCard</code>), a pasted link is found however it arrives
+  (<code>Join</code>), the camera can always be switched off
+  (<code>Onboarding</code>), and copying gives the text
+  (<code>PlainText</code>).
+</footer>
+
+<script type="module">
+import * as K from "./kantzk.mjs";
+import * as N from "./kant-net.mjs";
+import * as S from "./kant-site.mjs";
+import * as F from "./kant-flow.mjs";
+import * as D from "./kant-diag.mjs";
+import * as C from "./kant-carddebug.mjs";
+import * as SL from "./kant-sharelog.mjs";
+
+const $ = (id) => document.getElementById(id);
+
+// --------------------------------------------------------------- the log
+//
+// One log for the whole run (`RequestProject/Kant/Diagnostics.lean`): a
+// bounded ring that keeps its order, never drops the newest line, and can
+// be shared without carrying the room secret with it.
+
+let diagPending = false;
+function queueDiagRender() {
+  if (diagPending) return;
+  diagPending = true;
+  setTimeout(() => { diagPending = false; renderDiag(); }, 120);
+}
+
+const LOG = new D.DiagLog({ cap: 3000, onEvent: () => queueDiagRender() });
+// The run before this one is kept, because a crash is exactly when the log
+// matters; this one is written down as it happens, so a reload does not
+// lose it either.
+const PREVIOUS = D.rotateStoredRun(globalThis.localStorage);
+LOG.persist("kant-diag-run", globalThis.localStorage);
+LOG.info("app", "page opened", location.href.split("#")[0]);
+if (PREVIOUS.length) {
+  LOG.info("app", `the previous run had ${PREVIOUS.length} events`,
+    "open the diagnostics page to read it");
+}
+
+window.addEventListener("error", (ev) =>
+  LOG.error("app", "uncaught error", `${ev.message} (${ev.filename}:${ev.lineno})`));
+window.addEventListener("unhandledrejection", (ev) =>
+  LOG.error("app", "a promise was rejected", ev.reason?.message ?? String(ev.reason)));
+
+// ------------------------------------------------------------- the config
+
+let cfg = { ...S.DEFAULT_CONFIG };
+let relayBase = "";
+let reach = { configured: "", configuredUp: false, origin: "", originIsRelay: false };
+
+/** Where this copy actually lives, when the configuration says nothing
+ *  useful.  A code that points at a page nobody can open is worse than no
+ *  code at all. */
+const hereUrl = () => location.origin + location.pathname;
+
+function effectiveConfig() {
+  const origin = cfg.origin && !cfg.origin.includes("#") ? cfg.origin : hereUrl();
+  const reachable = location.protocol.startsWith("http");
+  return { ...cfg, origin: reachable ? hereUrl() : origin };
+}
+
+// -------------------------------------------------------------- the state
+
+let ui = F.start();
+let node = null;
+let camera = null;
+let spokenFor = "";
+
+const SECTION = {
+  welcome: "s-welcome", share: "s-share", join: "s-join",
+  scan: "s-scan", chat: "s-chat", more: "s-more",
+};
+
+function dispatch(ev) {
+  const next = F.step(ui, ev);
+  // The camera follows the proved state exactly: `Kant.Onboarding` shows that
+  // in every reachable state a running camera means the scan screen is on
+  // show, so the stop button is always in front of the user.
+  if (ui.camera && !next.camera) stopCamera();
+  ui = next;
+  if (ui.camera && !camera) startCamera();
+  render();
+}
+
+function render() {
+  for (const [screen, id] of Object.entries(SECTION)) {
+    $(id).classList.toggle("on", ui.screen === screen);
+  }
+  $("title").textContent = F.screenTitle(ui.screen);
+  $("back").style.visibility = ui.screen === "welcome" ? "hidden" : "visible";
+  $("hush").textContent = ui.hushed ? "🔇" : "🔊";
+  $("hush").title = ui.hushed ? "turn the voice on" : "turn the voice off";
+
+  const task = F.nextTask(ui.progress);
+  $("prompt").textContent = F.promptFor(ui);
+  const done = [ui.progress.gotIn, ui.progress.sharedIt, ui.progress.saidHello];
+  $("steps").textContent = done.map((d) => (d ? "●" : "○")).join(" ");
+
+  if (node && node.secret) drawShare();
+  renderChat();
+  const key = `${ui.screen}|${task}`;
+  if (key !== spokenFor) { spokenFor = key; speak(F.promptFor(ui)); }
+}
+
+// ------------------------------------------------------------------ voice
+
+function speak(text) {
+  if (ui.hushed || !text) return;
+  const synth = window.speechSynthesis;
+  if (!synth) return;
+  try {
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1;
+    synth.speak(u);
+  } catch { /* a browser without a voice is still a usable browser */ }
+}
+
+$("hush").onclick = () => {
+  if (!ui.hushed) window.speechSynthesis?.cancel();
+  dispatch({ type: ui.hushed ? "unhush" : "hush" });
+  if (!ui.hushed) speak(F.promptFor(ui));
+};
+$("again").onclick = () => { spokenFor = ""; speak(F.promptFor(ui)); };
+
+// ----------------------------------------------------------- the room
+
+function newNode() {
+  return new N.KantNode({
+    peer: "peer-" + Math.random().toString(36).slice(2, 7),
+    relay: D.effectiveRelay(reach),
+    log: LOG,
+    reach,
+    onChange: () => { renderChat(); },
+  });
+}
+
+function attach(fresh) {
+  if (node) node.stop();
+  node = fresh;
+  node.connect();
+  node.onChange = () => renderChat();
+  node.announceSelf()
+    .then(() => node.dialKnownPeers())
+    .catch((e) => LOG.error("app", "could not announce into the room", e));
+  node.startPolling({ wait: 25 })
+    .catch((e) => LOG.error("relay", "polling stopped", e));
+  renderDiag();
+}
+
+const currentInvite = () =>
+  N.invite(node.relayBase, node.secret, node.self, node.addrs);
+
+function inviteLink() {
+  return F.inviteUrl(effectiveConfig(), currentInvite());
+}
+
+function dress() {
+  return {
+    caption: $("caption").value || cfg.caption,
+    icon: $("icon").value || cfg.picture,
+    alt: cfg.alt,
+  };
+}
+
+/** The one link and the one code — the code being the link, dressed with the
+ *  chosen picture and the chosen words (`Kant.InviteCard`). */
+function drawShare() {
+  const link = inviteLink();
+  $("link").value = link;
+  try {
+    const svg = F.inviteCardSvg(effectiveConfig(), dress(), currentInvite(),
+      { scale: 6, border: 4, dark: "#0f0", light: "#000" });
+    $("qr").innerHTML = svg;
+    $("qrmeta").textContent =
+      `the code carries the whole link (${link.length} characters), ` +
+      `so any camera app can open it — not just this one`;
+  } catch (e) {
+    $("qr").innerHTML = "";
+    $("qrmeta").textContent =
+      `the link is too long for one code (${e.message}) — send it as text instead`;
+  }
+  $("sharestatus").textContent = transportLine();
+}
+
+function transportLine() {
+  if (!node) return "";
+  const direct = node.mesh ? node.mesh.connected.length : 0;
+  const others = node.peers().filter((p) => p && p.peer !== node.self).length;
+  const relay = node.relayBase
+    ? `relay ${node.relayBase}`
+    : "no relay: only other tabs of THIS browser can find you";
+  return `${relay}\n${others} other person(s) heard from, ${direct} direct connection(s)`;
+}
+
+function renderChat() {
+  if (!node) { $("chat").textContent = "(not in a room)"; $("chatstatus").textContent = ""; return; }
+  const lines = node.view();
+  $("chat").innerHTML = lines.length
+    ? lines.map((m) => {
+        const who = m.sender === node.self ? "you" : m.sender;
+        const cls = m.sender === node.self ? "me" : "";
+        return `<div class="${cls}">${K.escapeHtml(who)}: ${K.escapeHtml(N.msgText(m))}</div>`;
+      }).join("")
+    : "(nothing said yet)";
+  $("chat").scrollTop = $("chat").scrollHeight;
+  $("chatstatus").textContent = transportLine();
+}
+
+// -------------------------------------------------------------- the taps
+
+$("back").onclick = () => dispatch({ type: "back" });
+$("btn-more").onclick = () => dispatch({ type: "goto", screen: "more" });
+$("btn-join").onclick = () => dispatch({ type: "goto", screen: "join" });
+$("btn-openroom").onclick = () => dispatch({ type: "goto", screen: "chat" });
+$("btn-shareroom").onclick = () => dispatch({ type: "goto", screen: "share" });
+
+$("btn-open").onclick = () => {
+  const fresh = newNode();
+  fresh.createRoom(D.effectiveRelay(reach));
+  attach(fresh);
+  $("caption").value = $("caption").value || cfg.caption;
+  $("icon").value = $("icon").value || cfg.picture;
+  dispatch({ type: "createRoom" });
+};
+
+$("btn-copy").onclick = async () => {
+  if (!node) return;
+  await copy(inviteLink());
+  $("sharestatus").textContent = "link copied — paste it into any chat";
+  dispatch({ type: "copyLink" });
+};
+
+$("btn-sharesys").onclick = async () => {
+  if (!node) return;
+  const link = inviteLink();
+  const bundle = { title: dress().caption, text: `${dress().caption}\n${link}`, url: link };
+  try {
+    if (navigator.share) await navigator.share(bundle);
+    else await copy(link);
+  } catch { /* the user changed their mind */ }
+  dispatch({ type: "copyLink" });
+};
+
+$("btn-copycard").onclick = async () => {
+  if (!node) return;
+  await copy(F.inviteChatText(effectiveConfig(), dress(), currentInvite()));
+  $("sharestatus").textContent = "the code copied as text — it reads back as the same card";
+  dispatch({ type: "copyLink" });
+};
+
+$("btn-savecode").onclick = () => {
+  if (!node) return;
+  const svg = F.inviteCardSvg(effectiveConfig(), dress(), currentInvite(),
+    { scale: 8, border: 4, dark: "#000", light: "#fff" });
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "kant-invite.svg";
+  a.click();
+  URL.revokeObjectURL(url);
+  $("sharestatus").textContent = "saved — the picture carries the link, the words and the icon";
+};
+
+for (const id of ["caption", "icon"]) $(id).oninput = () => { if (node) drawShare(); };
+
+$("btn-dojoin").onclick = () => joinFrom($("joinbox").value, "joinmsg");
+$("btn-scan").onclick = () => dispatch({ type: "startCamera" });
+$("btn-scan2").onclick = () => dispatch({ type: "startCamera" });
+$("btn-stop").onclick = () => dispatch({ type: "stopCamera" });
+
+$("btn-send").onclick = async () => {
+  if (!node) return;
+  const text = $("say").value;
+  if (!text) return;
+  $("say").value = "";
+  await node.say(text);
+  dispatch({ type: "say" });
+};
+$("say").onkeydown = (e) => { if (e.key === "Enter") $("btn-send").click(); };
+
+$("btn-leave").onclick = () => {
+  if (node) node.stop();
+  node = null;
+  $("qr").innerHTML = "";
+  $("link").value = "";
+  dispatch({ type: "leave" });
+};
+
+/**
+ * Joining, as tolerantly as `Kant.Join.findInvite`: the link may arrive
+ * wrapped in a sentence, in brackets, with a full stop after it, or with a
+ * trailing newline.
+ */
+function joinFrom(text, msgId) {
+  const inv = F.findInvite(text);
+  if (!inv) {
+    // Say what it *is*, not only what it is not (`Kant.CardDebug.classify`).
+    const what = C.classify(text);
+    const named = what.kind === "card"
+      ? "That is a <b>share card</b>: a page, a caption and a picture. It names no room, " +
+        "so there is nothing in it to join."
+      : what.kind === "page"
+        ? "That is a <b>page link</b>: the address of a paste. It names no room, so there " +
+          "is nothing in it to join."
+        : "";
+    $(msgId).innerHTML =
+      '<span class="bad">no invite link in that text.</span> ' + named +
+      " An invitation looks like <code>https://…/#kzinvite…</code>, and comes from " +
+      "<b>Share \u2192 Invite someone to chat</b> on the other device. " +
+      "Copy the whole message if you are not sure which part is the link.";
+    LOG.warn("ingest", "the text pasted is not an invitation", what.kind);
+    return false;
+  }
+  const fresh = newNode();
+  fresh.joinInvite(N.copyInvite(inv));
+  attach(fresh);
+  $(msgId).textContent = `joined room ${fresh.room.slice(0, 12)}…`;
+  dispatch({ type: "joinText", text });
+  return true;
+}
+
+// -------------------------------------------------------------- the camera
+
+async function startCamera() {
+  $("scanmsg").textContent = "asking for the camera…";
+  if (!("BarcodeDetector" in window)) {
+    $("scanmsg").innerHTML =
+      '<span class="warn">this browser cannot read codes.</span> ' +
+      "Go back and paste the link instead.";
+    return;
+  }
+  try {
+    const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+    });
+    camera = stream;
+    const video = $("cam");
+    video.srcObject = stream;
+    await video.play();
+    $("scanmsg").textContent = "point the camera at the other screen — Stop turns it off";
+    const tick = async () => {
+      if (!camera) return;
+      const found = await detector.detect(video).catch(() => []);
+      if (found.length) {
+        const text = found[0].rawValue;
+        joinFrom(text, "scanmsg");
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) {
+    $("scanmsg").innerHTML =
+      `<span class="warn">the camera is not available (${K.escapeHtml(e.message)}).</span> ` +
+      "Go back and paste the link instead.";
+    camera = null;
+    ui = { ...ui, camera: false };
+    render();
+  }
+}
+
+function stopCamera() {
+  if (camera) { camera.getTracks().forEach((t) => t.stop()); camera = null; }
+  const v = $("cam");
+  if (v) v.srcObject = null;
+  $("scanmsg").textContent = "the camera is off";
+}
+
+// ------------------------------------------------------- copying a note
+
+const noteOf = () => K.makePaste({
+  id: "note",
+  title: $("notetitle").value || "a note",
+  content: K.utf8($("note").value),
+  timestamp: new Date().toISOString().replace(/\D/g, "").slice(0, 14),
+});
+
+$("btn-copytext").onclick = async () => {
+  await copy(F.copyPlain(noteOf()));
+  $("notemsg").textContent = "copied the words themselves, nothing else";
+};
+$("btn-copytextmeta").onclick = async () => {
+  await copy(F.copyPlainWithMeta(effectiveConfig(), noteOf()));
+  $("notemsg").textContent =
+    "copied the words, then a `-- ` line, then the title, link, address and time";
+};
+$("btn-copynotelink").onclick = async () => {
+  await copy(S.pasteUrl(effectiveConfig(), noteOf()));
+  $("notemsg").textContent = "copied a link whose address is the content itself";
+};
+
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = document.createElement("textarea");
+    t.value = text;
+    document.body.appendChild(t);
+    t.select();
+    document.execCommand("copy");
+    t.remove();
+  }
+}
+
+// ------------------------------------------------------------ the relay
+
+/** Work out where this copy can meet other clients, and say so plainly.
+ *
+ *  A configured relay wins.  With nothing configured the page's *own*
+ *  origin is probed: when the site is served by `node server/relay.mjs
+ *  --static web` that origin is a relay, and using it is what lets two
+ *  different browsers on one machine find each other.  An origin that
+ *  does not answer as a relay is never used as one
+ *  (`Kant.Connectivity.effectiveRelay`). */
+async function refreshTransport() {
+  reach = await D.resolveReachability({
+    configured: relayBase,
+    origin: location.origin,
+    log: LOG,
+  });
+  const used = D.effectiveRelay(reach);
+  const text = used
+    ? (reach.configured
+        ? `Relay ${used} is up — other devices can join.`
+        : `This page is served by a relay (${used}) — other browsers on this machine, ` +
+          "and other devices that can reach it, can join.")
+    : (reach.configured
+        ? `The relay at ${reach.configured} did not answer (${reach.probe?.reason ?? "?"}). ` +
+          "Nobody outside this browser can join."
+        : "No relay: two tabs of THIS browser will find each other, but a second " +
+          "browser or a second device will not. Serve the page with " +
+          "`node server/relay.mjs --static web`, or set `relay =` in kant.config.");
+  $("transport").innerHTML = used ? K.escapeHtml(text) : `<span class="warn">${K.escapeHtml(text)}</span>`;
+  $("relaymsg").textContent = text;
+  if (node) {
+    node.reach = reach;
+    node.relayBase = used;
+    node.client = used ? new N.RelayClient(used, { log: LOG }) : null;
+  }
+  renderDiag();
+  return reach;
+}
+
+$("btn-testrelay").onclick = async () => {
+  relayBase = $("relay").value.trim();
+  await refreshTransport();
+  if (node) drawShare();
+};
+
+// ------------------------------------------------------ the diagnostics
+
+/** The current run, with the room secret and the invite withheld
+ *  (`Kant.Diagnostics.Log.share`). */
+function currentReport() {
+  if (node) return node.report({ browser: 1 });
+  const self = D.clientOf({ room: "", reach, bus: typeof BroadcastChannel === "function" });
+  return {
+    verdict: D.diagnose(self, { ...self, browser: 2 }),
+    room: "",
+    relay: D.effectiveRelay(reach),
+    events: LOG.share([]),
+    dropped: LOG.dropped,
+  };
+}
+
+function renderDiag() {
+  if (!$("verdict")) return;
+  const r = currentReport();
+  const bad = r.verdict !== "ok";
+  $("verdict").innerHTML =
+    `${bad ? '<span class="warn">' : ""}${K.escapeHtml(D.explain(r.verdict))}${bad ? "</span>" : ""}` +
+    `\nroom ${K.escapeHtml(r.room || "(none)")} · relay ${K.escapeHtml(r.relay || "(none)")}` +
+    ` · ${LOG.total} events${LOG.dropped ? ` (${LOG.dropped} dropped)` : ""}`;
+  const tail = LOG.events.slice(-40).map((e) =>
+    `${String(e.ms).padStart(6)}ms ${e.level.padEnd(5)} ${e.area.padEnd(6)} ${e.text}` +
+    `${e.detail ? `  |  ${e.detail}` : ""}`).join("\n");
+  $("diagtail").textContent = tail;
+}
+
+$("btn-diagcopy").onclick = async () => {
+  await copy(D.reportText(currentReport()));
+  $("diagmsg").textContent =
+    "copied — paste it anywhere; the room secret and the invite are not in it";
+};
+
+$("btn-diagsave").onclick = () => {
+  const blob = new Blob([D.reportText(currentReport())], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "kant-diagnostics.txt";
+  a.click();
+  URL.revokeObjectURL(url);
+  $("diagmsg").textContent = "saved as kant-diagnostics.txt";
+};
+
+// Sharing the run: the system share sheet if this device has one, the
+// clipboard otherwise — and, either way, the run cut into chat-sized
+// messages, because a chat window is a transport that always exists
+// (`Kant.ShareLog.chatParts`, `Kant.Handoff.logScript`).
+$("btn-diagshare").onclick = async () => {
+  const r = currentReport();
+  const text = D.reportText(r);
+  const steps = SL.logScript(100, "you", r);
+  const parts = SL.codes(steps);
+  $("diagparts").value = parts
+    .map((c, i) => `--- ${i + 1}/${parts.length} ---\n${c}`).join("\n");
+  let how = "copied";
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "kant-zk diagnostics", text });
+      how = "shared";
+    } else {
+      await copy(text);
+    }
+  } catch { await copy(text); }
+  $("diagshare").textContent =
+    `${how} — the room secret and the invite are not in it. ` +
+    `No chat that takes a whole run? Send the ${parts.length} message(s) below instead, ` +
+    "in any order; the other side pastes them into the diagnostics page.";
+  LOG.info("app", "the run was shared", `${how}, ${parts.length} part(s)`);
+};
+
+// Posting the run to the store: it becomes an ordinary content-addressed
+// post, with a witness and a link, held by this device
+// (`Kant.ShareLog.postLog`).
+$("btn-diagpost").onclick = async () => {
+  const r = currentReport();
+  const store = SL.loadStore(globalThis.localStorage);
+  const stamp = new Date().toISOString();
+  const { paste, witness, already } =
+    SL.postLog(store, r, { id: `run_${Date.now()}`, timestamp: stamp });
+  SL.saveStore(store, globalThis.localStorage);
+  const link = SL.logLink(hereUrl(), paste);
+  $("diagshare").innerHTML =
+    `${already ? "already in the store" : "posted to the store"} as ` +
+    `<code>${K.escapeHtml(witness.slice(0, 16))}…</code>\n${K.escapeHtml(link)}\n` +
+    `${store.entries.length} block(s) held on this device.`;
+  $("diagparts").value = SL.carryText(paste);
+  $("diagmsg").textContent =
+    "the block itself is in the box below: paste it into somebody else's " +
+    "\u201ccarry a block by hand\u201d box and they hold the very same run.";
+  LOG.info("app", "the run was posted to the store", witness.slice(0, 16));
+};
+
+$("btn-diagpage").onclick = () => {
+  const r = currentReport();
+  sessionStorage.setItem("kant-diag", D.renderReport(r));
+  window.open("./diag.html", "_blank");
+};
+
+// --------------------------------------------------------------- startup
+
+(async () => {
+  const loaded = await S.loadConfig();
+  cfg = loaded.config;
+  LOG.info("config", loaded.ok === false ? "kant.config could not be read" : "kant.config read",
+    loaded.ok === false ? "using the defaults" : cfg.origin);
+  relayBase = await S.loadRelay();
+  await refreshTransport();
+  $("relay").value = relayBase;
+  $("caption").value = cfg.caption;
+  $("icon").value = cfg.picture;
+
+  // An invite link opened in the browser walks straight into the room.
+  const frag = location.hash.slice(1);
+  if (frag && F.findInvite(frag)) joinFrom(frag, "joinmsg");
+
+  render();
+  renderDiag();
+
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>

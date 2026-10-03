@@ -1,0 +1,12 @@
+DOMAIN: kant-zk-pastebin
+HASH: d807c5644f4c582c4887b8ab8c10cd43f30e3a182df17b6a2265b384b1b9e939
+
+Domain Proof Coverage
+
+Objects: 425
+Proven: 118
+Partially proven: 0
+Unproven: 307
+Contradicted: 0
+Proofs: 118
+Valid proofs: 118

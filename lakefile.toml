@@ -1,0 +1,23 @@
+name = "RequestProject"
+defaultTargets = ["RequestProject"]
+
+[[require]]
+name = "mathlib"
+path = "/mnt/data1/lean/mathlib"
+
+[[lean_lib]]
+name = "RequestProject"
+globs = ["RequestProject.+"]
+
+[[lean_exe]]
+name = "emitwasm"
+root = "EmitWasm"
+
+[[lean_exe]]
+name = "emitdomain"
+root = "EmitDomain"
+supportInterpreter = true
+
+[[lean_exe]]
+name = "packdomain"
+root = "PackDomain"

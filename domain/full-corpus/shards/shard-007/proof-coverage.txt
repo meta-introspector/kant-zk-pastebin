@@ -1,0 +1,12 @@
+DOMAIN: kant-zk-pastebin/shard-007
+HASH: 8ebb62284b45809aa6a736c57c3a1dd54518e5f938a1773c86d60ed8d81dae67
+
+Domain Proof Coverage
+
+Objects: 400
+Proven: 182
+Partially proven: 0
+Unproven: 218
+Contradicted: 0
+Proofs: 182
+Valid proofs: 182

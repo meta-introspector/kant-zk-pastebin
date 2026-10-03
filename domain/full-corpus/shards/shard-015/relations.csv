@@ -1,0 +1,4 @@
+"source_id","relation","target_id"
+"obj.Kant.Diagnostics.parseEvents.eq_2","OUTPUT_OF","proof.Kant.Diagnostics.parseEvents.eq_2"
+"proof.Kant.Diagnostics.parseEvents.eq_2","PROVES","obj.Kant.Diagnostics.parseEvents.eq_2"
+"obj.Kant.Diagnostics.parseEvents.eq_2","PROVEN_BY","proof.Kant.Diagnostics.parseEvents.eq_2"

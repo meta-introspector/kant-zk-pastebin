@@ -1,0 +1,25 @@
+[Unit]
+Description=kant-zk archive server — relay with durable blocks + p2p block router
+Documentation=https://github.com/meta-introspector/kant-zk-pastebin
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mdupont
+Group=mdupont
+WorkingDirectory=/home/mdupont/projects/pastebin-lean
+ExecStart=/usr/bin/node /home/mdupont/projects/pastebin-lean/server/relay.mjs --port 8788 --host 127.0.0.1 --blocks-dir /var/lib/kant-zk/blocks --archive-dir /var/lib/kant-zk/archive --block-mirrors http://127.0.0.1:8787
+Restart=on-failure
+RestartSec=2
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kant-zk
+ReadOnlyPaths=/home/mdupont/projects/pastebin-lean
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

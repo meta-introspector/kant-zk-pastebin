@@ -1,0 +1,23 @@
+# proof-schema/1.0 — an output
+#
+# The authoritative definition is `Kant.Codec.Outp` in
+# RequestProject/Kant/Codec/Model.lean.  A proof may produce several
+# outputs: a theorem, a witness, a certificate, a numerical result, a
+# diagnostic.
+
+schema: proof-schema/1.0
+kind: object
+name: Output
+
+fields:
+  id:          { type: string }
+  name:        { type: string }
+  type:        { type: string }
+  value:       { type: value }
+  encoding:    { type: string }
+  claims:      { type: list, of: value }
+  certificate: { type: value, doc: null when the output is uncertified }
+  provenance:  { type: optional, of: provenance }
+
+example:
+  - { name: result, type: integer, value: 12, certificate: "12*12=144" }

@@ -1,0 +1,3 @@
+"object_id","claim_id","proof_id","truth_status","proof_status","coverage","canonical_hash"
+"obj.Kant.Diagnostics.parseEvents.eq_2","claim.Kant.Diagnostics.parseEvents.eq_2","proof.Kant.Diagnostics.parseEvents.eq_2","PROVEN","VALID","PROVEN","133bb61c9141f991d03b358f552c4f968fe4a8227cab344b170e472cf017ee50"
+"obj.Kant.Dom.allFormats","--","--","ASSERTED","--","UNPROVEN","4177d3fa011530a212a62a70c3cfa625d461a366d1bcb9dcb78988b27abd3adf"

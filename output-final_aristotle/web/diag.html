@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kant — diagnostics</title>
+<style>
+  :root { --ink: #0f0; --dim: #7a7; --hi: #0ff; --bg: #0a0a0a; --panel: #111; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 820px; margin: 0 auto; padding: 0 14px 80px;
+         background: var(--bg); color: var(--ink); }
+  h1 { font-size: 1.15rem; color: var(--hi); }
+  h2 { font-size: 1rem; color: var(--hi); margin: 0 0 6px; }
+  button { background: var(--ink); color: #000; border: none; border-radius: 8px;
+           padding: 10px 14px; margin: 4px 6px 4px 0; cursor: pointer;
+           font-family: inherit; font-size: 1rem; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  textarea, input { width: 100%; background: var(--panel); color: var(--ink);
+                    border: 1px solid #2a2; border-radius: 8px; padding: 10px;
+                    font-family: ui-monospace, monospace; font-size: .9rem; }
+  .card { background: var(--panel); border: 1px solid #222; border-radius: 10px;
+          padding: 12px; margin: 10px 0; }
+  .meta { color: var(--dim); font-size: .85rem; font-family: ui-monospace, monospace;
+          white-space: pre-wrap; }
+  .warn { color: #fb0; }
+  .bad { color: #f66; }
+  .good { color: #6f6; }
+  table { width: 100%; border-collapse: collapse; font-family: ui-monospace, monospace;
+          font-size: .8rem; }
+  td { border-top: 1px solid #1c1c1c; padding: 3px 6px; vertical-align: top; }
+  td.ms { color: var(--dim); text-align: right; white-space: nowrap; }
+  tr.error td { color: #f66; }
+  tr.warn td { color: #fb0; }
+  #rows { max-height: 60vh; overflow: auto; display: block; }
+  a { color: var(--hi); }
+  label { display: block; margin: 6px 0 2px; color: var(--dim); font-size: .85rem; }
+</style>
+</head>
+<body>
+
+<h1>Kant diagnostics</h1>
+<p class="meta">The whole run: every probe, every request, every refusal, every error, in the
+order it happened. Nothing here is guessed — the log, the verdict and the sharing rules are
+specified in <code>RequestProject/Kant/Diagnostics.lean</code> and
+<code>RequestProject/Kant/Connectivity.lean</code>.</p>
+
+<div class="card">
+  <h2>Verdict</h2>
+  <div class="meta" id="verdict">(nothing loaded yet)</div>
+  <button id="btn-check">Run the checks on this machine</button>
+  <button class="ghost" id="btn-reload">Reload the run from the app</button>
+  <button class="ghost" id="btn-previous">Load the run from before the last reload</button>
+</div>
+
+<div class="card">
+  <h2>The run</h2>
+  <div class="meta" id="counts"></div>
+  <table><tbody id="rows"></tbody></table>
+</div>
+
+<div class="card">
+  <h2>Share it</h2>
+  <p class="meta">The room secret and the invite are never in a shared run: any line that
+  quotes one is withheld before the report is built.</p>
+  <button id="btn-copy">Copy the whole run</button>
+  <button class="ghost" id="btn-save">Save it as a file</button>
+  <button class="ghost" id="btn-link">Copy a link to it</button>
+  <button class="ghost" id="btn-chat">Cut it into chat messages</button>
+  <button class="ghost" id="btn-post">Post it to the store</button>
+  <div class="meta" id="sharemsg"></div>
+  <textarea id="chatparts" rows="4" readonly
+    placeholder="the run, cut into messages small enough for any chat"></textarea>
+</div>
+
+<div class="card">
+  <h2>What is this code?</h2>
+  <p class="meta">Paste a code into each box — a whole share card, a bare
+  <code>kzcard:</code> / <code>kzinvite:</code> line, or a page link — and this says what each
+  one is and whether the two can connect at all. The rules are proved in
+  <code>RequestProject/Kant/CardDebug.lean</code>.</p>
+  <label for="code-a">The first code</label>
+  <textarea id="code-a" rows="4" placeholder="kant-zk-pastebin&#10;https://…/#…&#10;6b7a…"></textarea>
+  <label for="code-b">The second code (leave empty to look at just the first)</label>
+  <textarea id="code-b" rows="4" placeholder="6b7a696e76697465:…"></textarea>
+  <button id="btn-codes">Tell me about these</button>
+  <div class="meta" id="codemsg"></div>
+</div>
+
+<div class="card">
+  <h2>Read somebody else's run</h2>
+  <label for="paste">Paste a run here — the whole message is fine, the machine-readable
+    block is found inside it.</label>
+  <textarea id="paste" rows="5" placeholder="kant-zk diagnostics …"></textarea>
+  <button id="btn-load">Load it</button>
+  <input type="file" id="file" accept=".txt,text/plain" style="margin-top:8px" />
+  <div class="meta" id="loadmsg"></div>
+</div>
+
+<p class="meta"><a href="./index.html">← back to the app</a></p>
+
+<script type="module">
+import * as D from "./kant-diag.mjs";
+import * as S from "./kant-site.mjs";
+import * as C from "./kant-carddebug.mjs";
+import * as SL from "./kant-sharelog.mjs";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let report = { verdict: "noRoom", room: "", relay: "", events: [], dropped: 0 };
+
+function show() {
+  const bad = report.verdict !== "ok";
+  $("verdict").innerHTML =
+    `<span class="${bad ? "warn" : "good"}">${esc(D.explain(report.verdict))}</span>\n` +
+    `room ${esc(report.room || "(none)")} · relay ${esc(report.relay || "(none)")}`;
+  $("counts").textContent =
+    `${report.events.length} events${report.dropped ? ` (+${report.dropped} dropped to stay ` +
+      "inside the log's limit)" : ""}`;
+  $("rows").innerHTML = report.events.map((e) =>
+    `<tr class="${esc(e.level)}"><td class="ms">${e.ms}ms</td><td>${esc(e.area)}</td>` +
+    `<td>${esc(e.text)}</td><td>${esc(e.detail)}</td></tr>`).join("");
+}
+
+/** Load whatever the app left for us, or whatever is in the link. */
+function loadFromEnvironment() {
+  const frag = decodeURIComponent(location.hash.slice(1));
+  const fromLink = frag ? D.findReport(frag) : null;
+  const held = sessionStorage.getItem("kant-diag");
+  const fromApp = held ? D.parseReport(held) : null;
+  const r = fromLink ?? fromApp;
+  if (r) { report = { dropped: 0, ...r }; show(); return true; }
+  return false;
+}
+
+$("btn-reload").onclick = () => {
+  if (!loadFromEnvironment()) {
+    $("verdict").innerHTML =
+      '<span class="warn">nothing to show yet — open the app, then "Open the diagnostics ' +
+      'page" under More.</span>';
+  }
+};
+
+$("btn-previous").onclick = () => {
+  const events = D.previousRun(globalThis.localStorage);
+  if (!events.length) {
+    $("verdict").innerHTML = '<span class="warn">no earlier run was kept.</span>';
+    return;
+  }
+  report = { verdict: report.verdict, room: report.room, relay: report.relay, events,
+    dropped: 0 };
+  show();
+};
+
+/** Everything this page can check by itself, written into a fresh log. */
+$("btn-check").onclick = async () => {
+  const log = new D.DiagLog({ cap: 500 });
+  log.info("app", "checks started here", location.origin);
+  log.record(typeof BroadcastChannel === "function" ? "info" : "warn", "bus",
+    typeof BroadcastChannel === "function"
+      ? "this browser has BroadcastChannel: other tabs of it can be found with no server"
+      : "this browser has no BroadcastChannel: even two tabs need a relay", "");
+  log.record(typeof RTCPeerConnection === "function" ? "info" : "warn", "mesh",
+    typeof RTCPeerConnection === "function"
+      ? "this browser has WebRTC: direct links are possible once introduced"
+      : "this browser has no WebRTC: everything goes through the relay", "");
+
+  let configured = "";
+  try { configured = await S.loadRelay(); }
+  catch (e) { log.error("config", "kant.config could not be read", e); }
+  log.info("config", configured ? "kant.config names a relay" : "kant.config names no relay",
+    configured);
+
+  const reach = await D.resolveReachability({ configured, origin: location.origin, log });
+  const used = D.effectiveRelay(reach);
+  log.record(used ? "info" : "error", "config",
+    used ? "this client would meet others at" : "this client has nowhere to meet others",
+    used);
+
+  const me = D.clientOf({ room: "check", reach, bus: typeof BroadcastChannel === "function",
+    browser: 1 });
+  const them = { ...me, browser: 2 };
+  report = {
+    verdict: D.diagnose(me, them),
+    room: "",
+    relay: used,
+    events: log.events,
+    dropped: log.dropped,
+  };
+  show();
+};
+
+$("btn-codes").onclick = async () => {
+  const a = $("code-a").value.trim();
+  const b = $("code-b").value.trim();
+  if (!a && !b) {
+    $("codemsg").innerHTML = '<span class="warn">paste a code into the first box.</span>';
+    return;
+  }
+  let origin = location.origin + "/";
+  try { origin = (await S.loadConfig()).origin || origin; } catch { /* the default will do */ }
+  if (a && b) {
+    const r = C.report(a, b, origin);
+    const cls = r.verdict === "connectable" ? "good" : "warn";
+    $("codemsg").innerHTML =
+      `<span class="${cls}">${esc(C.renderReport(r).join("\n"))}</span>`;
+  } else {
+    const one = C.classify(a || b);
+    const d = C.describe(one);
+    const lines = Object.entries(d)
+      .filter(([, v]) => v !== null && v !== undefined && !(Array.isArray(v) && !v.length))
+      .map(([k, v]) => `${k.padEnd(8)}${Array.isArray(v) ? v.join(", ") : v}`);
+    $("codemsg").innerHTML =
+      `<span class="${one.kind === "invite" ? "good" : "warn"}">` +
+      `${esc(lines.join("\n"))}\n\n${esc(C.single(one))}</span>`;
+  }
+};
+
+$("btn-copy").onclick = async () => {
+  await copy(D.reportText(report));
+  $("sharemsg").textContent = "copied — paste it into an issue, a chat, an email";
+};
+
+$("btn-save").onclick = () => {
+  const url = URL.createObjectURL(new Blob([D.reportText(report)], { type: "text/plain" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "kant-diagnostics.txt";
+  a.click();
+  URL.revokeObjectURL(url);
+  $("sharemsg").textContent = "saved as kant-diagnostics.txt";
+};
+
+$("btn-link").onclick = async () => {
+  // A link can only carry so much; the newest events are the ones that matter,
+  // so a long run is shared from its end.
+  let kept = report.events;
+  let link = "";
+  for (;;) {
+    link = `${location.origin}${location.pathname}#` +
+      encodeURIComponent(D.renderReport({ ...report, events: kept }));
+    if (link.length <= 8000 || kept.length === 0) break;
+    kept = kept.slice(Math.ceil(kept.length / 4));
+  }
+  await copy(link);
+  $("sharemsg").textContent = kept.length === report.events.length
+    ? "copied a link carrying the whole run"
+    : `copied a link carrying the last ${kept.length} of ${report.events.length} events ` +
+      "— use the file for all of them";
+};
+
+// Cutting the run into messages any chat will take, and posting it to this
+// device's store, are the two ways out that need no server at all
+// (`Kant.ShareLog.chatParts`, `Kant.ShareLog.postLog`).
+$("btn-chat").onclick = async () => {
+  const parts = SL.chatParts(100, report);
+  const text = parts.map((c, i) => `--- ${i + 1}/${parts.length} ---\n${c}`).join("\n");
+  $("chatparts").value = text;
+  await copy(text);
+  $("sharemsg").textContent =
+    `copied as ${parts.length} message(s), each inside a tweet — send them in any order; ` +
+    "whoever receives them pastes the lot into the box below.";
+};
+
+$("btn-post").onclick = () => {
+  const store = SL.loadStore(globalThis.localStorage);
+  const { paste, witness, already } =
+    SL.postLog(store, report, { id: `run_${Date.now()}`, timestamp: new Date().toISOString() });
+  SL.saveStore(store, globalThis.localStorage);
+  $("chatparts").value = SL.carryText(paste);
+  $("sharemsg").innerHTML =
+    `${already ? "already in the store" : "posted to the store"} as ` +
+    `<code>${esc(witness.slice(0, 16))}…</code> — ${store.entries.length} block(s) held here. ` +
+    "The block itself is in the box: anyone who pastes it holds the very same run.";
+};
+
+$("btn-load").onclick = () => {
+  const pasted = $("paste").value;
+  const lines = pasted.split(/\r?\n/).map((l) => l.trim())
+    .filter((l) => l && !/^---/.test(l));
+  const r = D.findReport(pasted) ?? SL.readChatParts(lines);
+  if (!r) { $("loadmsg").innerHTML = '<span class="bad">no run found in that text.</span>'; return; }
+  report = { dropped: 0, ...r };
+  show();
+  $("loadmsg").textContent = `loaded ${r.events.length} events`;
+};
+
+$("file").onchange = async (ev) => {
+  const f = ev.target.files?.[0];
+  if (!f) return;
+  const text = await f.text();
+  $("paste").value = text;
+  $("btn-load").click();
+};
+
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = document.createElement("textarea");
+    t.value = text;
+    document.body.appendChild(t);
+    t.select();
+    document.execCommand("copy");
+    t.remove();
+  }
+}
+
+if (!loadFromEnvironment()) $("btn-check").click();
+</script>
+</body>
+</html>

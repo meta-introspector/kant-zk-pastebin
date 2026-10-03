@@ -1,0 +1,27 @@
+[Unit]
+Description=kant-zk archive pairer — local archive ⇄ CF Pages public block storage
+Documentation=https://github.com/meta-introspector/kant-zk-pastebin
+After=network-online.target kant-archive.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mdupont
+Group=mdupont
+WorkingDirectory=/home/mdupont/projects/pastebin-lean
+# PAGES_URL: the CF Pages public snapshot (blocks.json + b/<cid>.bin),
+# the public block storage the pairer pulls from (set per-host).
+Environment=PAGES_URL=https://kant-zk-pastebin.pages.dev
+ExecStart=/usr/bin/node /home/mdupont/projects/pastebin-lean/server/pair.mjs --local http://127.0.0.1:8788 --pages ${PAGES_URL} --archive-dir /var/lib/kant-zk/archive --interval 300
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/kant-zk /home/mdupont/projects/pastebin-lean
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

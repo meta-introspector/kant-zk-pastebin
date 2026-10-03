@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>kant-zk-pastebin — the workbench</title>
+<style>
+  body { font-family: monospace; max-width: 1000px; margin: 20px auto; padding: 0 16px;
+         background: #0a0a0a; color: #0f0; }
+  h1, h2 { color: #0ff; }
+  textarea, input { width: 100%; background: #111; color: #0f0; border: 1px solid #0f0;
+                    padding: 8px; font-family: monospace; }
+  button { background: #0f0; color: #000; border: none; padding: 8px 14px; margin: 4px 4px 4px 0;
+           cursor: pointer; font-family: monospace; }
+  .meta { color: #8f8; white-space: pre-wrap; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  canvas { border: 1px solid #0f0; image-rendering: pixelated; }
+  small { color: #7a7; }
+</style>
+</head>
+<body>
+<h1>kant-zk-pastebin — the workbench</h1>
+<p><a href="./">← back to the simple client</a></p>
+<p><small>Every control of the system on one page.  If you only want to talk to somebody,
+use <a href="./">the simple client</a> instead: one link to share, one code to show.</small></p>
+<p><small>Browser front end over <code>web/kantzk.mjs</code>, the JavaScript transcription of the
+Lean 4 core in <code>RequestProject/Kant/</code>.  The Lean development is the proved artefact:
+content addressing, framing under a 5 MB cap, out-of-order reassembly, LSB steganography,
+replica convergence, the credit ledger and Gödel numbering all have machine-checked proofs there.
+This page is unverified glue.</small></p>
+<div class="meta" id="wasm">wasm kernel: loading…</div>
+<div class="meta" id="site">site: loading kant.config…</div>
+
+<h2>1. Paste or load</h2>
+<textarea id="content" rows="8">The Critique of Pure Paste</textarea>
+<div class="row">
+  <input id="url" placeholder="https://… or ipfs://CID or an archive.org item URL" />
+</div>
+<button id="load">Load URL into paste</button>
+<button id="hash">Address it</button>
+<div class="meta" id="addr"></div>
+
+<h2>2. Export under a channel cap</h2>
+<div class="row">
+  <label>channel
+    <select id="channel"></select>
+  </label>
+  <button id="frame">Frame it</button>
+  <button id="stego">Stego PNG</button>
+  <button id="svg">SVG</button>
+  <button id="video">≤5 MB WebM</button>
+  <button id="speak">Speak the witness</button>
+</div>
+<div class="meta" id="frames"></div>
+<div class="row">
+  <canvas id="carrier" width="256" height="256"></canvas>
+  <canvas id="gl" width="256" height="256"></canvas>
+</div>
+
+<h2>3. Pin, serve, earn</h2>
+<div class="row">
+  <button id="pin">Pin locally</button>
+  <button id="serve">Record a serve (simulated peer fetch)</button>
+  <button id="list">List pinned</button>
+</div>
+<div class="meta" id="ledger"></div>
+
+<h2>4. The posts</h2>
+<div class="row">
+  <input id="q" placeholder="search titles and bodies" />
+  <label>per page <input id="pagesize" type="number" min="1" value="5" style="width: 5em" /></label>
+</div>
+<div class="row">
+  <button id="post">Post the paste above</button>
+  <button id="refresh">Show the posts</button>
+  <button id="reply">Reply to the selected post</button>
+</div>
+<div class="meta" id="feedmeta"></div>
+<div id="posts"></div>
+
+<h2>5. Copy and paste the results</h2>
+<textarea id="clip" rows="4" placeholder="paste a copied post, a quote, a bundle, a result line, a share card or a share link here"></textarea>
+<div class="row">
+  <button id="import">Paste it in</button>
+  <button id="copyall">Copy every post</button>
+  <button id="cardpage">Copy a share card for this page</button>
+</div>
+<div class="meta" id="clipmsg"></div>
+
+<h2>6. Share it as a meme with the data inside</h2>
+<div class="row">
+  <input id="memetop" value="WHEN THE CATEGORICAL IMPERATIVE" />
+  <input id="memebottom" value="IS ALSO A CONTENT ADDRESS" />
+</div>
+<div class="row">
+  <label>template <input id="memeimg" type="file" accept="image/*" /></label>
+  <button id="mememake">Make a meme of the selected post</button>
+  <button id="memeresult">Make a meme of its results</button>
+  <button id="memepage">Make a meme of the whole page</button>
+  <button id="memequote">Make a meme of the quote</button>
+</div>
+<div class="row">
+  <button id="stripmake">Make a strip of stills (for a share too big for one picture)</button>
+</div>
+<div class="row">
+  <label>read a meme <input id="memein" type="file" accept="image/png" /></label>
+  <label>read a strip <input id="stripin" type="file" accept="image/png" multiple /></label>
+</div>
+<div class="row">
+  <canvas id="meme" width="512" height="512"></canvas>
+</div>
+<div class="meta" id="mememsg"></div>
+
+<h2>7. Find other clients, and chat</h2>
+<p><small>Two browsers meet in a <em>room</em>.  The room name is the digest of a secret that
+travels only inside the chat code, so a relay learns the room but never the secret
+(<code>Kant.Rendezvous.roomOf</code>, <code>scan_same_room</code>).  Everything either side sends is a
+self-certifying line: a doctored line is refused rather than displayed
+(<code>Kant.Relay.parseMsg_eq_none_of_mismatch</code>), and two clients handed the same lines by any
+route, in any order, display the same chat (<code>clients_agree</code>).</small></p>
+<div class="row">
+  <label>my name <input id="netpeer" placeholder="alice" style="width: 12em" /></label>
+  <label>relay <input id="netrelay" placeholder="https://relay.example.org" /></label>
+</div>
+<div class="row">
+  <button id="netopen">Open a room and show its code</button>
+  <button id="netcode">Show the code again</button>
+  <button id="netscan">Scan a code with the camera</button>
+  <button id="netleave">Leave</button>
+</div>
+<div class="row">
+  <div>
+    <div id="netqr"></div>
+    <div class="meta" id="netqrmeta"></div>
+  </div>
+  <div style="flex: 1; min-width: 18em">
+    <div class="meta" id="netstatus">not in a room</div>
+    <div class="meta" id="netpeers"></div>
+  </div>
+</div>
+<textarea id="netjoin" rows="3" placeholder="paste a chat code or an invite link here to join the room"></textarea>
+<div class="row">
+  <button id="netjoinbtn">Join from that code</button>
+  <button id="netcopy">Copy my code</button>
+  <button id="netlink">Copy my invite link</button>
+</div>
+<div class="row">
+  <input id="netsay" placeholder="say something to the room" />
+  <button id="netsend">Send</button>
+  <button id="netsharepost">Send the selected post to the room</button>
+</div>
+<div class="meta" id="netchat"></div>
+
+<h2>8. Sneakernet: keep going with no relay at all</h2>
+<p><small>This section talks to nobody.  Your lines live in a <em>spool</em> in this browser; the
+whole spool copies out as one <em>mailbag</em> — a single line of ASCII you can send in a DM, tweet
+as a numbered thread, print as a QR code, or hang off a link.  Whoever pastes it is caught up to
+the moment it was made, and nothing else ever reaches them: you are exactly as up to date as the
+last code you pasted (<code>Kant.Uucp.Node.mem_sneakernet_iff</code>).  A doctored bag is refused
+whole (<code>bag_rejects_forgery</code>), the parts of a thread may arrive in any order
+(<code>readThread_perm</code>), and what you end up displaying is exactly what a relay would have
+shown you (<code>sneakernet_matches_relay</code>).</small></p>
+<div class="row">
+  <label>my name <input id="snname" placeholder="alice" style="width: 12em" /></label>
+  <label>room <input id="snroom" placeholder="a shared word, e.g. kant-zk demo secret" /></label>
+</div>
+<div class="row">
+  <input id="snsay" placeholder="write a line — offline is fine" />
+  <button id="snwrite">Write it</button>
+  <button id="sncopy">Copy my bag</button>
+  <button id="snlink">Copy my link</button>
+  <button id="snqr">Show my QR code</button>
+  <button id="sntweets">Cut into tweets</button>
+  <button id="snscan">Scan a code with the camera</button>
+</div>
+<textarea id="snpaste" rows="3" placeholder="paste a bag, a link, or a whole tweet thread (one part per line)"></textarea>
+<div class="row">
+  <button id="snpastebtn">Paste it in</button>
+  <button id="snforget">Forget everything</button>
+</div>
+<div class="row">
+  <div>
+    <div id="snqrbox"></div>
+    <div class="meta" id="snqrmeta"></div>
+  </div>
+  <div style="flex: 1; min-width: 18em">
+    <div class="meta" id="snstatus">empty spool</div>
+    <div class="meta" id="snview"></div>
+  </div>
+</div>
+<pre class="meta" id="snout" style="white-space: pre-wrap; word-break: break-all"></pre>
+
+<h2>9. The share card: the whole URL, your text, your picture</h2>
+<p><small>Everything you hand to somebody else carries the <em>whole</em> address of the page —
+<code>https://kant.cicada71.net/#ff81…f605</code> — with the part before the <code>#</code> coming
+from <code>kant.config</code> rather than from this program
+(<code>Kant.SiteCard.qrPayload_origin_prefix</code>).  A card is that URL, a line of text and a
+picture, exported as one SVG that still carries the card itself
+(<code>readCard_cardSvg</code>); the caption cannot break out of its element
+(<code>card_text_no_markup</code>) and the picture in the middle covers at most a twenty-fifth of
+the code, so it stays scannable (<code>logo_area_bound</code>).  Send it to the room and it arrives
+as the same card (<code>readChatCard_chatMsg</code>); paste it into any other chat as text and it
+still comes back whole (<code>readChatText_chatText</code>).</small></p>
+<div class="row">
+  <label style="flex: 1; min-width: 22em">URL
+    <input id="cardurl" placeholder="https://kant.cicada71.net/#…  (leave empty for the current paste)" />
+  </label>
+</div>
+<div class="row">
+  <label style="flex: 1; min-width: 16em">text
+    <input id="cardtext" placeholder="the line printed under the code" />
+  </label>
+  <label>picture <input id="cardpicfile" type="file" accept="image/*" /></label>
+  <label style="flex: 1; min-width: 14em">or a picture URL
+    <input id="cardpicurl" placeholder="./kant-logo.svg" />
+  </label>
+</div>
+<div class="row">
+  <button id="cardshow">Show the card</button>
+  <button id="cardcopyurl">Copy the URL</button>
+  <button id="cardcopyline">Copy the card</button>
+  <button id="cardsvgdl">Download SVG</button>
+  <button id="cardpngdl">Download PNG</button>
+  <button id="cardshare">Share…</button>
+  <button id="cardtoroom">Send it to the room</button>
+</div>
+<textarea id="cardin" rows="3" placeholder="paste a card, a card line or a link here to read it back"></textarea>
+<div class="row">
+  <button id="cardread">Read that card</button>
+  <label>or read a card picture <input id="cardfile" type="file" accept="image/svg+xml,.svg" /></label>
+</div>
+<div class="row">
+  <div id="cardbox"></div>
+  <div style="flex: 1; min-width: 18em">
+    <div class="meta" id="cardmeta">no card yet</div>
+  </div>
+</div>
+
+<script type="module">
+import * as K from "./kantzk.mjs";
+import { loadKernel, KERNEL_EXPORTS } from "./kant-wasm.mjs";
+import * as S from "./kant-site.mjs";
+import * as F from "./kant-flow.mjs";
+
+const $ = (id) => document.getElementById(id);
+const store = new K.Store();
+const ledger = new K.Ledger();
+const me = "this-browser";
+let current = null;
+let kernel = null;
+let siteConfig = { ...S.DEFAULT_CONFIG };
+
+// --- where this deployment lives ----------------------------------------
+// kant.config supplies the origin every code, link and card carries; the
+// grammar and its round trip are RequestProject/Kant/SiteCard.lean.
+(async () => {
+  const { config, source } = await S.loadConfig();
+  siteConfig = config;
+  $("site").textContent =
+    `site: ${S.originOf(config)}#<address>  (from ${source})` +
+    (S.configWf(config) ? "" : "  — this configuration is not well formed");
+  if (current) address();
+})();
+window.kantSite = { config: () => siteConfig, current: () => current };
+
+// --- the Lean-extracted WebAssembly kernel ------------------------------
+// dist/kant_kernel.wasm is emitted by `lake exe emitwasm dist`; every export
+// is proved in RequestProject/Wasm/KernelSpec.lean to compute the matching
+// Kant definition. The page degrades to the JS core if it cannot be fetched.
+(async () => {
+  try {
+    kernel = await loadKernel();
+    $("wasm").textContent =
+      `wasm kernel: ${kernel.bytes.length} bytes, ${KERNEL_EXPORTS.length} proved exports, ` +
+      `from ${kernel.embedded ? "the copy bundled with this page" : kernel.source} — ` +
+      `witnesses on this page are computed inside WebAssembly`;
+    if (current) address();
+  } catch (e) {
+    kernel = null;
+    $("wasm").textContent =
+      `wasm kernel: unavailable (${e.message}) — falling back to the JS core`;
+  }
+})();
+
+// --- channels -----------------------------------------------------------
+for (const [name, cap] of Object.entries(K.CHANNEL_CAPACITY)) {
+  const o = document.createElement("option");
+  o.value = name;
+  o.textContent = `${name} (${cap} B)`;
+  $("channel").appendChild(o);
+}
+$("channel").value = "qr";
+
+// --- addressing ---------------------------------------------------------
+function address() {
+  current = K.makePaste({
+    id: "paste_" + Date.now(),
+    title: "browser paste",
+    content: $("content").value,
+    timestamp: new Date().toISOString(),
+  });
+  const o = current.coords;
+  $("addr").textContent =
+    `witness : ${current.witness}\n` +
+    `dasl    : ${K.daslHex(current.cid)}  (type ${K.cidType(current.cid)})\n` +
+    `orbifold: (${o.l}, ${o.m}, ${o.n})  in Z/71 x Z/59 x Z/47\n` +
+    `bytes   : ${current.content.length}\n` +
+    `page URL: ${S.pasteUrl(siteConfig, current)}` +
+    (kernel
+      ? "\nwasm    : witness " +
+        (kernel.witness(current.content) === current.witness
+          ? "recomputed in WebAssembly, agrees"
+          : "MISMATCH")
+      : "");
+  location.hash = current.witness;
+  return current;
+}
+$("hash").onclick = address;
+
+// --- loading a URL (http, ipfs://, archive.org item) --------------------
+$("load").onclick = async () => {
+  const raw = $("url").value.trim();
+  if (!raw) return;
+  const url = raw.startsWith("ipfs://")
+    ? "https://ipfs.io/ipfs/" + raw.slice("ipfs://".length)
+    : raw;
+  try {
+    const r = await fetch(url);
+    $("content").value = await r.text();
+    address();
+  } catch (e) {
+    $("addr").textContent = "fetch failed (CORS or offline): " + e;
+  }
+};
+
+// --- framing ------------------------------------------------------------
+function currentFrames() {
+  const p = current ?? address();
+  const cap = K.CHANNEL_CAPACITY[$("channel").value];
+  return K.frames(cap, p.content);
+}
+
+$("frame").onclick = () => {
+  const fs = currentFrames();
+  const back = K.reassemble([...fs].sort(() => Math.random() - 0.5));
+  $("frames").textContent =
+    `${fs.length} frame(s), max ${Math.max(0, ...fs.map((f) => f.payload.length))} B\n` +
+    `shuffled reassembly matches: ${K.fromUtf8(back) === $("content").value}`;
+};
+
+// --- stego PNG ----------------------------------------------------------
+function carrierImage() {
+  const c = $("carrier");
+  const ctx = c.getContext("2d");
+  const img = ctx.createImageData(c.width, c.height);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 100 + ((i / 4) % 57);
+    img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
+  }
+  return { c, ctx, img };
+}
+
+$("stego").onclick = () => {
+  const p = current ?? address();
+  const { c, ctx, img } = carrierImage();
+  // one payload bit per colour sample, skipping alpha
+  const samples = [];
+  for (let i = 0; i < img.data.length; i += 4) samples.push(img.data[i], img.data[i + 1], img.data[i + 2]);
+  if (K.capacityBytes(samples) < p.content.length) {
+    $("frames").textContent = "carrier too small for this paste";
+    return;
+  }
+  const hidden = K.embedBlob(samples, Array.from(p.content));
+  let j = 0;
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i] = hidden[j++]; img.data[i + 1] = hidden[j++]; img.data[i + 2] = hidden[j++];
+  }
+  ctx.putImageData(img, 0, 0);
+  const recovered = K.extractBlob(p.content.length, hidden);
+  $("frames").textContent =
+    `hidden ${p.content.length} B in ${samples.length} samples; recovered exactly: ` +
+    `${K.fromUtf8(recovered) === $("content").value}`;
+  c.toBlob((b) => download(b, "stego.png"));
+};
+
+// --- SVG ----------------------------------------------------------------
+$("svg").onclick = () => {
+  const p = current ?? address();
+  const rows = K.frames(64, p.content).map((f, i) =>
+    `<text x="4" y="${16 + 14 * i}" font-family="monospace" font-size="11" fill="#0f0">` +
+    `${f.seq}: ${K.hexEncode(f.payload).slice(0, 96)}</text>`).join("\n  ");
+  const svg =
+`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="${24 + 14 * K.frames(64, p.content).length}">
+  <rect width="100%" height="100%" fill="#000"/>
+  <text x="4" y="12" font-family="monospace" font-size="11" fill="#0ff">${K.escapeHtml(K.daslHex(p.cid))} ${p.witness.slice(0, 16)}…</text>
+  ${rows}
+</svg>`;
+  download(new Blob([svg], { type: "image/svg+xml" }), "paste.svg");
+};
+
+// --- ≤5 MB WebM export --------------------------------------------------
+$("video").onclick = async () => {
+  const p = current ?? address();
+  const fs = K.frames(1024, p.content);
+  const c = $("carrier");
+  const ctx = c.getContext("2d");
+  const stream = c.captureStream(8);
+  const rec = new MediaRecorder(stream, { mimeType: "video/webm" });
+  const parts = [];
+  rec.ondataavailable = (e) => parts.push(e.data);
+  rec.onstop = () => {
+    const blob = new Blob(parts, { type: "video/webm" });
+    if (blob.size > K.SOCIAL_LIMIT) {
+      $("frames").textContent = `export ${blob.size} B exceeds the 5 MB cap — use more frames`;
+    } else {
+      download(blob, "paste.webm");
+    }
+  };
+  rec.start();
+  for (const f of fs.length ? fs : [{ seq: 0, payload: [] }]) {
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = "#0f0"; ctx.font = "12px monospace";
+    ctx.fillText(`frame ${f.seq + 1}/${fs.length}`, 8, 16);
+    ctx.fillText(K.hexEncode(f.payload).slice(0, 30), 8, 34);
+    await new Promise((r) => setTimeout(r, 125));
+  }
+  rec.stop();
+};
+
+// --- text to speech -----------------------------------------------------
+$("speak").onclick = () => {
+  const p = current ?? address();
+  const u = new SpeechSynthesisUtterance(
+    "Witness " + p.witness.slice(0, 8).split("").join(" ") +
+    ". Orbifold " + p.coords.l + ", " + p.coords.m + ", " + p.coords.n + ".");
+  speechSynthesis.speak(u);
+};
+
+// --- WebGL playback of a code movie -------------------------------------
+(function playMovie() {
+  const gl = $("gl").getContext("webgl");
+  if (!gl) return;
+  const vs = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs, "attribute vec2 p; void main(){ gl_Position = vec4(p,0.0,1.0); }");
+  gl.compileShader(vs);
+  const fsSrc = `precision mediump float; uniform float t; uniform vec3 c;
+    void main(){ vec2 uv = gl_FragCoord.xy/256.0;
+      float v = sin(uv.x*c.x + t) * cos(uv.y*c.y - t) * 0.5 + 0.5;
+      gl_FragColor = vec4(v*0.2, v, v*0.4, 1.0); }`;
+  const fs = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fs, fsSrc); gl.compileShader(fs);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog); gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "p");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const tLoc = gl.getUniformLocation(prog, "t");
+  const cLoc = gl.getUniformLocation(prog, "c");
+  // the "code movie": orbifold coordinates drive the shader, looping with
+  // the movie's own period (see `Kant.CodeMovie.frameAt_periodic`)
+  const movie = [[71, 59, 47], [47, 71, 59], [59, 47, 71]];
+  let t = 0;
+  (function loop() {
+    const f = K.frameAt(movie, Math.floor(t) % movie.length);
+    gl.uniform1f(tLoc, t);
+    gl.uniform3f(cLoc, f[0] / 8, f[1] / 8, f[2] / 8);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    t += 0.05;
+    requestAnimationFrame(loop);
+  })();
+})();
+
+// --- pin / serve / earn -------------------------------------------------
+$("pin").onclick = () => {
+  const p = current ?? address();
+  store.put(p);
+  localStorage.setItem("kantzk:" + p.witness, JSON.stringify({
+    witness: p.witness, dasl: K.daslHex(p.cid), content: K.fromUtf8(p.content),
+  }));
+  navigator.serviceWorker?.ready.then((reg) =>
+    reg.active?.postMessage({
+      kind: "pin",
+      witness: p.witness,
+      body: K.fromUtf8(p.content),
+      contentType: "text/plain; charset=utf-8",
+    })
+  );
+  $("ledger").textContent =
+    `pinned ${p.witness}\n${store.entries.length} block(s) held\n` +
+    `servable at ${location.origin}${location.pathname.replace(/[^/]*$/, "")}pin/${p.witness}`;
+};
+
+$("serve").onclick = () => {
+  const p = current ?? address();
+  ledger.serve(me, p.content.length);
+  $("ledger").textContent =
+    `served ${p.content.length} B → balance ${ledger.balance(me)} credit(s)\n` +
+    `total credit ever created here: ${ledger.totalEarned()}`;
+};
+
+$("list").onclick = () => {
+  const keys = Object.keys(localStorage).filter((k) => k.startsWith("kantzk:"));
+  $("ledger").textContent = keys.map((k) => k.slice(7)).join("\n") || "(nothing pinned)";
+};
+
+function download(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+  // A real serve out of the pin cache earns credit, exactly as
+  // `Kant.Credits.Ledger.serve` specifies.
+  navigator.serviceWorker.addEventListener("message", (ev) => {
+    if (ev.data?.kind !== "served") return;
+    const held = store.entries.find((p) => p.witness === ev.data.witness);
+    const bytes = held ? held.content.length : 0;
+    ledger.serve(me, bytes);
+    $("ledger").textContent =
+      `served ${ev.data.witness} (${bytes} B) → balance ${ledger.balance(me)} credit(s)`;
+  });
+}
+
+// --- the posts ----------------------------------------------------------
+// `Kant.Feed`: the feed is the store's posts, newest first, searched and
+// paginated.  Every row carries the exact text that pastes back into it
+// (`Kant.Feed.row_copy_roundTrip`).
+let selected = null;
+let pageIndex = 0;
+
+// The feed survives a reload: the posts are stored as one clipboard bundle
+// and read back with the same verified envelope (`Kant.Clipboard.pasteAll`),
+// so anything that has been tampered with in storage is dropped.
+const POSTS_KEY = "kantzk:posts";
+
+function keep(p) {
+  store.put(p);
+  try {
+    localStorage.setItem(POSTS_KEY, K.copyAll(K.feed(store)));
+  } catch (e) {
+    /* storage full or unavailable: the feed still works for this session */
+  }
+  return p;
+}
+
+function loadPosts() {
+  const saved = localStorage.getItem(POSTS_KEY);
+  if (!saved) return;
+  const ps = K.pasteAll(saved);
+  if (ps) for (const p of ps) store.put(p);
+}
+
+function creditsOf(p) {
+  return K.Ledger.creditsFor(p.content.length);
+}
+
+function esc(s) {
+  return K.escapeHtml(s);
+}
+
+async function copyToClipboard(text, msg) {
+  try {
+    await navigator.clipboard.writeText(text);
+    $("clipmsg").textContent = msg + " copied to the clipboard (" + text.length + " chars)";
+  } catch (e) {
+    $("clip").value = text;
+    $("clipmsg").textContent = msg + " placed in the box below — copy it from there";
+  }
+}
+
+function renderPosts() {
+  const q = $("q").value;
+  const size = Math.max(1, Number($("pagesize").value) || 5);
+  const matching = K.search(q, K.newest(K.feed(store)));
+  const pages = K.paginate(size, matching);
+  if (pageIndex >= pages.length) pageIndex = 0;
+  const shown = pages[pageIndex] ?? [];
+  $("feedmeta").textContent =
+    `${K.feed(store).length} post(s) held, ${matching.length} matching, ` +
+    `page ${pages.length ? pageIndex + 1 : 0}/${pages.length}`;
+  const host = $("posts");
+  host.textContent = "";
+  for (const p of shown) {
+    const r = K.row(p, creditsOf(p));
+    const el = document.createElement("div");
+    el.style.cssText = "border:1px solid #0f0;padding:8px;margin:8px 0";
+    el.innerHTML =
+      `<div style="color:#0ff">${r.title || "(untitled)"}</div>` +
+      `<pre style="white-space:pre-wrap;margin:6px 0">${r.body}</pre>` +
+      `<div class="meta">witness : ${r.witness}\n` +
+      `dasl    : ${esc(K.daslHex(r.cid))}\n` +
+      `posted  : ${esc(r.timestamp)}   bytes: ${r.bytes}   credits: ${creditsOf(p)}` +
+      (r.replyTo ? `\nin reply to: ${esc(r.replyTo)}` : "") +
+      `</div>`;
+    const buttons = document.createElement("div");
+    for (const [label, action] of [
+      // Copying a post used to hand over the machine-readable envelope and
+      // nothing else.  These two give the text a human can read, with the
+      // details optional (Kant.PlainText.copyPlain_eq_content,
+      // bodyOf_copyPlainWithMeta, metaOf_copyPlainWithMeta).
+      ["Copy text", () => copyToClipboard(F.copyPlain(p), "the text of this post")],
+      ["Copy text + details", () =>
+        copyToClipboard(F.copyPlainWithMeta(siteConfig, p),
+          "the text of this post, with its title, link, address and time under a `-- ` line,")],
+      ["Copy post", () => copyToClipboard(r.copy, "post (the machine-readable envelope)")],
+      ["Copy results", () => copyToClipboard(r.receipt, "results")],
+      ["Copy link", () =>
+        copyToClipboard(K.shareUrl(location.origin + location.pathname, K.ofPaste(p)), "link")],
+      ["Quote it", () => copyToClipboard(K.copyQuote(quoteOf(p)),
+        "a quote of this post, with your text above as the commentary,")],
+      ["Copy card", () => copyToClipboard(K.postCard(location.origin + location.pathname, p),
+        "a share card (headline plus link)")],
+      ["Select", () => { selected = p; renderPosts(); }],
+      ["Thread", () => {
+        const t = K.thread(p, K.feed(store));
+        $("clipmsg").textContent =
+          `thread of ${p.witness.slice(0, 16)}…: ${t.length} post(s)\n` +
+          t.map((x) => `  ${x.witness.slice(0, 16)}… ${K.fromUtf8(x.content).slice(0, 40)}`).join("\n");
+      }],
+    ]) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.onclick = action;
+      buttons.appendChild(b);
+    }
+    if (selected && selected.witness === p.witness) {
+      el.style.borderColor = "#0ff";
+      const tag = document.createElement("span");
+      tag.className = "meta";
+      tag.textContent = "  ← selected";
+      buttons.appendChild(tag);
+    }
+    el.appendChild(buttons);
+    host.appendChild(el);
+  }
+  const nav = document.createElement("div");
+  for (const [label, delta] of [["◀ previous page", -1], ["next page ▶", 1]]) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.onclick = () => {
+      if (pages.length === 0) return;
+      pageIndex = (pageIndex + delta + pages.length) % pages.length;
+      renderPosts();
+    };
+    nav.appendChild(b);
+  }
+  host.appendChild(nav);
+}
+
+// `Kant.Repost`: a quote carries the original whole, so the reader of the
+// quote can check it themselves (`Kant.Repost.pasteQuote_copyQuote`, and
+// `Kant.Repost.pasteQuote_eq_none_of_bad_original` for doctored ones).
+function quoteOf(p) {
+  const comment = K.makePaste({
+    id: "quote_" + Date.now(),
+    title: $("content").value.split("\n")[0].slice(0, 60),
+    content: $("content").value,
+    timestamp: new Date().toISOString(),
+    replyTo: p.witness,
+  });
+  return K.quoteWith(comment, p);
+}
+
+function postCurrent(replyTo = null) {
+  const p = K.makePaste({
+    id: "paste_" + Date.now(),
+    title: $("content").value.split("\n")[0].slice(0, 60),
+    content: $("content").value,
+    timestamp: new Date().toISOString(),
+    replyTo,
+  });
+  keep(p);
+  current = p;
+  selected = p;
+  pageIndex = 0;
+  renderPosts();
+  return p;
+}
+
+$("post").onclick = () => postCurrent(null);
+$("reply").onclick = () => {
+  if (!selected) { $("feedmeta").textContent = "select a post to reply to first"; return; }
+  postCurrent(selected.witness);
+};
+$("refresh").onclick = () => { pageIndex = 0; renderPosts(); };
+$("q").oninput = () => { pageIndex = 0; renderPosts(); };
+$("pagesize").oninput = () => { pageIndex = 0; renderPosts(); };
+
+// --- copy and paste the results -----------------------------------------
+// `Kant.Clipboard`: pasted text is only accepted if the witness that
+// travels with it is the witness of the content that arrived
+// (`Kant.Clipboard.toPaste_eq_none_of_mismatch`).
+$("import").onclick = () => {
+  const raw = $("clip").value.trim();
+  if (!raw) return;
+  const text = raw.includes("#") ? K.fragment(raw) : raw;
+  const post = K.pasteText(text);
+  if (post) {
+    keep(post);
+    selected = post;
+    renderPosts();
+    $("clipmsg").textContent =
+      `pasted a post: ${post.witness}\ncontent and witness agree, so it was accepted`;
+    return;
+  }
+  const quote = K.pasteQuote(text);
+  if (quote) {
+    keep(quote.original);
+    keep(quote.comment);
+    selected = quote.comment;
+    renderPosts();
+    $("clipmsg").textContent =
+      `pasted a quote repost:\n  says     : ${K.fromUtf8(quote.comment.content).slice(0, 60)}\n` +
+      `  quoting  : ${quote.original.witness}\n` +
+      "both halves matched their own witnesses, so the quotation is genuine";
+    return;
+  }
+  const bundle = K.pasteAll(text);
+  if (bundle) {
+    for (const p of bundle) keep(p);
+    renderPosts();
+    $("clipmsg").textContent = `pasted a bundle of ${bundle.length} post(s) into the feed above`;
+    return;
+  }
+  const receipt = K.pasteReceipt(text);
+  if (receipt) {
+    $("clipmsg").textContent =
+      `pasted results:\n  witness : ${receipt.witness}\n  dasl    : ${K.daslHex(receipt.cid)}\n` +
+      `  bytes   : ${receipt.bytes}\n  credits : ${receipt.credits}`;
+    return;
+  }
+  $("clipmsg").textContent =
+    "that text is not a post, a result line or a share link — " +
+    "or its content does not match the witness travelling with it, so it was refused";
+};
+
+// A whole page copies as one bundle (`Kant.Clipboard.pasteAll_copyAll`).
+$("copyall").onclick = () => copyToClipboard(K.copyAll(K.feed(store)), "every post, as one bundle");
+
+// A card is a readable headline plus a link whose fragment carries the data
+// (`Kant.Repost.readCard_card`), so it can be dropped into any social feed.
+$("cardpage").onclick = () => {
+  const q = $("q").value;
+  const size = Math.max(1, Number($("pagesize").value) || 5);
+  const shown = K.paginate(size, K.search(q, K.newest(K.feed(store))))[pageIndex] ?? [];
+  if (shown.length === 0) { $("clipmsg").textContent = "nothing on this page to share"; return; }
+  copyToClipboard(K.bundleCard(location.origin + location.pathname, shown),
+    `a share card for ${shown.length} post(s)`);
+};
+
+// --- memes with embedded data -------------------------------------------
+// `Kant.Meme`: the payload is the clipboard envelope, prefixed with KZM1
+// and terminated by a zero byte, hidden in the least significant bits of
+// the colour samples.  The picture changes by at most one unit per sample
+// (`Kant.Meme.render_preserves_high_bits`).
+let memeTemplateImage = null;
+$("memeimg").onchange = (ev) => {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => { memeTemplateImage = img; $("mememsg").textContent = "template loaded"; };
+  img.src = URL.createObjectURL(file);
+};
+
+function drawTemplate(ctx, c, witness) {
+  if (memeTemplateImage) {
+    ctx.drawImage(memeTemplateImage, 0, 0, c.width, c.height);
+  } else {
+    for (let y = 0; y < c.height; y += 1) {
+      ctx.fillStyle = `rgb(${20 + (y % 90)}, ${40 + ((y * 3) % 120)}, ${60 + ((y * 7) % 100)})`;
+      ctx.fillRect(0, y, c.width, 1);
+    }
+  }
+  ctx.textAlign = "center";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#000";
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 22px monospace";
+  const draw = (text, y) => { ctx.strokeText(text, c.width / 2, y); ctx.fillText(text, c.width / 2, y); };
+  draw($("memetop").value, 32);
+  draw($("memebottom").value, c.height - 40);
+  ctx.font = "11px monospace";
+  draw(witness.slice(0, 32) + "…", c.height - 16);
+}
+
+function samplesOf(img) {
+  const out = [];
+  for (let i = 0; i < img.data.length; i += 4) out.push(img.data[i], img.data[i + 1], img.data[i + 2]);
+  return out;
+}
+
+function writeSamples(img, samples) {
+  let j = 0;
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i] = samples[j++]; img.data[i + 1] = samples[j++]; img.data[i + 2] = samples[j++];
+    img.data[i + 3] = 255;
+  }
+}
+
+function makeMeme(envelope, witness, what) {
+  const c = $("meme");
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  drawTemplate(ctx, c, witness);
+  const img = ctx.getImageData(0, 0, c.width, c.height);
+  const samples = samplesOf(img);
+  const need = K.memePayload(envelope).length;
+  if (8 * need > samples.length) {
+    $("mememsg").textContent =
+      `this template holds ${K.memeCapacityChars(samples)} characters; ` +
+      `the ${what} needs ${need - 5} — use a bigger picture`;
+    return;
+  }
+  const hidden = K.memeRender(samples, envelope);
+  writeSamples(img, hidden);
+  ctx.putImageData(img, 0, 0);
+  const back = K.memeDecode(hidden);
+  $("mememsg").textContent =
+    `${what} hidden in ${samples.length} colour samples (${need} bytes of payload)\n` +
+    `read back out of the picture: ${back ? "yes, identical" : "FAILED"}\n` +
+    `every sample changed by at most one unit: ` +
+    `${hidden.every((v, i) => (v >> 1) === (samples[i] >> 1))}\n` +
+    `caption drawn on it: ${K.unescapeHtml(K.memeCaption($("memetop").value, " " + witness.slice(0, 16) + "… ", $("memebottom").value))}`;
+  c.toBlob((b) => {
+    if (b.size > K.SOCIAL_LIMIT) {
+      $("mememsg").textContent += `\nexport is ${b.size} B, over the 5 MB social cap`;
+      return;
+    }
+    $("mememsg").textContent += `\nexported ${b.size} B PNG (within the 5 MB social cap)`;
+    download(b, "kant-meme.png");
+  }, "image/png");
+}
+
+$("mememake").onclick = () => {
+  const p = selected ?? current ?? address();
+  makeMeme(K.ofPaste(p), p.witness, "post");
+};
+
+$("memeresult").onclick = () => {
+  const p = selected ?? current ?? address();
+  makeMeme(K.ofReceipt(K.receiptOf(p, creditsOf(p))), p.witness, "results");
+};
+
+$("memepage").onclick = () => {
+  const q = $("q").value;
+  const size = Math.max(1, Number($("pagesize").value) || 5);
+  const shown = K.paginate(size, K.search(q, K.newest(K.feed(store))))[pageIndex] ?? [];
+  if (shown.length === 0) { $("mememsg").textContent = "nothing on this page to share"; return; }
+  makeMeme(K.ofPastes(shown), shown[0].witness, `page of ${shown.length} post(s)`);
+};
+
+$("memequote").onclick = () => {
+  const p = selected ?? current ?? address();
+  makeMeme(K.ofQuote(quoteOf(p)), p.witness, "quote of a post");
+};
+
+// --- strips: one share over several pictures ----------------------------
+// `Kant.Strip`: the envelope is cut into numbered parts, one per still, and
+// the stills may be collected in any order (`Kant.Strip.readStrip_perm`).
+async function samplesOfFile(file) {
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = URL.createObjectURL(file);
+  });
+  const c = document.createElement("canvas");
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  return samplesOf(ctx.getImageData(0, 0, c.width, c.height));
+}
+
+$("stripmake").onclick = () => {
+  const p = selected ?? current ?? address();
+  const envelope = K.ofQuote(quoteOf(p));
+  const c = $("meme");
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  drawTemplate(ctx, c, p.witness);
+  const base = samplesOf(ctx.getImageData(0, 0, c.width, c.height));
+  const limit = K.stripLimitFor(base);
+  if (limit === 0) { $("mememsg").textContent = "this template is too small for even one part"; return; }
+  const stills = K.strip(base, limit, envelope);
+  const back = K.readStrip(stills);
+  $("mememsg").textContent =
+    `quote of ${p.witness.slice(0, 16)}… split over ${stills.length} still(s), ` +
+    `${limit} payload bytes each\n` +
+    `read back from the shuffled stills: ` +
+    `${K.readStrip([...stills].reverse()) && back ? "yes, identical" : "FAILED"}`;
+  stills.forEach((samples, i) => {
+    const img = ctx.createImageData(c.width, c.height);
+    writeSamples(img, samples);
+    ctx.putImageData(img, 0, 0);
+    c.toBlob((b) => download(b, `kant-strip-${String(i).padStart(3, "0")}.png`), "image/png");
+  });
+};
+
+$("stripin").onchange = async (ev) => {
+  const files = Array.from(ev.target.files ?? []);
+  if (files.length === 0) return;
+  const stills = [];
+  for (const f of files) stills.push(await samplesOfFile(f));
+  const envelope = K.readStrip(stills);
+  if (!envelope) {
+    $("mememsg").textContent =
+      `those ${stills.length} picture(s) do not make up a complete strip ` +
+      "(a part is missing, or one was re-encoded lossily)";
+    return;
+  }
+  const quote = K.toQuote(envelope);
+  const posts = K.toPastes(envelope) ?? (K.toPaste(envelope) ? [K.toPaste(envelope)] : null);
+  if (quote) {
+    keep(quote.original); keep(quote.comment);
+    selected = quote.comment;
+    renderPosts();
+    $("mememsg").textContent =
+      `that strip carried a quote of ${quote.original.witness}; both posts are in the feed above`;
+    return;
+  }
+  if (posts) {
+    for (const p of posts) keep(p);
+    renderPosts();
+    $("mememsg").textContent =
+      `that strip carried ${posts.length} post(s); they are in the feed above`;
+    return;
+  }
+  $("mememsg").textContent = "that strip carried something this client cannot display";
+};
+
+$("memein").onchange = (ev) => {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => {
+    const c = $("meme");
+    c.width = img.width; c.height = img.height;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const samples = samplesOf(ctx.getImageData(0, 0, c.width, c.height));
+    const bundle = K.memeToPastes(samples);
+    if (bundle) {
+      for (const p of bundle) keep(p);
+      selected = bundle[0];
+      renderPosts();
+      $("mememsg").textContent =
+        `this meme contained ${bundle.length} post(s); they have been added to the feed above`;
+      return;
+    }
+    const quote = K.memeToQuote(samples);
+    if (quote) {
+      keep(quote.original);
+      keep(quote.comment);
+      selected = quote.comment;
+      renderPosts();
+      $("mememsg").textContent =
+        `this meme contained a quote of ${quote.original.witness}\n` +
+        "both the remark and the post it quotes are now in the feed above";
+      return;
+    }
+    const post = K.memeToPaste(samples);
+    if (post) {
+      keep(post);
+      selected = post;
+      renderPosts();
+      $("mememsg").textContent =
+        `this meme contained a post: ${post.witness}\nit has been added to the feed above`;
+      return;
+    }
+    const receipt = K.memeToReceipt(samples);
+    if (receipt) {
+      $("mememsg").textContent =
+        `this meme contained results:\n  witness : ${receipt.witness}\n` +
+        `  bytes   : ${receipt.bytes}\n  credits : ${receipt.credits}`;
+      return;
+    }
+    $("mememsg").textContent =
+      "no KZM1 payload in that picture (or it was re-encoded lossily on the way here)";
+  };
+  img.src = URL.createObjectURL(file);
+};
+
+// A share link opened in the browser loads its post straight into the feed
+// (`Kant.Clipboard.parseShareUrl_shareUrl`).  This runs before `address()`,
+// which replaces the fragment with the current witness.
+(function loadSharedLink() {
+  const frag = K.fragment(location.href);
+  if (!frag.includes(":")) return;
+  const post = K.pasteText(frag);
+  if (!post) return;
+  keep(post);
+  selected = post;
+  $("clipmsg").textContent = `this link carried a post: ${post.witness}`;
+})();
+
+loadPosts();
+address();
+renderPosts();
+</script>
+
+<script type="module">
+// --- discovery, rendezvous and chat -------------------------------------
+// Pure layer: web/kant-net.mjs, a transcription of RequestProject/Kant/
+// Rendezvous.lean and Relay.lean.  Transports: a relay (HTTP long polling,
+// or a WebSocket), other tabs of this browser, and direct WebRTC data
+// channels introduced through the relay.  Whatever the route, every line is
+// re-checked against its own witness before it is shown.
+import * as N from "./kant-net.mjs";
+import * as S from "./kant-site.mjs";
+import { escapeHtml } from "./kantzk.mjs";
+import { qrEncode, qrSvg } from "./kant-qr.mjs";
+
+const $ = (id) => document.getElementById(id);
+let node = null;
+let camera = null;
+
+// A line of chat, as HTML: a shared card is shown as its text, its picture
+// and its link; anything else as the text that arrived.
+function chatLineHtml(m) {
+  const text = N.msgText(m);
+  const card = S.readCardLine(text.trim());
+  const who = `${escapeHtml(m.sender)}#${m.seq}`;
+  if (!card) return `<div>${who}: ${escapeHtml(text)}</div>`;
+  return (
+    `<div>${who} shared a card:<br>` +
+    (card.picture
+      ? `<img src="${escapeHtml(card.picture)}" alt="${escapeHtml(card.alt)}" ` +
+        `width="24" height="24" style="vertical-align: middle"> `
+      : "") +
+    `${escapeHtml(card.caption)}<br>` +
+    `<a href="${escapeHtml(card.url)}">${escapeHtml(card.url)}</a></div>`
+  );
+}
+
+// The share-card section posts through this.
+window.kantChat = {
+  isOpen: () => !!node,
+  shareCard: async (card) => {
+    if (!node) return false;
+    await node.say(S.cardLine(card));
+    render();
+    return true;
+  },
+};
+
+const sameOriginRelay = location.protocol.startsWith("http") ? location.origin : "";
+$("netrelay").value = sameOriginRelay;
+$("netpeer").value = "peer-" + Math.random().toString(36).slice(2, 7);
+
+function render() {
+  if (!node) { $("netstatus").textContent = "not in a room"; return; }
+  const direct = node.mesh ? node.mesh.connected.length : 0;
+  $("netstatus").textContent =
+    `room ${node.room.slice(0, 16)}…  as ${node.self}\n` +
+    `relay ${node.relayBase || "(none)"} — ${direct} direct peer connection(s), ` +
+    `${node.roster.length} announcement(s) heard`;
+  const peers = node.peers().filter((p) => p && p.peer !== node.self);
+  $("netpeers").textContent = peers.length
+    ? "peers:\n" + peers.map((p) =>
+        `  ${p.peer} @ rev ${p.seq}` +
+        (p.addrs.length ? `  [${p.addrs.map((a) => a.transport).join(", ")}]` : "")).join("\n")
+    : "peers: nobody else yet — show them the code";
+  const lines = node.view();
+  $("netchat").innerHTML = lines.length
+    ? lines.map(chatLineHtml).join("")
+    : "(no messages yet)";
+}
+
+const siteOrigin = () =>
+  (window.kantSite ? window.kantSite.config() : S.DEFAULT_CONFIG).origin;
+
+function inviteLink() {
+  return N.inviteUrl(siteOrigin(),
+    N.invite(node.relayBase, node.secret, node.self, node.addrs));
+}
+
+function showCode() {
+  if (!node || !node.secret) { $("netqrmeta").textContent = "no room yet"; return; }
+  // The code carries the whole URL, not the bare invitation: a scanner that
+  // knows nothing about this program still offers an openable link
+  // (Kant.SiteCard.qrPayload_origin_prefix).
+  const text = inviteLink();
+  try {
+    const qr = qrEncode(text);
+    $("netqr").innerHTML = qrSvg(qr, { scale: 4, border: 4, dark: "#0f0", light: "#000" });
+    $("netqrmeta").textContent =
+      `chat code: version ${qr.version}, ${text.length} characters — it carries ` +
+      `${siteOrigin()}#… so any scanner can open it`;
+  } catch (e) {
+    $("netqr").innerHTML = "";
+    $("netqrmeta").textContent = `the invitation is too long for one code (${e.message})`;
+  }
+}
+
+function start(existing) {
+  if (node) node.stop();
+  node = existing;
+  node.connect();
+  node.onChange = render;
+  node.announceSelf().then(() => node.dialKnownPeers()).catch(() => {});
+  node.startPolling({ wait: 25 }).catch(() => {});
+  render();
+}
+
+$("netopen").onclick = () => {
+  const fresh = new N.KantNode({ peer: $("netpeer").value.trim() || undefined,
+                                 relay: $("netrelay").value.trim() });
+  fresh.createRoom($("netrelay").value.trim());
+  start(fresh);
+  showCode();
+};
+
+$("netcode").onclick = showCode;
+
+$("netjoinbtn").onclick = () => {
+  const text = $("netjoin").value.trim();
+  const fresh = new N.KantNode({ peer: $("netpeer").value.trim() || undefined,
+                                 relay: $("netrelay").value.trim() });
+  const inv = fresh.joinInvite(text);
+  if (!inv) { $("netstatus").textContent = "that is not a chat code or invite link"; return; }
+  start(fresh);
+  $("netrelay").value = fresh.relayBase;
+  showCode();
+};
+
+$("netcopy").onclick = async () => {
+  if (!node) return;
+  await navigator.clipboard.writeText(node.inviteText());
+  $("netqrmeta").textContent = "chat code copied — paste it to whoever should join";
+};
+
+$("netlink").onclick = async () => {
+  if (!node || !node.secret) return;
+  await navigator.clipboard.writeText(inviteLink());
+  $("netqrmeta").textContent = `invite link copied (${siteOrigin()}#…)`;
+};
+
+$("netsend").onclick = async () => {
+  if (!node) { $("netstatus").textContent = "open or join a room first"; return; }
+  const text = $("netsay").value;
+  if (!text) return;
+  $("netsay").value = "";
+  await node.say(text);
+  render();
+};
+
+$("netsharepost").onclick = async () => {
+  if (!node) { $("netstatus").textContent = "open or join a room first"; return; }
+  const line = $("clip").value.trim();
+  if (!line) {
+    $("netstatus").textContent =
+      "copy a post first (the buttons in section 5 put its clipboard line in the box)";
+    return;
+  }
+  await node.publish(line);
+  $("netstatus").textContent = "sent that clipboard line to the room";
+};
+
+$("netleave").onclick = () => {
+  if (node) node.stop();
+  node = null;
+  $("netqr").innerHTML = "";
+  $("netqrmeta").textContent = "";
+  render();
+};
+
+// Camera scanning, where the browser offers a barcode detector.  Everywhere
+// else, the code can still be pasted into the box above.
+$("netscan").onclick = async () => {
+  if (!("BarcodeDetector" in window)) {
+    $("netqrmeta").textContent =
+      "this browser has no barcode detector — paste the code into the box instead";
+    return;
+  }
+  try {
+    const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    const video = document.createElement("video");
+    video.srcObject = stream;
+    await video.play();
+    camera = stream;
+    const tick = async () => {
+      if (!camera) return;
+      const found = await detector.detect(video).catch(() => []);
+      if (found.length) {
+        $("netjoin").value = found[0].rawValue;
+        camera.getTracks().forEach((t) => t.stop());
+        camera = null;
+        $("netjoinbtn").click();
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+    $("netqrmeta").textContent = "point the camera at the other screen…";
+  } catch (e) {
+    $("netqrmeta").textContent = `camera unavailable (${e.message})`;
+  }
+};
+
+// An invite link opened in the browser joins its room straight away.
+(function joinFromLink() {
+  const frag = location.hash.slice(1);
+  if (!frag) return;
+  const fresh = new N.KantNode({ peer: $("netpeer").value.trim() || undefined });
+  if (!fresh.joinInvite(frag)) return;
+  start(fresh);
+  $("netrelay").value = fresh.relayBase;
+  showCode();
+})();
+
+render();
+</script>
+<script type="module">
+// --- the static sneakernet ------------------------------------------------
+// Pure layer: web/kant-uucp.mjs, a transcription of RequestProject/Kant/
+// Uucp.lean.  There is no transport here on purpose: state moves only when a
+// human moves a code.  The spool is kept in localStorage, so the page is as
+// up to date as the last code pasted into it, exactly as the Lean model says.
+import * as U from "./kant-uucp.mjs";
+import * as S from "./kant-site.mjs";
+import { roomOf, msgText } from "./kant-net.mjs";
+import { utf8 } from "./kantzk.mjs";
+import { qrEncode, qrSvg } from "./kant-qr.mjs";
+
+const $ = (id) => document.getElementById(id);
+let sn = U.loadNode("peer-" + Math.random().toString(36).slice(2, 7));
+let snCamera = null;
+
+$("snname").value = sn.name;
+$("snroom").value = localStorage.getItem("kant-sneakernet-room") || "kant-zk demo secret";
+
+const snRoom = () => roomOf(utf8($("snroom").value || "kant-zk demo secret"));
+
+function snRender() {
+  const bag = sn.bag();
+  const parts = U.bagForCarrier(bag, "tweet");
+  $("snstatus").textContent =
+    `${sn.spool.length} line(s) held as ${sn.name}\n` +
+    `bag ${bag.length} characters — ` +
+    `dm ${bag.length <= U.CARRIER_CAPACITY.dm ? "yes" : "no"}, ` +
+    `qr ${bag.length <= U.CARRIER_CAPACITY.qr ? "yes" : "no"}, ` +
+    `tweet ${parts.length === 1 ? "yes" : `${parts.length} parts`}`;
+  $("snview").textContent = sn.view().length
+    ? "spool:\n" + sn.view().map((m) => `  ${m.sender} #${m.seq}: ${msgText(m)}`).join("\n")
+    : "nothing here yet — write a line, or paste somebody's bag";
+  U.saveNode(sn);
+  localStorage.setItem("kant-sneakernet-room", $("snroom").value);
+}
+
+$("snwrite").onclick = () => {
+  const text = $("snsay").value.trim();
+  if (!text) return;
+  sn.name = $("snname").value.trim() || sn.name;
+  sn.write(snRoom(), text);
+  $("snsay").value = "";
+  $("snout").textContent = "";
+  snRender();
+};
+
+const copy = async (text, note) => {
+  try { await navigator.clipboard.writeText(text); $("snqrmeta").textContent = note; }
+  catch { $("snout").textContent = text; }
+};
+
+$("sncopy").onclick = () => copy(sn.bag(), `copied ${sn.bag().length} characters — paste it into a DM`);
+
+const snOrigin = () =>
+  (window.kantSite ? window.kantSite.config() : S.DEFAULT_CONFIG).origin;
+
+$("snlink").onclick = () => {
+  const link = sn.bagLink(snOrigin());
+  copy(link, `copied a ${link.length}-character link`);
+};
+
+$("sntweets").onclick = () => {
+  const parts = U.bagForCarrier(sn.bag(), "tweet");
+  $("snout").textContent = parts
+    .map((p, i) => `--- ${i + 1}/${parts.length} (${p.length} chars)\n${p}`).join("\n\n");
+};
+
+$("snqr").onclick = () => {
+  const bag = sn.bag();
+  // One code holding the whole spool carries it as a link, so a plain scanner
+  // gets a URL rather than an opaque payload; a spool too big for that still
+  // travels as numbered parts.
+  const link = sn.bagLink(snOrigin());
+  const single = link.length <= U.CARRIER_CAPACITY.qr;
+  const codes = single ? [link] : U.bagForCarrier(bag, "tweet");
+  try {
+    $("snqrbox").innerHTML = codes.slice(0, 4).map((c) => qrSvg(qrEncode(c), { scale: 3 })).join(" ");
+    $("snqrmeta").textContent = single
+      ? `one code holds the whole spool, as ${snOrigin()}#…`
+      : `${codes.length} codes (showing the first ${Math.min(4, codes.length)})`;
+  } catch (e) { $("snqrmeta").textContent = `no code: ${e.message}`; }
+};
+
+$("snpastebtn").onclick = () => {
+  const text = $("snpaste").value.trim();
+  if (!text) return;
+  const r = sn.paste(text);
+  $("snqrmeta").textContent = r.accepted
+    ? `pasted: ${r.added} new line(s)`
+    : "refused: that is not a bag, or a line failed its own witness";
+  if (r.accepted) $("snpaste").value = "";
+  snRender();
+};
+
+$("snforget").onclick = () => {
+  sn = U.SneakerNode.blank($("snname").value.trim() || "anon");
+  $("snqrbox").innerHTML = "";
+  $("snout").textContent = "";
+  snRender();
+};
+
+$("snscan").onclick = async () => {
+  if (!("BarcodeDetector" in window)) {
+    $("snqrmeta").textContent = "this browser cannot scan codes; paste the text instead";
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    const video = document.createElement("video");
+    video.srcObject = stream; video.playsInline = true; await video.play();
+    $("snqrbox").innerHTML = ""; $("snqrbox").appendChild(video);
+    const det = new BarcodeDetector({ formats: ["qr_code"] });
+    const collected = [];
+    snCamera = setInterval(async () => {
+      const found = await det.detect(video).catch(() => []);
+      for (const b of found) {
+        if (!collected.includes(b.rawValue)) collected.push(b.rawValue);
+      }
+      const r = sn.paste(collected.length === 1 ? collected[0] : collected.join("\n"));
+      if (r.accepted && r.added >= 0) {
+        clearInterval(snCamera); snCamera = null;
+        stream.getTracks().forEach((t) => t.stop());
+        $("snqrbox").innerHTML = "";
+        $("snqrmeta").textContent = `scanned ${collected.length} code(s): ${r.added} new line(s)`;
+        snRender();
+      }
+    }, 400);
+  } catch (e) { $("snqrmeta").textContent = `camera unavailable (${e.message})`; }
+};
+
+// A link whose fragment carries a bag catches this browser up on arrival.
+(function snFromLink() {
+  const frag = location.hash.slice(1);
+  if (!frag) return;
+  const ms = U.openBag(frag);
+  if (!ms) return;
+  const r = sn.paste(U.packBag(ms));
+  if (r.accepted) $("snqrmeta").textContent = `this link carried ${r.added} new line(s)`;
+})();
+
+snRender();
+</script>
+<script type="module">
+// --- the share card ------------------------------------------------------
+// Pure layer: web/kant-site.mjs, a transcription of RequestProject/Kant/
+// SiteCard.lean.  The code carries the whole URL; the caption and the
+// picture ride along; the exported picture still carries the card.
+import * as S from "./kant-site.mjs";
+import * as K from "./kantzk.mjs";
+import { qrEncode } from "./kant-qr.mjs";
+
+const $ = (id) => document.getElementById(id);
+let picture = "";
+let card = null;
+let cardQr = null;
+
+const cfg = () => (window.kantSite ? window.kantSite.config() : S.DEFAULT_CONFIG);
+
+function defaults() {
+  const c = cfg();
+  if (!$("cardtext").value) $("cardtext").value = c.caption;
+  if (!$("cardpicurl").value) $("cardpicurl").value = c.picture;
+}
+
+/** The URL the card should carry: what was typed, the current paste, or this page. */
+function targetUrl() {
+  const typed = $("cardurl").value.trim();
+  if (typed) return typed.includes("#") ? typed : S.addressUrl(cfg(), typed);
+  const current = window.kantSite ? window.kantSite.current() : null;
+  if (current) return S.pasteUrl(cfg(), current);
+  if (location.hash.length > 1) return S.addressUrl(cfg(), location.hash.slice(1));
+  return cfg().origin;
+}
+
+function build() {
+  defaults();
+  const c = cfg();
+  const url = targetUrl();
+  card = S.cardFor(c, url, $("cardtext").value || c.caption,
+                   picture || $("cardpicurl").value.trim(), c.alt);
+  cardQr = qrEncode(card.url);
+  const svg = S.cardSvg(card, cardQr, { scale: 6, border: 4 });
+  $("cardbox").innerHTML = svg.slice(svg.indexOf("<svg"));
+  const back = S.readCard(svg);
+  $("cardmeta").textContent =
+    `URL      : ${card.url}\n` +
+    `code     : version ${cardQr.version}, ${cardQr.size}×${cardQr.size} modules\n` +
+    `logo     : ${S.logoSide(cardQr.size)} modules across ` +
+    `(${(100 * S.logoSide(cardQr.size) ** 2 / cardQr.size ** 2).toFixed(1)}% of the code)\n` +
+    `card line: ${S.cardLine(card).length} characters\n` +
+    `read back: ${back && back.url === card.url ? "the picture carries this card" : "FAILED"}`;
+  return svg;
+}
+
+$("cardshow").onclick = () => { try { build(); } catch (e) { $("cardmeta").textContent = e.message; } };
+
+$("cardpicfile").onchange = () => {
+  const f = $("cardpicfile").files[0];
+  if (!f) { picture = ""; return; }
+  const r = new FileReader();
+  r.onload = () => { picture = String(r.result); try { build(); } catch {} };
+  r.readAsDataURL(f);
+};
+$("cardpicurl").oninput = () => { picture = ""; };
+
+$("cardcopyurl").onclick = async () => {
+  build();
+  await navigator.clipboard.writeText(card.url);
+  $("cardmeta").textContent = `copied: ${card.url}`;
+};
+
+$("cardcopyline").onclick = async () => {
+  build();
+  await navigator.clipboard.writeText(S.chatText(card));
+  $("cardmeta").textContent =
+    "copied the card: a line of text, the link, and the machine-readable card underneath — " +
+    "paste it into any chat";
+};
+
+function download(name, blob) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+$("cardsvgdl").onclick = () => {
+  const svg = build();
+  download("kant-card.svg", new Blob([svg], { type: "image/svg+xml" }));
+  $("cardmeta").textContent += "\nsaved kant-card.svg (it still carries the card)";
+};
+
+$("cardpngdl").onclick = () => {
+  const svg = build();
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width || 512;
+    canvas.height = img.height || 512;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+    canvas.toBlob((b) => {
+      download("kant-card.png", b);
+      $("cardmeta").textContent +=
+        "\nsaved kant-card.png — the picture is a plain code, the card text travels with the link";
+    }, "image/png");
+  };
+  img.onerror = () => { $("cardmeta").textContent += "\ncould not rasterise the card"; };
+  img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svg)));
+};
+
+$("cardshare").onclick = async () => {
+  build();
+  const b = S.shareBundle(card);
+  if (navigator.share) {
+    try { await navigator.share({ title: b.title, text: b.text, url: b.url }); return; }
+    catch { /* the user dismissed it */ }
+  }
+  await navigator.clipboard.writeText(b.chat);
+  $("cardmeta").textContent = "this browser cannot share directly — the card is on the clipboard";
+};
+
+$("cardtoroom").onclick = async () => {
+  build();
+  if (!window.kantChat || !window.kantChat.isOpen()) {
+    $("cardmeta").textContent = "open or join a room in section 7 first";
+    return;
+  }
+  await window.kantChat.shareCard(card);
+  $("cardmeta").textContent = `sent the card for ${card.url} to the room`;
+};
+
+function show(read, how) {
+  if (!read) { $("cardmeta").textContent = `that is not a card (${how})`; return; }
+  card = read;
+  $("cardurl").value = read.url;
+  $("cardtext").value = read.caption;
+  $("cardpicurl").value = read.picture;
+  picture = "";
+  build();
+  $("cardmeta").textContent = `read a card from ${how}:\n` + $("cardmeta").textContent;
+}
+
+$("cardread").onclick = () => {
+  const text = $("cardin").value.trim();
+  if (!text) return;
+  const asCard = S.readCard(text) || S.readChatText(text) || S.readCardLine(text);
+  if (asCard) { show(asCard, "the pasted card"); return; }
+  const frag = K.fragment(text);
+  if (frag) { show(S.cardFor(cfg(), text.trim()), "the pasted link"); return; }
+  $("cardmeta").textContent = "that is neither a card nor a link";
+};
+
+$("cardfile").onchange = async () => {
+  const f = $("cardfile").files[0];
+  if (!f) return;
+  show(S.readCard(await f.text()), f.name);
+};
+</script>
+</body>
+
+</html>

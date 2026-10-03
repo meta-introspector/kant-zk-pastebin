@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>kant paste — a p2p post box</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto;
+         padding: 0 1rem; }
+  h1 { font-size: 1.4rem; }
+  h1 small { font-weight: 400; opacity: .6; }
+  textarea, input { width: 100%; font: inherit; box-sizing: border-box; margin: .3rem 0; }
+  textarea { font-family: ui-monospace, monospace; }
+  button { font: inherit; padding: .4rem 1rem; cursor: pointer; }
+  .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .ok { color: #080; } .err { color: #c00; }
+  .muted { opacity: .65; font-size: .9rem; }
+  .card { border: 1px solid #8884; border-radius: .5rem; padding: .8rem 1rem; margin: 1rem 0; }
+  code { background: #8882; padding: 0 .2rem; border-radius: .2rem; }
+  pre { background: #8882; padding: .6rem; border-radius: .4rem; overflow-x: auto;
+        font-size: .85rem; }
+  #log { font-size: .85rem; max-height: 14rem; overflow-y: auto; }
+</style>
+</head>
+<body>
+<h1>kant paste <small>— a p2p post box: static page, live relays</small></h1>
+
+<p class="muted">This page is static — it ships no server of its own.  It
+talks to the kant relays (the node twin and the Cloudflare twin speak the
+same protocol) and posts through the proved wasm kernel.  Everything it
+sends is archived: rooms are folded into the
+<a href="./archive/">archive</a> and mirrored between relays.</p>
+
+<div class="card">
+  <h2 style="font-size:1.05rem">1. Open a room</h2>
+  <textarea id="joinbox" rows="3"
+    placeholder="paste an invite link (#kzinvite…) or a limited pass (kzpass…)"></textarea>
+  <div class="row">
+    <button id="join">Open</button>
+    <span id="roominfo" class="muted"></span>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="font-size:1.05rem">2. Post</h2>
+  <textarea id="text" rows="6" placeholder="the text to post to the room"></textarea>
+  <div class="row">
+    <button id="post" disabled>Post</button>
+    <label class="muted"><input type="checkbox" id="poll" checked /> follow the room</label>
+    <span id="passleft" class="muted"></span>
+  </div>
+  <div id="log"></div>
+</div>
+
+<div class="card">
+  <h2 style="font-size:1.05rem">3. What just happened</h2>
+  <p class="muted">Your text became a <code>kzchat</code> line, witnessed
+  by the kernel's FNV-1a digest.  The relay took it (spending one use of
+  your pass, if you used one).  The archive clients fold every room into
+  the pastebin, and the publisher pushes the fold to Cloudflare Pages.
+  Nothing here can be forged: every client re-checks every witness.</p>
+</div>
+
+<script type="module">
+import * as N from "./kant-net.mjs";
+import * as P from "./kant-pass.mjs";
+import { parseShareUrl, envelopeEncode } from "./kantzk.mjs";
+import { loadKernel } from "./kant-wasm.mjs";
+import { loadRelay } from "./kant-site.mjs";
+
+const $ = (id) => document.getElementById(id);
+const say = (msg, cls = "") => {
+  const d = document.createElement("div");
+  d.textContent = msg;
+  d.className = cls;
+  $("log").prepend(d);
+};
+
+// A pass or invite link carries its code in the fragment (#kzpass… /
+// #kzinvite…).  Whoever opens such a link has already been given the
+// room — make them join it instead of staring at an empty box.
+
+let kernel = null;
+let node = null;      // KantNode
+let pass = null;      // parsed kzpass / kzinvite
+let pollTimer = null;
+let cursor = 0;
+
+// Which relay to talk to.  The relay named in the invite wins; otherwise
+// the one this deployment configures in kant.config.  There is deliberately
+// no baked-in fallback host here: a second copy of the relay URL would
+// drift from kant.config and silently send people to a relay this
+// deployment does not control.  No relay configured means saying so.
+const effectiveRelay = (inv, configured) => {
+  if (inv && inv.relay && inv.relay.startsWith("http")) return inv.relay;
+  return (configured ?? "").trim();
+};
+
+// Read it once, at load; the invite's own relay still takes precedence.
+const configuredRelay = await loadRelay();
+
+$("join").onclick = () => openRoom($("joinbox").value.trim());
+
+async function openRoom(raw) {
+  if (!raw) return;
+  let inv = null;
+  if (raw.includes("#")) {
+    // A share link: #kzpass… (limited) or #kzinvite… (unlimited).
+    const e = parseShareUrl(raw);
+    inv = e ? P.pastePass(envelopeEncode(e)) : N.parseInviteUrl(raw);
+  }
+  inv ??= P.pastePass(raw);   // accepts kzpass and kzinvite codes
+  if (!inv) { say("that is not an invite or a pass", "err"); return; }
+  if (!kernel) {
+    try { kernel = await loadKernel(); say("proved kernel loaded"); }
+    catch (e) { say("kernel failed to load — posting still works, unproved: " + e.message, "err"); }
+  }
+  const relay = effectiveRelay(inv, configuredRelay);
+  if (!relay) {
+    say("no relay: this page does not name one and kant.config sets none. " +
+        "Set `relay = https://…` in kant.config, or open the page from a " +
+        "relay, or send a link that names its relay.", "err");
+    return;
+  }
+  node = new N.KantNode({ peer: "paste-page", relay, log: null });
+  node.joinInvite(raw);   // pasteInvite now reads kzpass codes too
+  pass = inv;
+  cursor = 0;
+  $("roominfo").textContent =
+    `room ${node.room.slice(0, 8)}… via ${new URL(relay).host}` +
+    (inv.limit > 0 ? ` — pass: ${inv.limit} post(s)` : "");
+  $("post").disabled = false;
+  say(`opened room ${node.room.slice(0, 8)}…` +
+    (inv.limit > 0 ? ` with a ${inv.limit}-post pass` : " (unlimited invite)"), "ok");
+  if ($("poll").checked) startPoll();
+}
+
+// Auto-join when the page is opened via a pass or invite link.
+if (location.hash.length > 10) {
+  $("joinbox").value = location.href;
+  openRoom(location.href);
+}
+
+function startPoll() {
+  stopPoll();
+  pollTimer = setInterval(async () => {
+    if (!node) return;
+    try {
+      const out = await node.client.poll(node.room, { wait: 0 });
+      for (const l of out.lines.slice(cursor === 0 ? 0 : undefined)) {
+        if (cursor === 0) { cursor = out.cursor; break; }
+      }
+      if (out.cursor > cursor) {
+        for (const l of out.lines) {
+          const m = N.parseMsg(l);
+          if (m) say(`${m.sender.slice(0, 8)}: ${N.msgText(m)}`);
+        }
+        cursor = out.cursor;
+      }
+    } catch { /* relay briefly away — keep polling */ }
+  }, 4000);
+}
+
+function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+$("poll").onchange = () => ($("poll").checked ? startPoll() : stopPoll());
+
+$("post").onclick = async () => {
+  if (!node) return;
+  const text = $("text").value;
+  if (!text.trim()) return;
+  const headers = {};
+  // Only a real pass (limit > 0) goes in the header.  A plain invite
+  // joins with the room secret itself — copyPass on it would throw
+  // (an invite has no pass id/sig fields).
+  if (pass && pass.limit > 0) headers["x-kant-pass"] = P.copyPass(pass);
+  try {
+    // say() builds the kzchat line; the extra header carries the pass.
+    const line = N.printMsg(N.sayText(node.room, node.self, node.seq + 1, text));
+    const r = await fetch(`${node.relayBase}/room/${encodeURIComponent(node.room)}`, {
+      method: "POST",
+      headers: { "content-type": "text/plain", ...headers },
+      body: line,
+    });
+    const out = await r.json();
+    if (!r.ok) { say(`refused (${r.status}): ${out.error}`, "err"); return; }
+    node.seq += 1;
+    node.ingest(line);
+    say(`posted (cursor ${out.cursor})`, "ok");
+    if (out.passRemaining != null) {
+      $("passleft").textContent =
+        out.passRemaining > 0 ? `pass: ${out.passRemaining} post(s) left`
+                              : "pass spent";
+      if (out.passRemaining === 0) say("the pass is spent — ask the room owner for another", "err");
+    }
+    $("text").value = "";
+  } catch (e) {
+    say("post failed: " + e.message, "err");
+  }
+};
+</script>
+</body>
+</html>

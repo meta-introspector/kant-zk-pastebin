@@ -1,0 +1,40 @@
+# proof-schema/1.0 — an error
+#
+# Errors are first-class exchange objects: they travel with the object
+# they are about and are never discarded.  The authoritative definition is
+# `Kant.Codec.Err` in RequestProject/Kant/Codec/Model.lean.
+
+schema: proof-schema/1.0
+kind: object
+name: Error
+
+fields:
+  id:            { type: string }
+  code:          { type: string, doc: "TYPE_MISMATCH, PARSE_FAILED, …" }
+  severity:      { type: enum, values: [INFO, WARNING, ERROR, FATAL] }
+
+  message:       { type: string }
+
+  location:      { type: string, doc: line and offset, where known }
+  field:         { type: string, doc: "the path, e.g. inputs[0].value" }
+  object_id:     { type: string }
+
+  source_system: { type: string }
+  source_format: { type: enum, values: [CANONICAL, IPDL, XML, CSV, YAML, TEXT, UNKNOWN] }
+
+  expected:      { type: string }
+  actual:        { type: string }
+
+  cause:         { type: string }
+  resolution:    { type: string, doc: what the resolver did, if anything }
+
+  recoverable:   { type: bool }
+
+example:
+  code: TYPE_MISMATCH
+  field: inputs[0].value
+  expected: integer
+  actual: string
+  recoverable: true
+  resolution: string to integer coercion
+  cause: schema declares integer
