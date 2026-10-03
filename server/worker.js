@@ -20,6 +20,8 @@
 //
 // Deploy:  cd server && npx wrangler deploy
 
+import { makeStore } from "./store.js";
+
 const VERSION = "1.0.0";
 // Which build is this? The systemd twin reads its checkout, but a Worker
 // has no filesystem, so the commit is injected at build time
@@ -28,8 +30,43 @@ const VERSION = "1.0.0";
 // version "1.0.0" while serving different wasm.
 const COMMIT = "__KANT_COMMIT__";
 const MAX_LINE = 262144;
-const MAX_LINES = 4096;
 const MAX_BODY = 1048576;
+
+// Storage limits and commit cadence. The cadence is what keeps a burst of
+// posts from turning into a burst of Durable Object writes: the old code
+// persisted the whole log on every POST and every socket message, so the cost
+// of one append scaled with the size of the room rather than the size of the
+// change. Overridable per deployment, so the tradeoff can be tuned against the
+// `/stats` numbers without a code change -- see `configFrom`.
+const DEFAULT_LIMITS = { maxLines: 4096, maxBytes: 8 * 1024 * 1024 };
+const DEFAULT_COMMIT = { every: 8, intervalMs: 2000 };
+
+/**
+ * Resolve storage config from the environment.
+ *
+ * Read per request rather than at module scope: a Worker has no `process`, and
+ * `env` is the only place deployment config actually arrives. Parsed with a
+ * fallback rather than `Number(...)` alone, because `Number(undefined)` is NaN
+ * and a NaN cadence would compare false forever -- silently disabling every
+ * commit, which is the failure this whole change exists to prevent.
+ */
+function configFrom(env) {
+  const num = (v, d) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : d;
+  };
+  return {
+    mode: env?.RELAY_MODE || undefined,
+    limits: {
+      maxLines: num(env?.RELAY_MAX_LINES, DEFAULT_LIMITS.maxLines),
+      maxBytes: num(env?.RELAY_MAX_BYTES, DEFAULT_LIMITS.maxBytes),
+    },
+    commit: {
+      every: num(env?.RELAY_COMMIT_EVERY, DEFAULT_COMMIT.every),
+      intervalMs: num(env?.RELAY_COMMIT_INTERVAL_MS, DEFAULT_COMMIT.intervalMs),
+    },
+  };
+}
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -150,10 +187,20 @@ export default {
 
     if (url.pathname === "/health") {
       console.log("HEALTH", request.url);
-      return json({ ok: true, name: "kant-zk-relay", version: VERSION, commit: COMMIT, platform: "cloudflare" });
+      const cfg = configFrom(env);
+      return json({
+        ok: true, name: "kant-zk-relay", version: VERSION, commit: COMMIT,
+        platform: "cloudflare",
+        // Announced, not inferred. A peer cannot tell the two modes apart from
+        // the wire, so `durable` here is what tells it whether a cursor is a
+        // promise or a hint.
+        durable: Boolean(env?.ROOMS) && cfg.mode !== "rendezvous",
+        mode: cfg.mode ?? (env?.ROOMS ? "mailbox" : "rendezvous"),
+        commit: cfg.commit,
+      });
     }
 
-    const m = url.pathname.match(/^\/(room|ws)\/([^/]+)$/);
+    const m = url.pathname.match(/^\/(room|ws|stats)\/([^/]+)$/);
     if (!m) {
       console.log("404", request.url, "method=", request.method);
       return json({ ok: false, error: "not found" }, 404);
@@ -161,6 +208,11 @@ export default {
 
     const [, kind, roomRaw] = m;
     const room = decodeURIComponent(roomRaw);
+    if (!env.ROOMS) {
+      // No Durable Object bound: routing has nowhere to send a room, and
+      // saying so plainly beats a 500 from `idFromName` on undefined.
+      return json({ ok: false, error: "no ROOMS binding: this deployment has no relay storage" }, 503);
+    }
     const id = env.ROOMS.idFromName(room);
     console.log("ROUTE", kind, room, "url=", request.url, "method=", request.method);
 
@@ -176,24 +228,44 @@ export default {
   },
 };
 
-/** One room: an append-only log, some pollers, some sockets. */
+/**
+ * One room: storage, some pollers, some sockets.
+ *
+ * The log lives in `this.store`, not in fields here. `worker.js` decides what
+ * a room means; `store.js` decides where those lines live and when they are
+ * written. That split is what lets the same room code run with a Durable
+ * Object behind it and without one.
+ */
 export class Room {
-  constructor(state) {
+  constructor(state, env) {
     this.state = state;
-    this.base = 0;
-    this.lines = [];
     this.sockets = new Set(); // { ws, cursor }
     this.waiters = new Set();
-    this.loaded = this.state.blockConcurrencyWhile(async () => {
-      const kept = await this.state.storage.get("log");
-      if (kept) { this.base = kept.base; this.lines = kept.lines; }
+    const cfg = configFrom(env ?? state?.env);
+    this.store = makeStore({
+      mode: cfg.mode,
+      env,
+      // `state` is what makes the store durable; without it, mailbox mode
+      // would have nothing to write to and `makeStore` refuses rather than
+      // quietly downgrading to a store that loses everything.
+      state,
+      limits: cfg.limits,
+      commit: cfg.commit,
     });
-    console.log("ROOM_INIT", "loaded=", this.lines.length, "base=", this.base);
+    this.loaded = this.state.blockConcurrencyWhile(() => this.store.ready());
+    console.log("ROOM_INIT", "mode=", this.store.report().mode,
+      "cursor=", this.store.report().cursor);
   }
 
+  /**
+   * Commit if the cadence says so.
+   *
+   * The cadence is what this replaced: `await this.persist()` ran on every
+   * POST and every socket message, writing the entire log each time.
+   */
   async persist() {
-    await this.state.storage.put("log", { base: this.base, lines: this.lines });
-    console.log("ROOM_PERSIST", "lines=", this.lines.length, "base=", this.base);
+    if (!this.store.dueForCommit()) return false;
+    return this.store.commit();
   }
 
   /**
@@ -229,21 +301,14 @@ export class Room {
   }
 
   fetchFrom(cursor) {
-    const end = this.base + this.lines.length;
-    const from = Math.max(cursor, this.base);
-    const out = { cursor: end, lines: this.lines.slice(from - this.base), truncated: cursor < this.base };
+    const out = this.store.fetchFrom(cursor);
     console.log("ROOM_FETCH", "cursor=", cursor, "->", out.cursor, "lines=", out.lines.length, "truncated=", out.truncated);
     return out;
   }
 
   append(lines) {
-    for (const l of lines) this.lines.push(l);
-    if (this.lines.length > MAX_LINES) {
-      const drop = this.lines.length - MAX_LINES;
-      this.lines.splice(0, drop);
-      this.base += drop;
-    }
-    console.log("ROOM_APPEND", "accepted=", lines.length, "total=", this.lines.length, "base=", this.base);
+    const { cursor, dropped } = this.store.append(lines);
+    console.log("ROOM_APPEND", "accepted=", lines.length, "cursor=", cursor, "dropped=", dropped);
     for (const w of [...this.waiters]) { this.waiters.delete(w); w(); }
     for (const s of [...this.sockets]) {
       const out = this.fetchFrom(s.cursor);
@@ -252,7 +317,7 @@ export class Room {
         try { s.ws.send(JSON.stringify({ ok: true, ...out })); } catch { this.sockets.delete(s); }
       }
     }
-    return this.base + this.lines.length;
+    return cursor;
   }
 
   wait(ms) {
@@ -266,9 +331,18 @@ export class Room {
   async fetch(request) {
     await this.loaded;
     const url = new URL(request.url);
-    const m = url.pathname.match(/^\/(?:room|ws)\/([^/]+)$/);
+    const m = url.pathname.match(/^\/(?:room|ws|stats)\/([^/]+)$/);
     const roomName = m ? decodeURIComponent(m[1]) : "";
     const started = Date.now();
+
+    if (url.pathname.startsWith("/stats/")) {
+      // What the storage split exists to make visible: how much is committed,
+      // how much is exposed, how many writes the cadence has saved, and --
+      // crucially -- whether loss is measurable at all in this mode.
+      const report = this.store.report();
+      console.log("ROOM_STATS", JSON.stringify(report));
+      return json({ ok: true, room: roomName, ...report });
+    }
 
     if (url.pathname.startsWith("/ws/")) {
       console.log("ROOM_UPGRADE", url.pathname);
@@ -302,6 +376,10 @@ export class Room {
         return json({ ok: false, error: verdict.error }, verdict.status);
       }
       const cursor = this.append(lines);
+      // Cadence, not per-request. A caller that needs the post durable can
+      // force it; the default trades a bounded window of exposure for a large
+      // drop in Durable Object writes, and `/stats` reports what that window
+      // currently costs.
       await this.persist();
       const ms = Date.now() - started;
       console.log("ROOM_POST", "cursor=", cursor, "accepted=", lines.length, "ms=", ms);
