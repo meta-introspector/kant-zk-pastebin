@@ -121,11 +121,15 @@ check_shape() {
     return 1
   fi
   if [ "$files" -gt 20 ]; then
-    warn "$files files differ from origin/main -- much larger than a typical fix"
-    note "Confirm this is intended before reading any of the content."
-  else
-    ok "$files file(s) differ from origin/main"
+    bad "$files files differ from origin/main -- much larger than a typical fix"
+    note "Confirm this is intended before reading any of the content. If you"
+    note "expected a small change, the base is wrong, not the diff:"
+    note "  git diff --stat origin/main...$ref | tail -20"
+    note "This fired on PR #11's branch: 645 files for a commit that touched"
+    note "one, because the branch was cut from a 213-commit-stale main."
+    return 1
   fi
+  ok "$files file(s) differ from origin/main"
   return 0
 }
 
