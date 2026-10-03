@@ -1,5 +1,5 @@
 [Unit]
-Description=kant-zk archive pairer — local archive server ⇄ Cloudflare twin
+Description=kant-zk archive pairer — local archive ⇄ CF Pages public block storage
 Documentation=https://github.com/meta-introspector/kant-zk-pastebin
 After=network-online.target kant-archive.service
 Wants=network-online.target
@@ -9,9 +9,10 @@ Type=simple
 User=mdupont
 Group=mdupont
 WorkingDirectory=/home/mdupont/projects/pastebin-lean
-# TWIN_URL: the workers.dev URL of the CF relay twin (set per-host).
-Environment=TWIN_URL=https://kant-zk-relay.solfunmeme.workers.dev
-ExecStart=/usr/bin/node /home/mdupont/projects/pastebin-lean/server/pair.mjs --local http://127.0.0.1:8788 --twin ${TWIN_URL} --archive-dir /var/lib/kant-zk/archive --interval 60
+# PAGES_URL: the CF Pages public snapshot (blocks.json + b/<cid>.bin),
+# the public block storage the pairer pulls from (set per-host).
+Environment=PAGES_URL=https://kant-zk-pastebin.pages.dev
+ExecStart=/usr/bin/node /home/mdupont/projects/pastebin-lean/server/pair.mjs --local http://127.0.0.1:8788 --pages ${PAGES_URL} --archive-dir /var/lib/kant-zk/archive --interval 300
 Restart=on-failure
 RestartSec=5
 

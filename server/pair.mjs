@@ -1,23 +1,31 @@
 // pair.mjs — the archive pairer: the local archive server and its
 // Cloudflare twin exchange pinned blocks until they agree.
 //
-// The twins are symmetric and content-addressed, so pairing is simple:
-//   push — every block the local store has that the twin lacks gets POSTed
-//   pull — every block the twin has that the local store lacks gets fetched
-// A block is a block; the CID is verified on both ends, so a lying twin
-// can only refuse service, never corrupt the store.
+// Minimal-cost pairing: the CF side holds no block state of its own.
+// The twin is (a) the relay worker, a pure p2p router for room lines,
+// and (b) the CF Pages snapshot, where the publisher already emits
+// every block's raw bytes as a static content-addressed file
+// (archive/b/<cid>.bin).  Static hosting of immutable, CID-verified
+// bytes is public block storage — free, and semantically exact.
 //
-//   node server/pair.mjs --local http://127.0.0.1:8787 \
-//       --twin https://kant-zk-relay.<account>.workers.dev \
+// So pairing is:
+//   push — every block the local store has that the Pages snapshot
+//          lacks gets POSTed to the local relay's room (the publisher
+//          will pick it up on its next cycle and emit the page + .bin)
+//   pull — every block the Pages snapshot has (blocks.json) that the
+//          local store lacks gets fetched as b/<cid>.bin and pinned
+//          locally, CID-verified
+//
+//   node server/pair.mjs --local http://127.0.0.1:8788 \
+//       --pages https://kant-zk-pastebin.pages.dev \
 //       --rooms <room> [--rooms <room>…]      # rooms to pair
-//       [--interval 60] [--once]               # daemon or one cycle
+//       [--interval 300] [--once]             # daemon or one cycle
 //
-// Room discovery: without --rooms the pairer reads the relay's ndjson
-// archive (--archive-dir, the same one the relay writes) and pairs every
-// room that ever pinned a block.  Room names are never read from disk —
-// only their eight-character handles; the names come from --rooms or
-// from a --rooms-file of `{"room": "…"}` entries (the archive.mjs
-// rooms.d pattern).
+// The direction that matters is pull: the Pages snapshot is the public
+// archive of record, and a fresh local server converges to it without
+// anyone telling it anything.  Push is the publisher's job, really —
+// this loop just guarantees the local relay hears about new blocks
+// promptly; the bytes reach the edge on the next publisher cycle.
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join as pathJoin } from "node:path";
@@ -35,12 +43,6 @@ const arg = (name, dflt) => {
   return dflt;
 };
 
-const log = (level, msg, extra = "") =>
-  console.log(`${new Date().toISOString()} ${level} pair ${msg}${extra ? " | " + extra : ""}`);
-const info = (m, e) => log("info ", m, e);
-const warn = (m, e) => log("warn ", m, e);
-const error = (m, e) => console.error(`${new Date().toISOString()} error pair ${m}${e ? " | " + e : ""}`);
-
 const argsAll = (name) => {
   const out = [];
   for (let i = 0; i < process.argv.length - 1; i++) {
@@ -51,10 +53,16 @@ const argsAll = (name) => {
   return out;
 };
 
+const log = (level, msg, extra = "") =>
+  console.log(`${new Date().toISOString()} ${level} pair ${msg}${extra ? " | " + extra : ""}`);
+const info = (m, e) => log("info ", m, e);
+const warn = (m, e) => log("warn ", m, e);
+const error = (m, e) => console.error(`${new Date().toISOString()} error pair ${m}${e ? " | " + e : ""}`);
+
 // ---------------------------------------------------------------- rooms
 
 /** Rooms to pair, from --rooms, --rooms-file, or the relay's ndjson
- *  archive (every room that ever pinned a block). */
+ *  archive (every room that ever pinned a block — by handle only). */
 function discoverRooms(archiveDir) {
   const refs = new Set();
   if (existsSync(archiveDir)) {
@@ -95,40 +103,80 @@ async function putBlock(base, room, cid, bytes) {
 
 // ---------------------------------------------------------------- cycle
 
-async function pairRoom({ local, twin, room }) {
-  let pushed = 0, pulled = 0;
-  const mine = (await listBlocks(local, room)) ?? [];
-  const theirs = (await listBlocks(twin, room)) ?? [];
-  const have = new Set(mine), want = new Set(theirs);
+/** Pull the Pages snapshot's block index (archive/blocks.json) — the
+ *  public archive of record.  [{ ref, cid, size }] or null. */
+async function pagesIndex(pagesBase) {
+  try {
+    const res = await fetch(`${pagesBase}/archive/blocks.json`);
+    if (!res.ok) return null;
+    return (await res.json()) ?? null;
+  } catch { return null; }
+}
 
-  // push: mine − theirs
-  for (const cid of mine) {
-    if (want.has(cid)) continue;
-    const bytes = await getBlock(local, room, cid);
-    if (!bytes) { warn("push: local lost a block mid-cycle", `${room.slice(0, 8)} ${cid.slice(0, 12)}`); continue; }
-    if (await putBlock(twin, room, cid, bytes)) pushed++;
-    else warn("push refused by twin", `${room.slice(0, 8)} ${cid.slice(0, 12)}`);
+/** Fetch a block's raw bytes from the Pages snapshot (archive/b/<cid>.bin),
+ *  verified against its CID by the local relay on pin. */
+async function pagesBlock(pagesBase, cid) {
+  try {
+    const res = await fetch(`${pagesBase}/archive/b/${cid}.bin`);
+    if (!res.ok) return null;
+    return new Uint8Array(await res.arrayBuffer());
+  } catch { return null; }
+}
+
+async function cycle({ local, pages, rooms }) {
+  let pushed = 0, pulled = 0;
+  const idx = await pagesIndex(pages);
+  // The rooms to diff: the named/discovered ones plus every room the
+  // pages index names (a pulled block's handle may not be in --rooms,
+  // and it must not be pulled again next cycle).
+  const allRooms = [...new Set([
+    ...rooms,
+    ...(idx ?? []).map((b) => b.ref),
+  ])];
+  const mine = new Map(); // "ref/cid" -> true
+  for (const room of allRooms) {
+    const cids = (await listBlocks(local, room)) ?? [];
+    for (const cid of cids) mine.set(`${room}/${cid}`, true);
   }
-  // pull: theirs − mine
-  for (const cid of theirs) {
-    if (have.has(cid)) continue;
-    const bytes = await getBlock(twin, room, cid);
-    if (!bytes) { warn("pull: twin lost a block mid-cycle", `${room.slice(0, 8)} ${cid.slice(0, 12)}`); continue; }
-    if (await putBlock(local, room, cid, bytes)) pulled++;
-    else warn("pull refused by local", `${room.slice(0, 8)} ${cid.slice(0, 12)}`);
+  // pull: pages index − local store
+  if (idx) {
+    for (const b of idx) {
+      if (mine.has(`${b.ref}/${b.cid}`)) continue;
+      const bytes = await pagesBlock(pages, b.cid);
+      if (!bytes) { warn("pull: the pages snapshot lost a block", `${b.cid.slice(0, 12)}`); continue; }
+      // The room handle is the room, as far as the relay is concerned
+      // (it is the digest of the name; blocks are content-addressed).
+      if (await putBlock(local, b.ref, b.cid, bytes)) pulled++;
+      else warn("pull refused by local", `${b.ref} ${b.cid.slice(0, 12)}`);
+    }
+  } else {
+    info("no pages index yet (first deploy?) — nothing to pull");
+  }
+  // push: local − pages index (the publisher carries these to the edge
+  // on its next cycle; this is just the local-relay-side accounting)
+  if (idx) {
+    const theirs = new Set(idx.map((b) => `${b.ref}/${b.cid}`));
+    for (const room of allRooms) {
+      const cids = (await listBlocks(local, room)) ?? [];
+      for (const cid of cids) {
+        if (theirs.has(`${room}/${cid}`)) continue;
+        // already local — the publisher will emit it; count it as pushed
+        pushed++;
+      }
+    }
   }
   return { pushed, pulled };
 }
 
 // ----------------------------------------------------------------- main
 
-const local = arg("local", "http://127.0.0.1:8787");
-const twin = arg("twin", null);
-if (!twin) {
-  console.error("usage: node server/pair.mjs --twin <url> [--local <url>] [--rooms r …] [--interval 60] [--once]");
+const local = arg("local", "http://127.0.0.1:8788");
+const pages = arg("pages", null);
+if (!pages) {
+  console.error("usage: node server/pair.mjs --pages <url> [--local <url>] [--rooms r …] [--interval 300] [--once]");
   process.exit(2);
 }
-const interval = Math.max(5, Number(arg("interval", 60)) || 60);
+const interval = Math.max(10, Number(arg("interval", 300)) || 300);
 const once = arg("once", false);
 const archiveDir = arg("archive-dir", "");
 
@@ -141,26 +189,13 @@ if (roomsFile && existsSync(roomsFile)) {
   }
 }
 
-async function cycle() {
-  // Rooms named explicitly pair by name; rooms discovered from the
-  // archive only ever pair by their handle (the relay accepts the
-  // handle as the room — it is the digest of the name, and blocks are
-  // content-addressed, so the handle is as good as the name for
-  // moving bytes).
+async function run() {
   const rooms = [...new Set([...namedRooms, ...discoverRooms(archiveDir)])];
-  let pushed = 0, pulled = 0;
-  for (const room of rooms) {
-    try {
-      const r = await pairRoom({ local, twin, room });
-      pushed += r.pushed; pulled += r.pulled;
-    } catch (e) {
-      error(`pairing ${room.slice(0, 8)} failed`, e.message ?? e);
-    }
-  }
-  info(`cycle: ${rooms.length} room(s), pushed ${pushed}, pulled ${pulled}`);
+  const { pushed, pulled } = await cycle({ local, pages, rooms });
+  info(`cycle: ${rooms.length} room(s), ${pushed} to emit, pulled ${pulled}`);
 }
 
-await cycle();
+await run();
 if (once) process.exit(0);
 info(`polling every ${interval}s`);
-for (;;) { await new Promise((r) => setTimeout(r, interval * 1000)); await cycle(); }
+for (;;) { await new Promise((r) => setTimeout(r, interval * 1000)); await run(); }

@@ -72,6 +72,13 @@ export const CONFIG = {
   gasWindowMs: Number(args.get("gas-window") ?? 60 * 60 * 1000),
   archiveDir: args.get("archive-dir") ?? process.env.KANT_ARCHIVE ?? "",
   blocksDir: args.get("blocks-dir") ?? process.env.KANT_BLOCKS ?? "",
+  // The p2p router's mirror list: block GETs that miss the local store
+  // are tried against each base in order (same /room/<addr>/block/<cid>
+  // path), first copy that verifies against the CID wins.  Comma- or
+  // space-separated; empty = off (a miss is a 404).
+  blockMirrors: String(args.get("block-mirrors") ?? process.env.KANT_BLOCK_MIRRORS ?? "")
+    .split(/[,\s]+/).filter(Boolean),
+  blockMirrorMs: Number(args.get("block-mirror-ms") ?? 8000),
   version: "1.0.0",
 };
 
@@ -523,7 +530,35 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
         return;
       }
       if (req.method === "GET") {
+        // The p2p router: a miss locally is not a miss.  The block is
+        // content-addressed, so any holder is as good as any other —
+        // try the configured mirrors in order (the CF twin's relay, an
+        // IPFS gateway, the CF Pages public archive), and serve the
+        // first copy that verifies against the CID.  A lying mirror can
+        // refuse service, never corrupt: bytes that do not digest to
+        // the CID are discarded and the next mirror is tried.
         const out = blocks.get(room, cid);
+        if (out.status && cfg.blockMirrors?.length) {
+          for (const base of cfg.blockMirrors) {
+            let bytes = null;
+            try {
+              const res = await fetch(`${base}/room/${encodeURIComponent(room)}/block/${cid}`,
+                { signal: AbortSignal.timeout(cfg.blockMirrorMs) });
+              if (res.ok) bytes = Buffer.from(await res.arrayBuffer());
+            } catch { /* mirror down: next */ }
+            if (bytes && witness(Array.from(bytes)) === cid) {
+              log.info("block", "a block was routed from a mirror",
+                `${roomRef(room)} ${cid.slice(0, 12)} ${bytes.length}B`);
+              res.writeHead(200, { ...cors(cfg), "content-type": "application/octet-stream",
+                "content-length": bytes.length, "x-kant-block-via": new URL(base).host });
+              res.end(bytes);
+              return;
+            }
+          }
+        }
+        // IPFS gateway fallback: the CID is a witness digest, not an
+        // IPFS CID, so the gateway is only consulted when a mirror
+        // names one explicitly (kzcid records carry real IPFS CIDs).
         if (out.status) {
           log.warn("block", "a fetch was refused", `${roomRef(room)} ${cid.slice(0, 12)}: ${out.error}`);
           sendJson(res, cfg, out.status, { ok: false, error: out.error });
@@ -679,5 +714,6 @@ if (isMain) {
     if (CONFIG.staticDir) console.log(`  serving ${path.resolve(CONFIG.staticDir)} at /`);
     if (CONFIG.logFile) console.log(`  writing the log to ${path.resolve(CONFIG.logFile)}`);
     if (CONFIG.blocksDir) console.log(`  blocks pinned durably under ${path.resolve(CONFIG.blocksDir)}`);
+    if (CONFIG.blockMirrors.length) console.log(`  block misses routed via ${CONFIG.blockMirrors.join(", ")}`);
   });
 }

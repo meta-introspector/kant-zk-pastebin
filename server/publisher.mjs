@@ -19,8 +19,11 @@
 //                         transcript (latest reply's body) + the chain
 //                         of replies with their witnesses and CIDs
 //   b/<cid>.html        — one page per pinned block: metadata, hex
-//                         preview, links to the bytes (the "new pages
-//                         in Cloudflare" half of the archive server)
+//                         preview, links to the bytes
+//   b/<cid>.bin         — the block's raw bytes, content-addressed:
+//                         CF Pages IS the public block storage — free,
+//                         immutable, and the bytes verify against their
+//                         CID wherever they are fetched from
 //   blocks.json         — every pinned block, by room handle and CID
 //   archive.json        — the whole fold as one JSON document
 //   manifest.json       — what this snapshot contains + when + sizes
@@ -204,7 +207,8 @@ table{border-collapse:collapse} td,th{border:1px solid #030;padding:4px 8px;text
 <h1>block <code>${esc(cid.slice(0, 16))}…</code></h1>
 <p><a href="../index.html">← archive</a> · room <code>${esc(ref)}</code> · ${size} bytes</p>
 <table><tr><th>cid</th><td><code>${esc(cid)}</code></td></tr>
-<tr><th>bytes</th><td><a href="${esc(`https://solana.solfunmeme.com/relay/room/${ref}/block/${cid}`)}">relay</a></td></tr></table>
+<tr><th>room</th><td><code>${esc(ref)}</code></td></tr>
+<tr><th>bytes</th><td><a href="${cid}.bin">${size} bytes</a> (static, content-addressed)</td></tr></table>
 <h2>preview (first 256 bytes, hex)</h2>
 <pre>${esc(preview)}</pre>
 </body></html>
@@ -212,8 +216,10 @@ table{border-collapse:collapse} td,th{border:1px solid #030;padding:4px 8px;text
 }
 
 /** Read every room's pinned blocks from the relay (or its CF twin) and
- *  emit a page per block.  Rooms are only ever named by their handle.
- *  Returns [{ ref, cid, size }] for the manifest. */
+ *  emit a page per block AND the raw bytes — the public block storage
+ *  is the static snapshot itself, pushed to CF Pages by --pages-deploy.
+ *  Rooms are only ever named by their handle.  Returns
+ *  [{ ref, cid, size }] for the manifest. */
 async function writeBlocks({ relay, out }) {
   // Every room the relay knows: the archive front page lists threads by
   // room handle already, so the union of those handles is the room set.
@@ -228,7 +234,7 @@ async function writeBlocks({ relay, out }) {
       cids = (await res.json()).blocks ?? [];
     } catch { continue; }
     for (const cid of cids) {
-      let size = 0, preview = "";
+      let size = 0, preview = "", raw = null;
       try {
         const r = await fetch(`${relay}/room/${ref}/block/${cid}`);
         if (r.ok) {
@@ -236,10 +242,12 @@ async function writeBlocks({ relay, out }) {
           size = bytes.length;
           preview = Array.from(bytes.slice(0, 256))
             .map((b) => b.toString(16).padStart(2, "0")).join(" ");
+          raw = bytes;
         }
       } catch { /* a block that will not read still gets a page */ }
       mkdirSync(pathJoin(out, "b"), { recursive: true });
       writeFileSync(pathJoin(out, "b", `${cid}.html`), renderBlock(ref, cid, size, preview));
+      if (raw) writeFileSync(pathJoin(out, "b", `${cid}.bin`), raw);
       blocks.push({ ref, cid, size });
     }
   }
