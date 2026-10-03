@@ -1,6 +1,6 @@
 # federated-p2p-relay — implementation plan
 
-**Date:** 2026-10-03 · **Status:** proposed · **Spec:** [SYSTEM.md](SYSTEM.md)
+**Date:** 2026-10-03 (updated: measurement + PR review) · **Status:** in progress · **Spec:** [SYSTEM.md](SYSTEM.md)
 
 ## Scope
 
@@ -11,6 +11,40 @@ transport for file chunks — that is done (`52349366`, `b23c518f`, `f360e985`).
 Every "gap" below was checked against a file and line on 2026-10-03. Where the
 spec and the code disagree, both positions are stated rather than only the one
 that is easier to implement.
+
+## Status
+
+Three commits landed after this plan was written and change what it says. Read
+this section before the workstreams; the gaps G1–G7 below are still accurate,
+but two of them are now partly addressed and one number has a measurement.
+
+| commit | effect on this plan |
+|---|---|
+| `9cee0daf` | Partly closes **G7**. Storage is split out of the worker into `server/store.js` (`IsolateStore` / `DurableStore`), and `/stats` reports `mode` and `durable`. The lean-worker question is now "which modes are deployed", not "which DO is authoritative". |
+| `f4235436` | Supplies the number **W3** and **W4** were asking to be measured, and changes W3's cost. |
+| `9d9ba0ee` | Gives the polling cadence a number instead of a preference: every 11s per worker, at the spec §12 budget with 50% headroom. |
+
+**Not deployed.** `9cee0daf` and `9d9ba0ee` are committed but not live: zero of
+three known workers answer `/stats` (`kant-zk-relay-wasm`, `otc-desk-relay-v2`,
+`otc-desk-relay-production`, all 404). So the split's behaviour is verified in
+tests only. Deploying it is the precondition for every measurement below being
+real, and this token's Cloudflare GraphQL exposes only `cost` and `viewer`, not
+the analytics datasets, so the account's actual spend cannot be pulled either.
+`scripts/relay-telemetry.mjs` states both facts on every run rather than
+reporting a budget figure as if it were observed.
+
+### What the cadence measurement changed
+
+`f4235436` measured the thing **W3** optimises for. Over 100 POSTs at the
+relay's real admission control — the passless limiter is 10 posts per sender
+per 10 minutes — `every:1` performs 101 writes and `every:8` performs 13, an 87%
+reduction. But the limiter caps requests long before cadence saves any writes,
+so DO write cost is **second-order next to admission control**. Cadence matters
+when a room has many senders, or when passes raise the ceiling.
+
+That reorders the work. A byte bound (W3) and a commit-cadence knob are worth
+less than an admission-control story, and the 256 KiB inline payload (G4/W4)
+is the largest single driver of bytes-per-request.
 
 ## Baseline
 
@@ -73,6 +107,11 @@ two implementations of the same rule.
 **Change.** Track total retained bytes alongside `MAX_LINES` and trim on both.
 Report which bound caused a trim, because a peer seeing `truncated` needs to
 know whether it missed messages or only bytes.
+
+**Reordered.** `f4235436` showed the write cadence is already tunable and worth
+87% of writes under load (`9cee0daf` made it configurable). A byte bound caps
+memory per room; a cadence knob caps write *operations*. Both matter, and the
+measurement says admission control dominates both — see the Status section.
 
 **Proof.** A room of 4096 short lines plus one oversized line must not exceed
 the byte cap. The failure this prevents is specific: at 256 KiB per line the
@@ -137,12 +176,26 @@ built correctly without it, so it should not be deferred past W5.
 
 ### W7 — Reconcile the two DOs (G7)
 
-**Change.** Decide whether `server/worker.js` and the lean-worker rescue DO
-converge, and record the decision. They currently disagree about durability,
-which means "the relay" is ambiguous in every other document too.
+**Mostly done in `9cee0daf`,** which split storage into `server/store.js` with
+an `IsolateStore` and a `DurableStore` behind one `makeStore({mode, …})`, and
+made the write cadence tunable (`RELAY_COMMIT_EVERY`, `RELAY_COMMIT_INTERVAL_MS`).
+`/stats` and `/health` now report `mode` and `durable`.
 
-**Proof.** Not a code change — a written decision plus, if they converge, the
-lean-worker tests passing against the survivor.
+**What remains** is that nothing is deployed. `makeStore` probes `state?.storage`
+rather than `env.ROOMS`, and a mailbox without storage **throws** rather than
+degrading — which is correct, but means the decision is untested against a real
+deployment. The census in `f4235436` found `otc-desk-relay-v2` self-reporting
+`durable: false` with the note `"consumers sync lines into their own sqlite"`,
+and `kant-zk-relay-production` reporting zeros across rooms/lines/sockets/peers.
+
+**Proof.** Deploy, then re-run `scripts/relay-measure.mjs --fleet` and confirm
+each worker names a mode instead of `unknown`. A worker that still reports
+unknown has not been migrated, and should be listed rather than assumed.
+
+**Also open:** the team's branches contradict each other on this. `317d5099`
+withdrew the Durable Object on dev; `1ca352a3` put DOs back; `1b772bcb` reverted
+that. One of those is a mistake, and the lattice cannot merge until it is
+identified.
 
 ## Sequencing
 
@@ -152,8 +205,12 @@ W1 ──┬──> W5 <── W2
 W3 ──┘     └──> W6 ──> federation (spec Phase 4)
 W4 (independent, but measure first)
 
-W7 — any time; it is a decision, not a dependency
+W7 — mostly done (9cee0daf); what remains is deployment, not code
 ```
+
+**Ahead of all of it: deploy W7.** Until a `/stats` answers, W3 and W4 are being
+tuned against no observation, and the polling loop in `9d9ba0ee` samples
+reachability only. That is the cheapest next move and it unblocks the rest.
 
 ## Blocking decisions
 
@@ -184,8 +241,58 @@ exist:
 | `scripts/cli-test.mjs` | 77 |
 | `scripts/room-store-test.mjs` | 20 |
 | `scripts/forward-test.mjs` | 8 |
+| `server/store-test.mjs` | 32 |
+| `server/room-test.mjs` | 28 |
+| `scripts/relay-measure-test.mjs` | 18 |
+| `scripts/relay-telemetry-test.mjs` | 16 |
 | `cargo test --lib` (see `docs/RUST_TESTS.md` for the invocation) | 75 |
 | `scripts/frames-crosscheck.sh` | 20 |
+
+### A test suite that cannot fail is a liability, not evidence
+
+The `rust-ipfs` submodule must be initialised (`git submodule update --init
+vendor/rust-ipfs`) or the crate will not build at all — this bit during review
+of PR #1.
+
+Of the sixteen telemetry tests, **three mutations survived the first pass**:
+`requestsPerPoll` halved, `durable` coerced from `null` to `false`, and
+`status >= 200` accepted for reachability. All three passed because the live
+fleet happens to answer 200 on every worker, so probing the real endpoint
+cannot distinguish a correct check from a wrong one. The fix was to test
+`isReachable` and `normalizeHealth` as pure functions, off the wire. A test
+whose subject is a live service can only ever assert what that service happens
+to be doing today.
+
+## Review log
+
+**PR #1** (`twilwa`, `fix(access): use public paste access urls`) — reviewed
+2026-10-03. The intent is right and the two tests are genuinely good: they
+assert the absence of `localhost:8090` and of the old `ipfs cat` line, which is
+the actual regression. Three findings, in the order they block a merge:
+
+1. **It introduces reflected XSS.** `normalized_base_url()` derives the origin
+   from `connection_info().host()`, which prefers `X-Forwarded-Host` over
+   `Host`, and interpolates it into the paste page **unescaped** inside an
+   `onclick` attribute. Before the PR that value came from `BASE_URL`, an
+   operator-controlled env var; after, it comes from the request. Verified by
+   probe, not by reading: a request with
+   `X-Forwarded-Host: evil"><script>alert(1)</script>` returns
+   `raw_tag=true escaped=false`, with the tag intact in all three command
+   divs. Needs HTML-escaping on the interpolated origin, and a test with a
+   hostile header that fails against the current code.
+2. **It does not compile.** Against this tree: `PasteIndex` has gained a `root`
+   field the PR's base predates, and `store_blocks()` in `ipfs.rs` assumes one
+   `cid` type where `rust-unixfs` and `ipld-core` resolve the crate from two
+   different registries and get distinct types. The PR's own `cargo test` claim
+   in its description is not reproducible here. (A bridge exists — convert by
+   bytes — but that belongs in the PR, not in review.)
+3. **143 of its ~1454 diff lines are `rustfmt`.** The substantive change is
+   about 70 lines. Worth splitting so the security fix is reviewable on its own.
+
+The two rust changes are otherwise sound and better than what they replace:
+`write_block` now returns whether it wrote, so a partial DAG cannot report
+success, and `ipfs_add_bytes` fails closed when no repo exists rather than
+returning a CID that resolves to nothing.
 
 **A suite that cannot go red is not evidence.** Every workstream above should
 add at least one test, and each new test should be shown to fail against the

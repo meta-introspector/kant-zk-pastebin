@@ -2,6 +2,15 @@
 
 **Date:** 2026-10-03 · **Status:** proposed · **Companion to** [PLAN.md](PLAN.md)
 
+> **Open PRs on 2026-10-03** — four, and they are not the branches below.
+> PR #10 `feat/build-feed` (**Chain A tip**, 1442 files, `CONFLICTING`) is the
+> one that matters: it is the tip this lattice's Step 4 exists for, and it is
+> far larger than the 57-file conflict count suggested. PR #9 is
+> `feature/big-merge` — this branch. PR #2 `feature/wip` is `MERGEABLE` but
+> `UNSTABLE` (298 files). PR #1 is an external contributor's fix, reviewed
+> separately in PLAN.md's Review log: it introduces reflected XSS and does not
+> compile, so it needs a fix before it can merge regardless of the lattice.
+
 Thirteen remote branches carry work that is in neither `feature/big-merge` nor
 `main`. They are not a stack — they are two independent chains plus a set of
 isolated snapshots, and the chains have crossed on the same files.
@@ -209,8 +218,15 @@ which is in use.
 ## What still needs a person
 
 1. **Is Chain A still wanted?** It is seven months divergent and rewrites the
-   relay. If it is dead, say so and the lattice collapses to Step 1.
+   relay. If it is dead, say so and the lattice collapses to Step 1. PR #10
+   makes this more urgent rather than less: `feat/build-feed` now shows as
+   +259,511 / −659,420 across 1442 files, which is not an integration diff, it
+   is a rewrite. **Confirm before anyone spends a day on it.**
 2. **Are the `wip/*` snapshots wanted at all?** They are uncommitted-work
    captures, not changes.
-3. **Who reconciles the 57-file Chain A merge?** It should not be whoever
-   happens to be holding the branch when it becomes urgent.
+3. **Who reconciles the Chain A merge?** It should not be whoever happens to be
+   holding the branch when it becomes urgent. At 1442 files the conflict count
+   (57) understates the work by an order of magnitude, so whoever takes this on
+   should be told that number up front.
+4. **PR #10 is `CONFLICTING` against `main`** and `mergeStateStatus: DIRTY`, so
+   it is not currently mergeable regardless of the answer to (1).
