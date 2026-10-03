@@ -515,6 +515,92 @@ const esm = (spec, version) => `https://esm.sh/${spec}@${version}`;
  * work. A node that cannot find peers simply never answers a request, and
  * the relay path still serves every file.
  */
+/**
+ * Adapt a real gossipsub router to the `{ subscribe, publish }` shape the
+ * rest of this module uses.
+ *
+ * Split out of `libp2pNode` so the adapter's contract is TESTABLE without a
+ * CDN and without a swarm. It is the part that knows js-libp2p's actual API,
+ * and the first version of it got three things wrong -- see the notes below.
+ * A test that does not drive this function is not testing the integration.
+ */
+export const gossipsubTransport = (pubsub, { onError = null } = {}) => {
+  if (!pubsub || typeof pubsub.subscribe !== "function" || typeof pubsub.publish !== "function") {
+    throw new Libp2pError("a gossipsub router is required", { code: "bad-pubsub" });
+  }
+  // One listener per topic, not per subscription: `subscribe()` is void and
+  // idempotent, so the handler count is this adapter's to manage.
+  const byTopic = new Map();
+  const publishQueue = new Map(); // topic -> Promise, to serialise per topic
+
+  return {
+    topics: () => [...byTopic.keys()],
+
+    subscribe(topic, handler) {
+      let entry = byTopic.get(topic);
+      if (!entry) {
+        entry = { handlers: new Set(), onMessage: null };
+        pubsub.subscribe(topic);
+        entry.onMessage = (evt) => {
+          // gossipsub dispatches `message` as a CustomEvent, so the payload
+          // is at `evt.detail.data` -- NOT `evt.data`, and not a bare
+          // Uint8Array. Reading the wrong one yields undefined, `decode`
+          // returns null, and the peer looks like it never answered: a
+          // silent failure with no error anywhere.
+          const detail = evt?.detail ?? evt;
+          if (detail?.topic !== undefined && detail.topic !== topic) return;
+          const data = detail?.data;
+          if (data == null) return;
+          for (const h of [...entry.handlers]) {
+            try { h({ data }); } catch { /* one bad handler must not stop the rest */ }
+          }
+        };
+        pubsub.addEventListener("message", entry.onMessage);
+        byTopic.set(topic, entry);
+      }
+      entry.handlers.add(handler);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        entry.handlers.delete(handler);
+        // Leave the topic subscribed but stop listening once nobody wants it:
+        // `unsubscribe()` makes gossipsub apply a prune backoff, and
+        // re-subscribing inside that window is refused. Keeping the
+        // subscription avoids that entirely.
+        if (entry.handlers.size === 0) {
+          pubsub.removeEventListener?.("message", entry.onMessage);
+          byTopic.delete(topic);
+        }
+      };
+    },
+
+    // Serialised per topic and always resolved: nothing in this module awaits
+    // a publish, and an unhandled rejection from NoPeersSubscribedToTopic
+    // would surface as a console error on every chunk offered to an empty
+    // room -- which is the normal state of a tab that has not met anyone.
+    publish(topic, bytes) {
+      const prev = publishQueue.get(topic) ?? Promise.resolve();
+      const next = prev.then(async () => {
+        try {
+          return await pubsub.publish(topic, bytes, {
+            allowPublishToZeroTopicPeers: true,
+            ignoreDuplicatePublishError: true,
+          });
+        } catch (e) {
+          // Duplicate and no-peers are ordinary here, not failures.
+          if (onError && !/Duplicate|NoPeersSubscribedToTopic/.test(e?.message ?? "")) {
+            onError(e);
+          }
+          return { recipients: [] };
+        }
+      }).catch(() => ({ recipients: [] }));
+      publishQueue.set(topic, next);
+      return next;
+    },
+  };
+};
+
 export const libp2pNode = async ({
   onError = null,
   relay = "",
@@ -572,72 +658,7 @@ export const libp2pNode = async ({
     });
     if (onError) node.addEventListener?.("error", (e) => onError(e));
 
-    const pubsub = node.services.pubsub;
-    // One listener per topic, not per subscription: `subscribe()` is void and
-    // idempotent, so the handler count is this module's to manage.
-    const byTopic = new Map();
-    const publishQueue = new Map(); // topic -> Promise, to serialise per topic
-
-    const transport = {
-      subscribe(topic, handler) {
-        let entry = byTopic.get(topic);
-        if (!entry) {
-          entry = { handlers: new Set(), onMessage: null };
-          pubsub.subscribe(topic);
-          entry.onMessage = (evt) => {
-            const detail = evt?.detail ?? evt;
-            if (detail?.topic !== undefined && detail.topic !== topic) return;
-            const data = detail?.data;
-            if (data == null) return;
-            for (const h of [...entry.handlers]) {
-              try { h({ data }); } catch { /* one bad handler must not stop the rest */ }
-            }
-          };
-          pubsub.addEventListener("message", entry.onMessage);
-          byTopic.set(topic, entry);
-        }
-        entry.handlers.add(handler);
-        let released = false;
-        return () => {
-          if (released) return;
-          released = true;
-          entry.handlers.delete(handler);
-          // Leave the topic subscribed but stop listening once nobody wants
-          // it: `unsubscribe()` makes gossipsub apply a prune backoff, and
-          // re-subscribing inside that window is refused. Keeping the
-          // subscription avoids that entirely.
-          if (entry.handlers.size === 0) {
-            pubsub.removeEventListener?.("message", entry.onMessage);
-            byTopic.delete(topic);
-          }
-        };
-      },
-
-      // Serialised per topic and always resolved: a caller of this module
-      // awaits nothing here, and an unhandled rejection from
-      // NoPeersSubscribedToTopic would surface as a console error on every
-      // chunk we offer to an empty room.
-      publish(topic, bytes) {
-        const prev = publishQueue.get(topic) ?? Promise.resolve();
-        const next = prev.then(async () => {
-          try {
-            return await pubsub.publish(topic, bytes, {
-              allowPublishToZeroTopicPeers: true,
-              ignoreDuplicatePublishError: true,
-            });
-          } catch (e) {
-            // Duplicate and no-peers are ordinary here, not failures.
-            if (onError && !/Duplicate|NoPeersSubscribedToTopic/.test(e?.message ?? "")) {
-              onError(e);
-            }
-            return { recipients: [] };
-          }
-        }).catch(() => ({ recipients: [] }));
-        publishQueue.set(topic, next);
-        return next;
-      },
-    };
-
+    const transport = gossipsubTransport(node.services.pubsub, { onError });
     if (relay) {
       await circuitMod.circuitRelay().relayListen?.(node.services.relay).catch(() => {});
     }

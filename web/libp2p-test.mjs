@@ -19,7 +19,8 @@ import { dirname, join } from "node:path";
 import {
   FRAME_BYTES, MIN_FRAME_BYTES, MAX_FRAME_BYTES, MAX_CHUNK_BYTES,
   Libp2pError, asWitness, encode, decode, topicOf,
-  libp2pFetcher, serveChunks, LIBP2P_EXPOSURE, LIBP2P_VERSIONS,
+  libp2pFetcher, serveChunks, gossipsubTransport,
+  LIBP2P_EXPOSURE, LIBP2P_VERSIONS,
 } from "./kant-libp2p.mjs";
 
 /** The same unwrapping the module does, so tests decode what it decodes. */
@@ -131,6 +132,7 @@ function strictBus() {
   const listeners = new Map();
   return {
     subs,
+    listeners,
     publishCalls: 0,
     pubsub: {
       subscribe (topic) { if (!subs.has(topic)) subs.set(topic, new Set()); },
@@ -530,7 +532,7 @@ t("a gossipsub subscribe returns nothing, so unsubscribe is ours", () => {
   assert.equal(b.subs.get("t").size, 0, "subscribe alone adds no handler");
 });
 
-t("gossipsub publish throws NoPeersSubscribedToTopic when alone", async () => {
+await ta("gossipsub publish throws NoPeersSubscribedToTopic when alone", async () => {
   const b = strictBus();
   let msg = "";
   try { await b.pubsub.publish("t", new Uint8Array([1])); }
@@ -538,10 +540,10 @@ t("gossipsub publish throws NoPeersSubscribedToTopic when alone", async () => {
   assert.match(msg, /NoPeersSubscribedToTopic/);
   // ...and the per-publish opt is what lifts it, which is why the adapter
   // must pass it: a browser tab with no peers is the normal case.
-  await b.pubsub.publish("t", new Uint8Array([1]), { allowPublishToZeroTopicPeers: true });
+  await b.pubsub.publish("t", new Uint8Array([2]), { allowPublishToZeroTopicPeers: true });
 });
 
-t("gossipsub publish throws Duplicate on a repeat", async () => {
+await ta("gossipsub publish throws Duplicate on a repeat", async () => {
   const b = strictBus();
   await b.pubsub.publish("t", new Uint8Array([1, 2]), { allowPublishToZeroTopicPeers: true });
   let msg = "";
@@ -553,7 +555,7 @@ t("gossipsub publish throws Duplicate on a repeat", async () => {
   await b.pubsub.publish("t", new Uint8Array([1, 3]), { allowPublishToZeroTopicPeers: true });
 });
 
-t("frames of one chunk are distinct messages, so none is a duplicate", async () => {
+t("frames of one chunk are distinct messages, so none is a duplicate", () => {
   const c = bytes(4000, 53);
   const w = cidOf(c);
   const topic = topicOf(ROOM, MW);
@@ -578,13 +580,189 @@ t("the adapter reads evt.detail.data, not evt.data", () => {
   assert.equal(evt.data, undefined);
 });
 
-t("fetchChunk exposes close() and its topic", () => {
+await ta("a CustomEvent-delivered frame reaches the fetcher", async () => {
+  // The end-to-end version of the assertion above. gossipsub 17.1.2 dispatches
+  // `message` as a CustomEvent whose `detail` is `{ topic, data }`. If any
+  // link in the chain reads `evt.data` instead of `evt.detail.data`, the
+  // handler runs, decodes nothing, and the peer looks silent -- which is
+  // exactly the bug the first draft of the adapter had.
+  const topic = topicOf(ROOM, MW);
+  const wrong = bytes(128, 61);      // valid bytes, NOT the chunk asked for
+  // Ask for a name the reply does NOT hash to: that is the whole point.
+  // (Deriving w from `wrong` would make the answer self-consistent and the
+  // fetcher would be right to return it.)
+  const w = hex(bytes(32, 67));
+  const handlers = new Set();
+
+  const transport = {
+    subscribe(_t, h) { handlers.add(h); },
+    // Answer the ask with wrong bytes, delivered as a CustomEvent on a
+    // microtask, the way a real router dispatches.
+    async publish(t, bytes) {
+      queueMicrotask(() => {
+        const ask = decode(bytes);
+        if (!ask || ask.tag !== 1) return;
+        const reply = encode({
+          tag: 2, witness: ask.witness, index: 0, total: 1, payload: wrong,
+        });
+        for (const h of handlers) {
+          h(Object.assign(new Event("message"), { detail: { topic: t, data: reply } }));
+        }
+      });
+      return { recipients: [] };
+    },
+  };
+
+  const fetchChunk = libp2pFetcher(transport, {
+    topic, cidOf, frameBytes: 1024, timeoutMs: 2000,
+  });
+  const got = await fetchChunk(w).then((x) => x, (e) => e);
+  fetchChunk.close();
+  assert.ok(got instanceof Libp2pError,
+    `the frame never reached the checker (got ${got?.constructor?.name})`);
+  assert.match(got.message, /not it/,
+    "a CustomEvent-delivered frame must be read and checked against its witness");
+});
+console.log("the real adapter");
+// These drive `gossipsubTransport` -- the function that actually knows
+// js-libp2p's API -- rather than a stand-in. A test that exercises only the
+// fake leaves the integration itself unverified, which is how the first
+// draft's `evt.data` bug survived a green suite.
+await ta("the adapter delivers a CustomEvent's payload to a handler", async () => {
+  const b = strictBus();
+  const t = gossipsubTransport(b.pubsub);
+  const got = [];
+  t.subscribe("kant-file/1/room/witness", (m) => got.push(decode(m.data)));
+
+  // Dispatch exactly what gossipsub 17.1.2 dispatches.
+  for (const fn of b.listeners.keys()) {
+    fn(Object.assign(new Event("message"), {
+      detail: { topic: "kant-file/1/room/witness", data: encode({ tag: 2, witness: MW, index: 0, total: 1, payload: new Uint8Array([1, 2]) }) },
+    }));
+  }
+  assert.equal(got.length, 1, "a CustomEvent payload must reach the handler");
+  assert.equal(got[0].tag, 2);
+});
+
+await ta("the adapter ignores a frame for a topic it is not on", async () => {
+  const b = strictBus();
+  const t = gossipsubTransport(b.pubsub);
+  const got = [];
+  t.subscribe("mine", (m) => got.push(m));
+  for (const fn of b.listeners.keys()) {
+    fn(Object.assign(new Event("message"), { detail: { topic: "theirs", data: new Uint8Array([9]) } }));
+  }
+  assert.equal(got.length, 0, "a frame for another topic must not be delivered");
+});
+
+await ta("the adapter absorbs a publish that would otherwise reject", async () => {
+  // A router that refuses EVERY publish, regardless of the per-publish opts.
+  // The strict fake honours allowPublishToZeroTopicPeers, so it never throws
+  // here and cannot test this -- an earlier version of this assertion passed
+  // against a code path that was never taken.
+  const exploding = {
+    subscribe () {},
+    unsubscribe () {},
+    addEventListener () { return { __fn: null }; },
+    removeEventListener () {},
+    async publish () { throw new Error("PublishError.NoPeersSubscribedToTopic"); },
+  };
+  const t = gossipsubTransport(exploding);
+  const result = await t.publish("empty-topic", new Uint8Array([1]));
+  assert.deepEqual(result, { recipients: [] },
+    "a refused publish resolves to an empty recipient list rather than throwing");
+  // Nothing may escape as an unhandled rejection.
+  let unhandled = null;
+  const onUnhandled = (e) => { unhandled = e; };
+  process.on("unhandledRejection", onUnhandled);
+  // Fire and forget, exactly as `serveChunks` and the drop path do: nobody
+  // awaits a publish. Awaiting it here would swallow the rejection at the
+  // await and the missing .catch() would go unnoticed -- which is what
+  // happened the first time this assertion was written.
+  t.publish("empty-topic", new Uint8Array([2]));
+  t.publish("empty-topic", new Uint8Array([3]));
+  await new Promise((r) => setTimeout(r, 80));
+  // The unhandled check above is the point; this line just proves the
+  // adapter resolved rather than hung.
+  process.off("unhandledRejection", onUnhandled);
+  assert.equal(unhandled, null, `publish leaked an unhandled rejection: ${unhandled}`);
+});
+
+await ta("the adapter gives one listener per topic, not per subscription", async () => {
+  const b = strictBus();
+  const t = gossipsubTransport(b.pubsub);
+  const off1 = t.subscribe("x", () => {});
+  const off2 = t.subscribe("x", () => {});
+  assert.equal(b.listeners.size, 1, "two subscriptions on one topic, one listener");
+  assert.equal(b.subs.get("x").size, 0, "the topic is subscribed once");
+  off1(); off2();
+  assert.equal(b.listeners.size, 0, "releasing both removes the listener");
+});
+
+t("the adapter refuses something that is not a router", () => {
+  assert.throws(() => gossipsubTransport(null), Libp2pError);
+  assert.throws(() => gossipsubTransport({}), Libp2pError);
+});
+
+await ta("two asks for the same chunk are distinct messages", async () => {
+  // gossipsub de-duplicates by message bytes and publish() throws
+  // PublishError.Duplicate. Without a nonce in the request, a retry after a
+  // timeout would be byte-identical to the first ask and would be refused --
+  // so the chunk could only ever be requested ONCE per process, ever.
+  // This mutation-checks the nonce: removing it fails here.
   const b = bus();
   const topic = topicOf(ROOM, MW);
-  const f = libp2pFetcher(b.transport, { topic, cidOf });
-  assert.equal(f.topic, topic);
-  f.close();
-  f.close(); // idempotent
+  const fetchChunk = libp2pFetcher(b.transport, {
+    topic, cidOf, frameBytes: 1024, timeoutMs: 120,
+  });
+  // No server: both asks go unanswered and time out, which is the point --
+  // both must still have been PUBLISHED, and neither may be a duplicate.
+  await assert.rejects(() => fetchChunk(MW), /no peer answered/);
+  await assert.rejects(() => fetchChunk(MW), /no peer answered/);
+
+  const asks = b.delivered.filter((m) => decode(m.bytes)?.tag === 1);
+  assert.equal(asks.length, 2, `expected 2 published asks, saw ${asks.length}`);
+  const keys = new Set(asks.map((m) => bytesToKey(m.bytes)));
+  assert.equal(keys.size, 2, "the two asks were byte-identical, so gossipsub would refuse the second");
+  fetchChunk.close();
+});
+
+await ta("the ask is retried once for a peer that arrives late", async () => {
+  // pubsub has no replay: a request published into an empty room is simply
+  // lost. The reader usually arrives before the holder does, so one re-ask
+  // partway through the window is what makes the swarm path usable at all.
+  const b = bus();
+  const topic = topicOf(ROOM, MW);
+  const c = bytes(64, 59);
+  const w = cidOf(c);
+
+  // Start the fetch FIRST, so its opening ask goes out into an empty topic
+  // and is lost. The holder subscribes afterwards and can only ever see the
+  // re-ask -- which is the behaviour under test.
+  const fetchChunk = libp2pFetcher(b.transport, {
+    topic, cidOf, frameBytes: 1024, timeoutMs: 4000,
+  });
+  const pending = fetchChunk(w);
+
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(b.sent().filter((m) => m.msg?.tag === 1).length, 1,
+    "the opening ask should have gone out before the holder existed");
+
+  b.transport.subscribe(topic, async (msg) => {
+    const m = decode(bytesOf(msg));
+    if (!m || m.tag !== 1 || m.witness !== w) return;
+    await b.transport.publish(topic, encode({
+      tag: 2, witness: w, index: 0, total: 1, payload: c,
+    }));
+  });
+
+  const got = await pending;
+  fetchChunk.close();
+  assert.deepEqual(Array.from(got), Array.from(c));
+
+  const asks = b.sent().filter((m) => m.msg?.tag === 1);
+  assert.ok(asks.length >= 2,
+    `a peer that arrives late needs a re-ask; saw ${asks.length} ask(s)`);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
