@@ -11,7 +11,8 @@
 //   wrangler deploy --name kant-zk-relay-wasm --asset "ASSETS=./web"
 //
 // The WASM binary is fetched from the published URL at startup and cached in
-// CF KV namespace `KANT_WASM`.  It is verified against the golden vectors on
+// CF KV namespace `WASM_KV` (optional; unbound by default).  The binary is
+// verified against the golden vectors on
 // every instantiation (see web/wasm-test.mjs for the validation logic).
 
 const VERSION = "1.0.0";
@@ -190,42 +191,50 @@ class Room {
   }
 }
 
-// WASM kernel loader — fetches and instantiates the Lean kernel
-handleWasmLoad = async (env) => {
-  let wasmBytes;
+// WASM kernel loader — fetches and instantiates the Lean kernel.
+//
+// `const` matters here and was missing: a bare `handleWasmLoad = ...` is an
+// assignment to an undeclared name, which is a ReferenceError at module
+// evaluation in the strict mode every ES module runs in. The whole worker
+// fails to load with it, and wrangler refuses the deploy with code 10021 —
+// which is why this file could not be deployed at all.
+//
+// Note the binding is `WASM_KV` (the header comment above says `KANT_WASM`,
+// which is stale). It is optional: the token in ~/.cloudflare cannot create KV
+// namespaces, so it is usually unbound, and every use is guarded below. A
+// cache write that throws must not abandon a fetch that already succeeded.
+const handleWasmLoad = async (env) => {
+  const kv = env?.WASM_KV ?? null;
+  const cache = async (bytes) => {
+    try { await kv?.put(WASM_KV_KEY, bytes); } catch { /* cache is optional */ }
+  };
 
   // Try KV cache first, then URL fetch, then published IPFS/CF Pages
-  try {
-    wasmBytes = await env.WASM_KV.get(WASM_KV_KEY, "arrayBuffer");
-    if (wasmBytes) {
-      return await WebAssembly.instantiate(wasmBytes, {});
-    }
-  } catch (e) {
-    // KV not available, fall through
+  if (kv) {
+    try {
+      const hit = await kv.get(WASM_KV_KEY, "arrayBuffer");
+      if (hit) return await WebAssembly.instantiate(hit, {});
+    } catch { /* fall through to the network */ }
   }
 
   try {
     const resp = await fetch(WASM_URL);
     if (resp.ok) {
-      wasmBytes = await resp.arrayBuffer();
-      await env.WASM_KV.put(WASM_KV_KEY, wasmBytes);
-      return await WebAssembly.instantiate(wasmBytes, {});
+      const bytes = await resp.arrayBuffer();
+      await cache(bytes);
+      return await WebAssembly.instantiate(bytes, {});
     }
-  } catch (e) {
-    // URL fetch failed, fall through
-  }
+  } catch { /* URL fetch failed, fall through */ }
 
   // Last resort: published IPFS
   try {
     const resp = await fetch("https://ipfs.solfunmeme.com/ipfs/QmWasmKernel");
     if (resp.ok) {
-      wasmBytes = await resp.arrayBuffer();
-      await env.WASM_KV.put(WASM_KV_KEY, wasmBytes);
-      return await WebAssembly.instantiate(wasmBytes, {});
+      const bytes = await resp.arrayBuffer();
+      await cache(bytes);
+      return await WebAssembly.instantiate(bytes, {});
     }
-  } catch (e) {
-    // IPFS failed
-  }
+  } catch { /* IPFS failed */ }
 
   throw new Error("WASM kernel not available from any source");
 };
@@ -301,7 +310,9 @@ export default {
       const resp = await fetch(WASM_URL);
       if (resp.ok) {
         const wasmBytes = await resp.arrayBuffer();
-        await env.WASM_KV.put(WASM_KV_KEY, wasmBytes);
+        // Same rule as handleWasmLoad: the KV binding is optional, and a
+        // cache write that throws must not swallow a fetch that worked.
+        try { await env?.WASM_KV?.put(WASM_KV_KEY, wasmBytes); } catch { /* unbound */ }
         console.log("WASM cache refreshed");
       }
     } catch (e) {
