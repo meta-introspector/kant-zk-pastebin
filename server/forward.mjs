@@ -23,13 +23,23 @@
 //   node server/forward.mjs --invite '<link>' \
 //       --from https://solana.solfunmeme.com/relay \
 //       --to   https://kant-zk-relay.jmikedupont2.workers.dev \
-//       [--interval 10] [--state f.json]
+//       [--interval 60] [--wait 10] [--max-interval 900] [--state f.json]
 //
 // The invite's room (a digest of the secret, which neither relay ever
 // learns) names the same room on both relays: that is the interlink.
+//
+// Pacing: the default interval is deliberately NOT 10s.  The destination
+// may be a Durable Object on Cloudflare's free tier, which bills storage
+// *duration*, so a bridge that long-polls `wait` seconds every `interval`
+// seconds holds the room open a `wait/interval` fraction of the time —
+// at 10/10 that is four rooms held open permanently, in the normal
+// healthy case, not under failure.  The long poll is therefore capped to
+// a third of the period, and a failure backs off exponentially rather
+// than retrying at the same cost.  See server/backoff.mjs.
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { RelayClient } from "../web/kant-net.mjs";
+import { Backoff, sleep, holdFor } from "./backoff.mjs";
 
 // ------------------------------------------------------------- arguments
 
@@ -61,13 +71,24 @@ const error = (m, e) => console.error(`${new Date().toISOString()} error forward
 // --------------------------------------------------------------- bridge
 
 class Bridge {
-  constructor({ from, to, room, statePath, interval = 10 }) {
+  // `interval`, `wait` and `maxInterval` arrive in SECONDS, from the
+  // command line.  Backoff works in milliseconds, so convert here, once.
+  constructor({ from, to, room, statePath, interval = 60, wait = 10,
+                maxInterval = 900 }) {
     this.src = new RelayClient(from);
     this.dst = new RelayClient(to);
     this.from = from;
     this.to = to;
     this.room = room;
-    this.interval = Math.max(1, Number(interval) || 10);
+    this.interval = Math.max(1, Number(interval) || 60);
+    // Never hold the relay open longer than our share of the period.
+    this.wait = holdFor(this.interval, wait);
+    // Each destination gets its own pacer, so one dead relay cannot
+    // stretch the other bridge's cadence.
+    this.pace = new Backoff({
+      base: this.interval * 1000,
+      cap: Math.max(1, Number(maxInterval) || 900) * 1000,
+    });
     this.statePath = statePath;
     this.state = existsSync(statePath)
       ? JSON.parse(readFileSync(statePath, "utf8"))
@@ -106,7 +127,11 @@ const invite = arg("invite", null);
 const roomsDir = arg("rooms", null);
 const from = arg("from", null);
 const to = arg("to", null);
-const interval = Number(arg("interval", 10)) || 10;
+// Default 60s, not 10s: see the header.  A 10s period with a 10s long
+// poll holds a free-tier Durable Object open ~100% of the time.
+const interval = Number(arg("interval", 60)) || 60;
+const wait = Number(arg("wait", 10)) || 0;
+const maxInterval = Number(arg("max-interval", 900)) || 900;
 const once = arg("once", false);
 
 const { witness, hexDecode } = await import("../web/kantzk.mjs");
@@ -121,7 +146,7 @@ const roomOfInvite = (link) => {
 async function pump(fwd, label) {
   for (;;) {
     try {
-      const out = await fwd.src.poll(fwd.room, { wait: 10 });
+      const out = await fwd.src.poll(fwd.room, { wait: fwd.wait });
       let lines = out.lines ?? [];
       // Loop guard: never re-post a line this bridge put on the source.
       if (fwd.pushed?.size) lines = lines.filter((l) => !fwd.pushed.has(l));
@@ -132,10 +157,27 @@ async function pump(fwd, label) {
         fwd.save();
         info(`${label}: carried ${lines.length} line(s)`, `total ${fwd.state.carried}`);
       }
+      fwd.pace.ok();
     } catch (e) {
-      error(`${label} poll cycle failed`, e.message ?? e);
-      await new Promise((r) => setTimeout(r, fwd.interval * 1000));
+      const { delay, kind, status, failures } = fwd.pace.fail(e);
+      // A quota-exhausted destination is not going to recover by being
+      // asked again, so name the wait in the log: a line every 10s
+      // saying "500" reads as an outage rather than as a bridge
+      // correctly sitting out its budget window.
+      if (kind === "quota") {
+        error(`${label}: destination is out of its Durable Objects duration budget`
+          + `${status ? ` (${status})` : ""} — not retrying for ${Math.round(delay / 1000)}s`,
+          e.message ?? e);
+      } else if (failures === 1 || failures % 8 === 0) {
+        error(`${label} poll cycle failed`, `${e.message ?? e} — retrying in ${Math.round(delay / 1000)}s`);
+      }
+      await sleep(delay);
+      continue;
     }
+    // A successful cycle: the poll already blocked for up to `wait`
+    // seconds, so only the remainder of the period is left to wait.
+    const spent = fwd.wait * 1000;
+    if (fwd.interval * 1000 > spent) await sleep(fwd.interval * 1000 - spent);
   }
 }
 
@@ -145,13 +187,15 @@ async function runBridge(room, fromRelay, toRelay, stateDir, { both = false } = 
     const b = new Bridge({
       from: from2, to: to2, room,
       statePath: `${stateDir}/kant-forward-${r8}-${tag}.json`,
-      interval,
+      interval, wait, maxInterval,
     });
     b.pushed = new Set(); // lines this side has posted to its destination
     return b;
   };
   const fwd = mk(fromRelay, toRelay, both ? "ab" : "fwd");
   info(`room ${r8}…`, both ? `${fromRelay} <-> ${toRelay}` : `${fromRelay} -> ${toRelay}`);
+  info(`  polling every ${interval}s, holding at most ${holdFor(interval, wait)}s`
+    + `, backing off to ${maxInterval}s`);
   if (both) {
     const back = mk(toRelay, fromRelay, "ba");
     fwd.other = back; back.other = fwd;
@@ -186,7 +230,12 @@ if (roomsDir) {
   const stateDir = arg("state-dir", "/var/lib/kant-zk/forward");
   mkdirSync(stateDir, { recursive: true });
   const running = new Map(); // room8 -> true
+  // Returns the bridges it started, so `--once` can await them.  It used
+  // to return nothing and fire-and-forget, which meant `process.exit(0)`
+  // below ran before any relay had been contacted: `--rooms … --once`
+  // reported the rooms it found and then exited having done nothing.
   const scan = () => {
+    const started = [];
     for (const f of readdirSync(roomsDir).filter((f) => f.endsWith(".json"))) {
       let cfg;
       try { cfg = JSON.parse(readFileSync(`${roomsDir}/${f}`, "utf8")); } catch { continue; }
@@ -197,18 +246,23 @@ if (roomsDir) {
       running.set(r8, true);
       const pairs = cfg.forward?.length ? cfg.forward : [{ from: defaultFrom, to: defaultTo }];
       for (const p of pairs) {
-        runBridge(room, p.from, p.to, stateDir, { both: Boolean(p.both ?? cfg.both ?? arg("both", false)) }).catch((e) => {
+        started.push(runBridge(room, p.from, p.to, stateDir, { both: Boolean(p.both ?? cfg.both ?? arg("both", false)) }).catch((e) => {
           error(`bridge ${r8}… died`, e.message ?? e);
           running.delete(r8); // allow rescan to restart it
-        });
+        }));
       }
       info(`watching room ${r8}… (${f})`, `${pairs.length} bridge(s)`);
     }
+    return started;
   };
-  scan();
-  if (!once) setInterval(scan, 15000);
+  const firstScan = scan();
+  if (once) {
+    // Carry every backlog, report what happened, and only then exit.
+    await Promise.all(firstScan);
+    process.exit(0);
+  }
+  setInterval(scan, 15000);
   setInterval(() => {}, 1 << 30);
-  if (once) process.exit(0);
 } else {
   if (!invite || !from || !to) {
     console.error(`usage: node server/forward.mjs --invite '<link>' --from <relay> --to <relay> [--both]

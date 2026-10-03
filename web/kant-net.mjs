@@ -386,8 +386,25 @@ export class RelayClient {
     clearTimeout(timeoutId);
     
     if (!r.ok) {
-      this.log.error("relay", `${what} was refused (${r.status})`, url);
-      throw new Error(`relay ${what} failed: ${r.status}`);
+      // The relay's own explanation is the most useful thing in the
+      // error: a Cloudflare Durable Object that has run out of its free
+      // daily duration says exactly that in the body, and a client that
+      // reports only "500" cannot tell that apart from a transient fault
+      // — so it retries, and retries, and spends the rest of the budget
+      // finding out.  Read the body, but bound it: it is untrusted, and
+      // it may not be JSON.
+      let detail = "";
+      try {
+        detail = (await r.text()).trim().slice(0, 200);
+      } catch { /* body already consumed, or the connection died */ }
+      this.log.error("relay", `${what} was refused (${r.status})`, detail || url);
+      const err = new Error(
+        `relay ${what} failed: ${r.status}${detail ? ` — ${detail}` : ""}`,
+      );
+      // The status as a property too, so callers can branch on it without
+      // parsing the message text.
+      err.status = r.status;
+      throw err;
     }
     return r;
   }
