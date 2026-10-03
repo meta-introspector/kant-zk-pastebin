@@ -4,10 +4,17 @@
 // working thunk system and `tasks/thunk-server/WASM.md` proposes replacing it.
 // Before replacing something, pin what it actually does.
 //
-// The tests below are expected to FAIL against the current implementation.
-// That is the point: each one is a red-to-green gate for phase 0 of WASM.md,
-// not a description of working code. A test that passes here means the loader
-// changed, and the comment saying so needs updating.
+// Each one is a red-to-green gate for phase 0 of WASM.md, not a description of
+// working code. A test that passes here means the loader changed, and the
+// comment saying so needs updating.
+//
+// Phase 0 landed 2026-10-03 (tasks/thunk-server/SANDBOX.md): 8 of 10 are green.
+// What is fixed: the loader throws no more, `export` is documented as out of
+// dialect, and the vm's `module` is the object read back. What is not: the id
+// is still a 16-char prefix where `asWitness` wants 64, which is phase 1.
+// The sandbox those two tests cover is now covered properly by
+// server/sandbox-test.mjs -- they passed on the first fix while three escapes
+// were still open.
 
 import { Thunk } from "./thunk.mjs";
 

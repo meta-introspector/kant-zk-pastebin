@@ -76,10 +76,30 @@ t("thunk-id-truncated goes red when the truncation is removed", () =>
   mustFlip("thunk-id-truncated", read("server/thunk.mjs").replace(/\.slice\(0,\s*16\)/, ".slice(0, 64)"),
     "a full-length hash"));
 
-t("apply-double-wraps goes red when apply stops double-wrapping", () =>
-  mustFlip("apply-double-wraps",
-    read("server/thunk.mjs").replace(/#state\s*=\s*this\.#compiled\.transducers\.reduce\(/, "#state = (({state}) => state)("),
-    "an apply that unwraps"));
+t("apply-unwraps goes red when the transducer is called as a method", () =>
+  // Calling it as `transducers.reduce(...)` binds `this` to the host-side
+  // object, which is a realm bridge back into the host global. The claim is
+  // about the call being unqualified, so the mutation puts the method call back.
+  mustFlip("apply-unwraps",
+    read("server/thunk.mjs").replace("const { reduce } = this.#compiled.transducers;",
+                                      "const reduce = this.#compiled.transducers.reduce.bind(null);"),
+    "a bound call site"));
+
+t("sandbox-has-no-require goes red when createRequire comes back", () =>
+  mustFlip("sandbox-has-no-require",
+    read("server/thunk.mjs").replace("const vm = await import(\"node:vm\");",
+      "const vm = await import(\"node:vm\");\n  const { createRequire } = await import(\"node:module\");"),
+    "a createRequire in the loader"));
+
+t("sandbox-refuses-console goes red when console is left in place", () =>
+  mustFlip("sandbox-refuses-console",
+    read("server/thunk.mjs").replace(/try \{ delete globalThis\.console; \} catch \(e\) \{\}/, ""),
+    "an un-deleted console"));
+
+t("sandbox-refuses-dynamic-import goes red when the guard is removed", () =>
+  mustFlip("sandbox-refuses-dynamic-import",
+    read("server/thunk.mjs").replace(/const forbidden = source\.match\([\s\S]*?\);/, "const forbidden = null;"),
+    "no load-time import guard"));
 
 t("snapshot-deep-copies goes red when snapshot stops copying", () =>
   mustFlip("snapshot-deep-copies",

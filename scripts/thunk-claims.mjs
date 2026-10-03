@@ -138,30 +138,69 @@ export const CLAIMS = [
 
   // ── thunk mechanics, including the three known defects ────────
   {
-    id: "thunk-load-throws",
-    claim: "Thunk.load throws on a valid source, so nothing loads today",
-    doc: "WASM.md, SYSTEM.md",
-    kind: "defect",
+    id: "thunk-loads",
+    claim: "Thunk.load loads a valid source; phase 0 fixed the loader",
+    doc: "WASM.md, SANDBOX.md",
+    kind: "health",
     input: RUN(),
     expect: true,
     probe: async () => {
       const { Thunk } = await import("../server/thunk.mjs");
-      try {
-        await Thunk.load("module.exports = { reduce: (s) => s };", "probe", "0.0.0");
-        return false;
-      } catch {
-        return true;
-      }
+      const t = await Thunk.load(
+        "module.exports.initialState = { n: 0 };\n" +
+        "module.exports.reduce = (s, i) => ({ state: { n: s.n + (i.by ?? 1) }, effects: [] });",
+        "probe", "0.0.0");
+      t.apply({ by: 2 });
+      return t.apply({ by: 3 }).state.n === 5;
     },
   },
   {
-    id: "apply-double-wraps",
-    claim: "apply() stores the transducer's {state, effects} return as the new state",
-    doc: "WASM.md, THUNK-CYCLE.md",
-    kind: "defect",
+    id: "sandbox-has-no-require",
+    claim: "the vm context is built empty apart from module/exports, so require is unreachable",
+    doc: "SANDBOX.md",
+    kind: "health",
     input: T("server/thunk.mjs"),
     expect: true,
-    probe: (src) => /#state\s*=\s*this\.#compiled\.transducers\.reduce\(/.test(src),
+    // `module` must be created inside the context with runInContext. Passing a
+    // host object in is a realm bridge, which is how the first fix still leaked.
+    probe: (src) =>
+      /runInContext\("var module = \{ exports: \{\} \}; var exports = module\.exports;"/.test(src) &&
+      !/createRequire/.test(src),
+  },
+  {
+    id: "sandbox-refuses-console",
+    claim: "console is deleted from the context before a thunk loads",
+    doc: "SANDBOX.md",
+    kind: "health",
+    input: T("server/thunk.mjs"),
+    expect: true,
+    probe: (src) => /delete globalThis\.console/.test(src),
+  },
+  {
+    id: "sandbox-refuses-dynamic-import",
+    claim: "a source containing import( is refused at load time, before compilation",
+    doc: "SANDBOX.md",
+    kind: "health",
+    input: T("server/thunk.mjs"),
+    expect: true,
+    // Refusing during execution does not work: ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING
+    // ignores the thunk's try/catch and kills the host process.
+    // The guard is one regex literal covering both spellings, so check that it
+    // names both rather than that it mentions `import.meta` verbatim -- the
+    // source says `import\s*\.\s*meta`.
+    probe: (src) =>
+      /const forbidden = source\.match\(/.test(src) &&
+      /import\\s\*\\\(/.test(src) &&
+      /meta/.test(src),
+  },
+  {
+    id: "apply-unwraps",
+    claim: "apply() unwraps {state, effects}, so state accumulates across calls",
+    doc: "WASM.md, THUNK-CYCLE.md",
+    kind: "health",
+    input: T("server/thunk.mjs"),
+    expect: true,
+    probe: (src) => /const \{ reduce \} = this\.#compiled\.transducers;/.test(src),
   },
   {
     id: "snapshot-deep-copies",

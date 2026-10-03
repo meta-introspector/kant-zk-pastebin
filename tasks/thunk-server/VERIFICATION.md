@@ -6,9 +6,10 @@ depends_on: thunk-server
 
 # Verification: the claim ledger
 
-**Date:** 2026-10-03 · **Status:** green (23/23) · **Companion to**
+**Date:** 2026-10-03 · **Status:** green (26/26) · **Companion to**
 [SYSTEM.md](SYSTEM.md), [WASM.md](WASM.md), [IPFS-IPDL.md](IPFS-IPDL.md),
-[TOOLCHAIN-THUNKS.md](TOOLCHAIN-THUNKS.md), [THUNK-CYCLE.md](THUNK-CYCLE.md)
+[TOOLCHAIN-THUNKS.md](TOOLCHAIN-THUNKS.md), [THUNK-CYCLE.md](THUNK-CYCLE.md),
+[SANDBOX.md](SANDBOX.md)
 
 ## Why this file exists
 
@@ -57,13 +58,18 @@ which is the only way a fix can announce itself:
 
 | defect claim | asserts | goes red when |
 |---|---|---|
-| `thunk-load-throws` | `Thunk.load` still throws on valid source | phase 0 lands |
-| `thunk-id-truncated` | the id is still a 16-char prefix | the id becomes full sha256 |
-| `apply-double-wraps` | `apply()` still stores `{state, effects}` | `apply()` unwraps |
+| `thunk-id-truncated` | the id is still a 16-char prefix | the id becomes full sha256 (phase 1) |
 | `schedule-has-no-constraint` | the scheduler has no budget vocabulary | phase 6 lands |
 | `ref-never-resolved` | nothing calls a resolver on a ref target | the IPDL resolver lands |
 | `nora-wildcard-version` | `rust-unixfs` is still `version = "*"` | the version is pinned |
 | `wasm-test-reads-gitignored-dist` | the test still reads gitignored `dist/` | the test reads the embedded copy |
+
+Two defect claims already did their job. `thunk-load-throws` and
+`apply-double-wraps` went red the moment phase 0 landed, were rewritten as
+health claims (`thunk-loads`, `apply-unwraps`), and three new claims took their
+place for the sandbox: `sandbox-has-no-require`, `sandbox-refuses-console`,
+`sandbox-refuses-dynamic-import`. That is the ledger working as intended rather
+than as decoration.
 
 The CLI says which kind of red you are looking at, so a fix does not get mistaken
 for a regression:
@@ -73,11 +79,25 @@ for a regression:
 1 defect claim(s) went red — that is progress; rewrite them.
 ```
 
+## Claims pin text; tests pin behaviour
+
+The ledger's probes are mostly pattern matches over source text, and a text claim
+can only ever say "this string is still there". That is a real limit and it is
+why the behaviour has its own file: `server/sandbox-test.mjs` enumerates 13
+escapes and runs them, and it was verified to have teeth by reintroducing the
+host-object realm bridge and watching two of its cases fail.
+
+The division of labour: **a claim says the code says this, a test says the code
+does this.** Neither substitutes for the other, and the gap between them is
+where phase 0's three surviving escapes lived — the two sandbox tests in
+`server/thunk-test.mjs` went green on the first fix while `module.constructor`,
+`this.constructor` and `console` were all still open.
+
 ## The checker is tested against itself
 
-`scripts/thunk-claims-test.mjs` — 14 checks. Two of them are structural: ids are
+`scripts/thunk-claims-test.mjs` — 17 checks. Two of them are structural: ids are
 unique, and the ledger refuses to shrink below 20 claims so it cannot be
-truncated into agreement. The other twelve are **mutations**: each feeds a
+truncated into agreement. The other fifteen are **mutations**: each feeds a
 claim's real probe an input that should break it and asserts the claim goes red.
 A probe that cannot be made to fail is not a probe.
 
@@ -120,12 +140,13 @@ made-up string.
 - **Judgements.** "the api set belongs in the call id, not the thunk id" and
   "where a lens's ambient input goes" are argued, not measured. They stay in the
   Open sections of their documents, which is where an unproven claim belongs.
-- **The sandbox policy.** Phase 0 needs a decision, not a measurement: drop
-  `require` from the vm entirely, or label `js` a trusted payload. The obvious
-  fix for defect 1 is `createRequire`, and that is exactly what makes the leak
-  reachable — a thunk calling `require("node:child_process").execSync("id -u")`
-  returned `REACHED:1000`. The ledger can tell you the leak is still dormant; it
-  cannot tell you whether it should be.
+- **Whether the sandbox is *enough*.** [SANDBOX.md](SANDBOX.md) records a
+  default-deny policy and 13 enumerated escapes, all closed. `vm` is a fresh
+  realm with no host authority, not a hardened security boundary, and the
+  ledger cannot argue that difference either way.
+- **The api set that policy points at.** A `js` thunk that needs the filesystem
+  is refused today, correctly, because `THUNK-CYCLE.md` phase 3 has not landed.
+  A capability that is refused is recoverable; one that was ambient is not.
 
 ## Adding a claim
 
@@ -133,6 +154,12 @@ One entry in `CLAIMS`: an `id`, the claim in a sentence, the `doc` it backs, its
 `kind`, one input (`T` text, `B` binary, `D` derived, `RUN` for "just do it"),
 the expected value, and a **pure** probe with no file access. Then add the
 mutation to `thunk-claims-test.mjs`. A claim without a mutation is a comment.
+
+If the claim is about behaviour rather than about a string, add it as a test
+instead. `thunk-loads` is the borderline case — it runs a real thunk and checks
+the state, which is behaviour — and it is worth having in both places, because
+the behavioural version is the one that would notice a break the text version
+cannot see.
 
 `SELF` at the top of the file lists the two files excluded from the
 `ref-never-resolved` scan, because a claim that greps for a name inside its own

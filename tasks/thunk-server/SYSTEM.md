@@ -121,44 +121,51 @@ consequences for the design above:
 - an experiment is `{ thunk, hypothesis, inputs, cadence, observations, verdict }`,
   after the shape `scripts/relay-measure.mjs` established
 
-**`server/thunk.mjs` does not currently work**, which blocks everything above.
-`Thunk.load` throws `ReferenceError: require is not defined` on every input: the
-file is an ES module, so bare `require` is undefined in its scope and the sandbox
-context object `{ module, exports, require }` throws before `runInNewContext` is
-called. Two related problems — `new Function` parses its body as a script, so
-the `export function reduce` form shown in DESIGN.md is a `SyntaxError`; and the
-vm's `module` is not the object passed in, so nothing is exported back.
+**Phase 0 landed 2026-10-03: the loader works and the sandbox is decided.**
+`Thunk.load` used to throw `ReferenceError: require is not defined` on every
+input. Three separate causes, and fixing the first one is not enough:
 
-Two more findings, both from rebuilding the loader in a scratch copy:
+- the context object `{ module, exports, require }` threw in an ES module, before
+  `runInNewContext` was ever called;
+- `new Function` parses its body as a *script*, so the `export function reduce`
+  form used throughout [DESIGN.md](DESIGN.md) is a `SyntaxError`. The dialect is
+  `module.exports = ...`, documented rather than papered over;
+- the vm's `module` was not the object the loader read back.
 
-- **The `require` leak becomes reachable the moment the loader is fixed.** With
-  `createRequire` in place, a thunk doing
-  `require("node:child_process").execSync("id -u")` returned `REACHED:1000` — it
-  spawned a process and read the uid. So `createRequire`, the obvious fix for the
-  first finding, is also what makes the isolation comment false. **Phase 0 must
-  decide the sandbox policy, not just make loading work.**
-- **`apply()` double-wraps state.** `server/thunk.mjs:107` stores the
-  transducer's whole `{state, effects}` return as the new state, so a second
-  apply reads `state.n` as `undefined`. Independent of the loader.
+The sandbox policy is **default-deny**, decided and recorded in
+[SANDBOX.md](SANDBOX.md). The one-line alternative was `createRequire`, and it
+is exactly what makes the isolation comment false: with it, a thunk doing
+`require("node:child_process").execSync("id -u")` returned `REACHED:1000`.
+A `js` thunk now gets no host capability at all, and capability comes from the
+declared api set instead — the cycle already has that mechanism, so adding
+`require` would have been a second, undeclared one.
 
-I first wrote this up as "the sandbox leaks `require`, so it is remote code
-execution by design" and then, when the probe refused to demonstrate it, as "not
-currently exploitable". Both were wrong: it is not exploitable *now* because
-nothing loads, and it is exploitable as soon as that is fixed.
+**The two sandbox tests passed on the first fix and the sandbox was still open.**
+That is worth recording rather than hiding:
 
-`server/thunk-test.mjs` pins all of this as red-to-green gates (10 tests, all
-currently failing). Under wasm this whole class of question disappears: a module
-with zero imports cannot reach the host, so there is no policy to get wrong.
+| escape | why it survived | fix |
+|---|---|---|
+| `module.constructor.constructor(...)` | a host object placed in a vm context bridges to the host `Function` constructor, then to the host global | create `module`/`exports` inside the context |
+| `this.constructor.constructor(...)` in a transducer | `transducers.reduce(...)` is a method call, so `this` binds to the host object — the same bridge by another name | destructure `reduce` so the call is unqualified |
+| `console.log` from a thunk | Node injects `console` into every context it creates, and a log is a live handle on the host's stdout | `delete globalThis.console` before loading |
 
-**Every number in these five documents is re-checked by a ledger.**
-`scripts/thunk-claims.mjs` holds 23 claims, each a probe over one input with the
-value it expects; `scripts/thunk-claims-test.mjs` mutates twelve of them and
-asserts each goes red, because a probe that cannot fail is not a probe. Claims
-are either **health** (red means a regression) or **defect** (red means a known
-defect got fixed and the claim needs rewriting) — seven are defects on purpose,
-which is how a fix announces itself. What it cannot cover is stated there too:
-the fleet, the other repositories the lens numbers come from, and the
-judgements. See [VERIFICATION.md](VERIFICATION.md).
+Plus a denial of service rather than an escape: a thunk calling `import()` raises
+`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`, which ignores the thunk's own
+`try`/`catch` and kills the host process. An `importModuleDynamically` callback
+did not contain it. The refusal is at load time, before compilation.
+
+So `server/sandbox-test.mjs` enumerates 13 escapes instead of testing one, and
+asserts a pure thunk still works — a sandbox that refuses everything is an
+outage, not a sandbox. It has teeth: reintroducing the host-object bridge makes
+two of its cases fail.
+
+`server/thunk-test.mjs` is 8/10 green. The two red gates are phase 1 — the id is
+still a 16-char prefix where `asWitness` wants 64.
+
+`server/example-compactor.mjs`, the one concrete thunk, is still written in the
+ESM form and does not parse under this policy. `apply()` accepts both shapes, so
+the conversion is mechanical; it was left alone because it is a decision about
+the example rather than about the sandbox.
 
 ## Design summary (see `DESIGN.md`)
 
@@ -190,15 +197,18 @@ judgements. See [VERIFICATION.md](VERIFICATION.md).
 
 ## Next Actions
 
-0. **Make `Thunk.load` work at all** — it throws on every input today. Use
-   `createRequire(import.meta.url)` or drop `require` from the sandbox entirely
-   (preferable: the isolation comment already promises it), and make the vm's
-   `module` actually the object that gets read back. Also fix
+0. ~~**Make `Thunk.load` work at all.**~~ Done 2026-10-03, with the sandbox
+   policy decided rather than assumed — see [SANDBOX.md](SANDBOX.md) and
+   `server/sandbox-test.mjs`. Still open from the original item: fix
    `web/wasm-test.mjs`, which reads the gitignored `dist/` and so fails in a
    fresh checkout even though the embedded copy is byte-identical.
-1. Then: `server/thunk.mjs` and `server/thunk-store.mjs` with one example
-   transducer; verify load, apply, snapshot, restore, share. Per `WASM.md`, make
-   the identity the full sha256 of the module bytes while doing it.
+1. **Phase 1: content addressing.** The id is a 16-char prefix where `asWitness`
+   wants 64. Make it the full sha256 of the module bytes, and add the second key
+   `callId = {thunkId, argsHash, secretRefs}` while doing it — every later phase
+   depends on that distinction and getting it wrong retrofits a key change
+   through the cache, the sharing and the scheduler. `server/thunk-store.mjs`
+   with one example transducer in the `module.exports` dialect, plus converting
+   `server/example-compactor.mjs`.
 2. Write `server/schedule.mjs` and the systemd driver `server/scheduler.mjs`;
    update `kant-relay.service` so the systemd service runs the scheduler loop.
 3. Extend `relay.mjs` to host thunks and expose an API for scheduling.
