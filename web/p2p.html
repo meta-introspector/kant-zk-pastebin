@@ -113,14 +113,31 @@ $("join").onclick = async () => {
 function addRow(rec) {
   const tb = $("arts").querySelector("tbody");
   if ([...tb.children].some((tr) => tr.dataset.cid === rec.cid)) return;
+  // rec arrives from other peers' room lines: name, cid and size are
+  // attacker-controlled, so build the row with DOM nodes and set every value
+  // as text. Never interpolate them into innerHTML.
   const tr = document.createElement("tr");
   tr.dataset.cid = rec.cid;
-  tr.innerHTML = `<td>${rec.name ?? "?"}</td><td><a href="#" data-cid="${rec.cid}">${rec.cid.slice(0, 16)}…</a></td>` +
-    `<td>${rec.size ?? "?"}</td><td>${rec.pinned ? "ipfs" : "room"}</td>` +
-    `<td><button data-act="get">fetch</button> <button data-act="pin">repin</button></td>`;
-  tr.querySelector("a").onclick = (e) => { e.preventDefault(); $("text").value = rec.cid; };
-  tr.querySelector('[data-act="get"]').onclick = () => doGet(rec);
-  tr.querySelector('[data-act="pin"]').onclick = () => doPin(rec);
+  const cell = (...kids) => { const td = document.createElement("td"); td.append(...kids); tr.append(td); };
+  const link = document.createElement("a");
+  link.href = "#";
+  link.dataset.cid = rec.cid;
+  link.textContent = `${rec.cid.slice(0, 16)}…`;
+  const button = (act, label) => {
+    const b = document.createElement("button");
+    b.dataset.act = act;
+    b.textContent = label;
+    return b;
+  };
+  const get = button("get", "fetch"), pin = button("pin", "repin");
+  cell(`${rec.name ?? "?"}`);
+  cell(link);
+  cell(`${rec.size ?? "?"}`);
+  cell(rec.pinned ? "ipfs" : "room");
+  cell(get, " ", pin);
+  link.onclick = (e) => { e.preventDefault(); $("text").value = rec.cid; };
+  get.onclick = () => doGet(rec);
+  pin.onclick = () => doPin(rec);
   tb.prepend(tr);
 }
 
