@@ -75,35 +75,58 @@ FAIL  scripts/lean-codec-vectors.mjs   4/8 checks pass
 
 ### The ten broken suites
 
-Worth having in one place, since nothing had them. Two of them are fixed now,
-so eight remain:
+Worth having in one place, since nothing had them. **All ten are fixed.** The
+core run is 41 suites and `check-all.mjs` reports `no tracked suites are broken`.
 
-| suites | why |
-|---|---|
-| `scripts/{cli-page,diagpage,handpage,page,site}-test.mjs` | look for `scripts/index.html`; the pages live in `web/`. Broken duplicates of passing `web/` twins |
-| `scripts/carddebug-test.mjs`, `web/carddebug-test.mjs` | import `scripts/kant-debug.mjs`, which does not exist |
-| `web/cli-page-test.mjs` | a genuine assertion failure: `box.querySelectorAll is not a function` |
+| suites | why it was broken | fix |
+|---|---|---|
+| `scripts/wasm-test.mjs`, `web/wasm-test.mjs` | read gitignored `dist/` — *two* files, not the one the claim named | `scripts/embed-kernel.mjs` writes the artifacts to `web/` as tracked files; `scripts/` copy delegates |
+| `scripts/{cli-page,diagpage,handpage,page,site}-test.mjs` | resolved their HTML and config against `scripts/`; the pages live in `web/` | delegate to the `web/` copy, which is a superset of each |
+| `scripts/carddebug-test.mjs`, `web/carddebug-test.mjs` | shell out to `scripts/kant-debug.mjs`, which the big merge dropped | restored byte-for-byte from `origin/feature/lean` |
+| `web/cli-page-test.mjs` | `box.querySelectorAll is not a function`, then a transcript assertion reading markup the renderer stopped emitting | shim gained `querySelectorAll`; assertion reads the current markup |
 
-**Fixed: `scripts/wasm-test.mjs` and `web/wasm-test.mjs`.** They read gitignored
-`dist/`, so both died with ENOENT on a clean checkout — and the defect was
-incomplete, because the second dependency was `dist/kernel-vectors.json`, which
-the claim never named. `scripts/embed-kernel.mjs` (referenced by seven tracked
-files, and previously present in none of them) now writes the binary and the 59
-golden vectors into `web/` as tracked artifacts, and `--check` verifies them
-against `lake exe emitwasm`'s output. The `scripts/` copy had become
-unfixable-by-duplication — `scripts/` has no tracked `kant_kernel.wasm`, so its
-"the default candidate list finds the binary" assertion could only pass via
-`dist/` — so it now delegates to the `web/` copy instead. Both are in the core
-set; the core run is 33 suites.
+Three of these were not what the ledger said, and that is the part worth
+keeping. Each one was recorded with a *spelling* of its cause, and the spelling
+was wrong or incomplete in all three:
 
-One assertion in there was quietly unfalsifiable and is now honest. The old
-`/dist/../README.md` check could not fail: a client resolves a literal `..`
-against the URL before sending, so it never reached the mount as a traversal,
-and the percent-encoded forms the WHATWG parser does not collapse (`..%2f`) name
-a literal directory while the relay does not decode them. Removing the
-`startsWith(distRoot)` guard in `staticCandidates` left the test green.
-Measured: the traversal defence is `path.normalize` *plus* that guard, and the
-test goes red only when both are gone together — which is what it now says.
+- **`wasm-test-reads-gitignored-dist`** named `kant_kernel.wasm` only. The test
+  also read `dist/kernel-vectors.json`, so fixing the named file would have left
+  it still dying with ENOENT.
+- **"looks for `scripts/index.html`"** was wrong for `scripts/site-test.mjs`,
+  which was failing on `scripts/kant.config`.
+- **"imports `scripts/kant-debug.mjs`, which does not exist"** was true of this
+  branch and false of the repository. `git log --diff-filter=D` — the check the
+  task file itself asked for — showed the file was never deleted: it is on
+  `origin/feature/lean` and `origin/feat/build-feed`, byte-identical, and never
+  reached `feature/big-merge`. So the tool was restored rather than the test
+  deleted, which was the other option and the wrong one.
+
+**Two assertions could not fail, and both were passing.**
+
+`web/page-test.mjs`'s twin `$("btn-dojoin").click()` was not awaited. The join
+handler is async, so the assertions after it were asserting before it had
+settled — the comment in the `web/` copy says so: "passing for the wrong
+reason". The two copies had drifted, and the stale one was the wrong one.
+
+`web/cli-page-test.mjs` compared the page's transcript against the terminal's
+positionally, with a regex for markup `lineHtml` stopped emitting, so it matched
+nothing and reported `[]`. That same check also asked the page to reproduce the
+terminal's *order*, which the page explicitly does not promise: `web/index.html`
+states that an untimed line "still shows, sorted last and marked, rather than
+vanishing", and `kant-cli.mjs say` sends no clock. Comparing multisets keeps the
+intent — every message the terminal shows, and nothing it does not — without
+demanding a promise the code declines to make. Mutation-tested: renaming the
+`body` span in `kant-pretty.mjs` turns it red.
+
+**A product bug the assertions were hiding.** `daySections` in
+`web/kant-pretty.mjs` read `d.untitled`, but `byDay` in `web/kant-net.mjs` sets
+`untimed` — two names differing by two letters, and `UNTITLED` is also the day
+*value*. So the untitled bucket fell through to `dayLabel("untitled")`, i.e.
+`new Date("untitled")`, and the page headed that section **"Invalid Date"**.
+`web/pretty-test.mjs` passed throughout, because its fixture was
+`{ day: "UNTITLED", untitled: true }` — matching neither the value nor the flag
+any real caller produces. The fixture is now built by `byDay` itself, and
+reverting the one-word fix turns the test red.
 
 One more, found while building this: **`scripts/net-test.mjs` is not hermetic**
 despite looking like its `web/` twin. It binds a real port and posts to a live

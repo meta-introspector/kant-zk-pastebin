@@ -293,8 +293,20 @@ await t("an older day gets a date, in UTC", () => {
 });
 
 await t("the untitled bucket is labelled, never dated", () => {
-  const secs = P.daySections([{ day: "UNTITLED", messages: [], untitled: true }], T0);
+  // Built by the real producer rather than by hand. The fixture used to be
+  // `{ day: "UNTITLED", messages: [], untitled: true }`, which matched neither
+  // the day value `byDay` uses (UNTITLED is the string "untitled") nor the
+  // flag it sets on that bucket (`untimed`) — so the test passed while the page
+  // rendered exactly this section as "Invalid Date". A hand-written fixture for
+  // another module's output is only evidence about the fixture.
+  const secs = P.daySections(
+    N.byDay([{ at: null, sender: "alice", text: "no clock here" }]),
+    T0,
+  );
+  assert.equal(secs.length, 1, "one bucket for one untimed line");
+  assert.equal(secs[0].day, N.UNTITLED, "the bucket is the one byDay names");
   assert.equal(secs[0].label, "No time");
+  assert.ok(!/Invalid|NaN/.test(secs[0].label), secs[0].label);
 });
 
 await t("a real day keeps its bucket and gains a label", () => {

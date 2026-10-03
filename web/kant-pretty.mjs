@@ -109,7 +109,14 @@ export function dayLabel(day, now = Date.now()) {
  *  in their own bucket last rather than being invented a date. This only adds
  *  the labels, so the two cannot disagree about what belongs where. */
 export function daySections(days, now = Date.now()) {
-  return days.map((d) => ({ ...d, label: d.untitled ? "No time" : dayLabel(d.day, now) }));
+  // `untimed` is the flag `byDay` in web/kant-net.mjs sets on the bucket of
+  // lines that carry no clock (and the only flag any caller produces). This
+  // used to read `d.untitled`, which nothing ever sets, so the untitled bucket
+  // fell through to `dayLabel("untitled")` — `new Date("untitled")` — and the
+  // page headed that section "Invalid Date". UNTITLED is the *day value*, not
+  // the flag; the two names differ by two letters and nothing else, which is
+  // how the mismatch survived a passing test.
+  return days.map((d) => ({ ...d, label: d.untimed ? "No time" : dayLabel(d.day, now) }));
 }
 
 // --------------------------------------------------------------- body

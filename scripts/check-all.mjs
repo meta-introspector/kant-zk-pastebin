@@ -72,6 +72,26 @@ export const CORE = [
   // assertions rather than two byte-identical copies that could drift.
   "web/wasm-test.mjs",
   "scripts/wasm-test.mjs",
+  // The remaining page and card suites. All eight were BROKEN and are now green:
+  //   * carddebug (both copies) needed scripts/kant-debug.mjs, which the big
+  //     merge dropped — it exists on origin/feature/lean and was restored.
+  //   * cli-page needed the querySelectorAll the page uses, plus a transcript
+  //     assertion that had been reading markup the renderer stopped emitting.
+  //   * the scripts/ page copies resolved their HTML and config against
+  //     scripts/ rather than web/, so they died with ENOENT; they now delegate
+  //     to the web/ copy, which is a superset of each.
+  //
+  // The delegating copies are in the core run even though they repeat their
+  // web/ twin's assertions: a delegation is code too, and the thing most likely
+  // to break here is the delegation itself. Together they add ~3.4s.
+  "web/cli-page-test.mjs",
+  "web/carddebug-test.mjs",
+  "scripts/carddebug-test.mjs",
+  "scripts/cli-page-test.mjs",
+  "scripts/diagpage-test.mjs",
+  "scripts/handpage-test.mjs",
+  "scripts/page-test.mjs",
+  "scripts/site-test.mjs",
 ];
 
 /**
@@ -93,15 +113,9 @@ export const EXCLUDED = {
   // one, filed next to a hermetic twin that looks identical.
   "scripts/net-test.mjs": "posts to a live relay; 429s when run twice",
 
-  // Broken, and deliberately visible rather than quietly skipped.
-  "scripts/carddebug-test.mjs": "BROKEN: imports scripts/kant-debug.mjs, which does not exist",
-  "web/carddebug-test.mjs": "BROKEN: imports scripts/kant-debug.mjs, which does not exist",
-  "scripts/cli-page-test.mjs": "BROKEN: looks for scripts/index.html; the pages live in web/",
-  "scripts/diagpage-test.mjs": "BROKEN: looks for scripts/index.html; the pages live in web/",
-  "scripts/handpage-test.mjs": "BROKEN: looks for scripts/index.html; the pages live in web/",
-  "scripts/page-test.mjs": "BROKEN: looks for scripts/index.html; the pages live in web/",
-  "scripts/site-test.mjs": "BROKEN: looks for scripts/index.html; the pages live in web/",
-  "web/cli-page-test.mjs": "BROKEN: real assertion failure, box.querySelectorAll is not a function",
+  // Broken, and deliberately visible rather than quietly skipped. Empty: every
+  // suite that was here has been fixed. The reason each one was wrong is in
+  // tasks/thunk-server/VERIFICATION.md, and the core list above carries the fix.
 };
 
 /** Run one suite in its own process, so a crash cannot take the runner with it. */
@@ -166,9 +180,15 @@ if (isMain) {
     }
     console.log(`\n${results.length - failed.length}/${results.length} suites pass`);
     if (!all) {
-      const broken = Object.entries(EXCLUDED).filter(([f]) => f.startsWith("") && /BROKEN/.test(EXCLUDED[f]));
-      console.log(`\n${broken.length} tracked suites are broken and excluded. They are listed so they stay visible:`);
-      for (const [f, why] of broken) console.log(`  ${f.padEnd(34)} ${why}`);
+      const broken = Object.entries(EXCLUDED).filter(([, why]) => /BROKEN/.test(why));
+      if (broken.length) {
+        console.log(`\n${broken.length} tracked suites are broken and excluded. They are listed so they stay visible:`);
+        for (const [f, why] of broken) console.log(`  ${f.padEnd(34)} ${why}`);
+      } else {
+        // Stated rather than omitted: "no broken suites" is a claim that stops
+        // being true quietly, and this line is what makes it visible when it does.
+        console.log("\nno tracked suites are broken");
+      }
       const slow = Object.entries(EXCLUDED).filter(([, why]) => !/BROKEN/.test(why));
       if (slow.length) console.log(`\n${slow.length} more excluded for slowness or a live relay; --all runs them.`);
       if (unlisted.length) {

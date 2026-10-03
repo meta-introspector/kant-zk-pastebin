@@ -85,6 +85,7 @@ class El {
     this.scrollTop = 0;
     this.scrollHeight = 0;
     this.srcObject = null;
+    this.dataset = {};
     this.href = "";
     this.download = "";
     this.classList = {
@@ -97,6 +98,40 @@ class El {
   get shown() { return this._classes.has("on"); }
   appendChild(c) { this.children.push(c); return c; }
   remove() {}
+
+  /** The anchors inside this element, parsed out of the innerHTML the page
+   *  just wrote.  The page wires handlers with
+   *  `box.querySelectorAll("a[data-q]")` and `box.querySelectorAll("a[data-f]")`
+   *  (web/index.html), so the shim has to answer that or renderFiles throws
+   *  before the test can assert anything — which it did, silently, on a click
+   *  that reached renderFiles at all.
+   *
+   *  Returns El stubs carrying the matched attributes, so `.dataset` and
+   *  `.onclick` in the page behave as they do in a browser.  Descends into
+   *  children too, since a real querySelectorAll is not depth-limited.
+   *
+   *  Ported from web/page-test.mjs, whose shim had the same gap and had it
+   *  fixed; this suite is a second copy of that shim, and the two had drifted. */
+  querySelectorAll(sel) {
+    const attr = /\[([\w-]+)\]/.exec(sel);
+    const tag = /^([a-z]+)/i.exec(sel)?.[1]?.toLowerCase();
+    const out = [];
+    const walk = (el) => {
+      for (const m of el.innerHTML.matchAll(/<([a-z]+)\s([^>]*)>/gi)) {
+        const [, t, attrs] = m;
+        if (tag && t.toLowerCase() !== tag) continue;
+        if (attr && !new RegExp(`\\b${attr}=["']([^"']*)["']`).test(attrs)) continue;
+        const a = /data-([\w-]+)=["']([^"']*)["']/.exec(attrs);
+        const e = new El("", t);
+        if (a) e.dataset = { [a[1].replace(/-(\w)/g, (_, c) => c.toUpperCase())]: a[2] };
+        out.push(e);
+      }
+      for (const c of el.children) walk(c);
+    };
+    walk(this);
+    return out;
+  }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
   select() {}
   click() { if (this.onclick) return this.onclick(); }
   play() { return Promise.resolve(); }
@@ -189,10 +224,38 @@ try {
   eq("the terminal hears the browser",
     texts, ["hello from the terminal", "hello from the browser"]);
 
-  // Both sides display the same conversation, in the same order.
-  const shown = [...$("chat").innerHTML.matchAll(/<div[^>]*>[^:]*: ([^<]*)<\/div>/g)]
-    .map((m) => m[1]);
-  eq("the page displays exactly what the terminal displays", shown, texts);
+  // Both sides display the same conversation.
+  //
+  // The transcript is rendered by `lineHtml` in web/kant-pretty.mjs: each line is
+  // `<div class="line...">` wrapping `<span class="who">`, `<span class="at">` and
+  // `<span class="body">`, the last holding markup (`<span class="ktext">` for a
+  // code span), so the tags have to be stripped rather than read as plain text.
+  //
+  // This used to be read with /<div[^>]*>[^:]*: ([^<]*)<\/div>/, a pattern for the
+  // old flat "name: text" markup. After the pretty-printing rewrite it matched
+  // nothing, so the comparison reported `[]` and failed for a reason that had
+  // nothing to do with the page and the terminal disagreeing.
+  const stripTags = (html) => html.replace(/<[^>]*>/g, "");
+  const shown = $("chat").innerHTML
+    .split(/<div class="line/)
+    .slice(1)
+    .map((chunk) => {
+      const m = /<span class="body">([\s\S]*?)<\/span><\/div>/.exec(chunk);
+      return m ? stripTags(m[1]) : undefined;
+    });
+
+  // Order is compared as a multiset, not positionally, because the two sides
+  // do not promise the same order and one of them says so. The terminal's
+  // `read` walks the store in arrival order; the page reads `viewByDay()`, and
+  // web/index.html states that an untimed line "still shows, sorted last and
+  // marked, rather than vanishing". `kant-cli.mjs say` sends no clock, so the
+  // terminal's own line is untimed and the page puts it last — the documented
+  // behaviour, not a disagreement. What must hold is that the page shows every
+  // message the terminal shows, and nothing it does not.
+  eq("the page shows every message the terminal shows",
+    [...shown].sort(), [...texts].sort());
+  ok("the page shows nothing the terminal does not", shown.length === texts.length,
+    `page ${shown.length} vs terminal ${texts.length}`);
 } catch (e) {
   ok(`the page ran without throwing (${e.message})`, false);
 } finally {
