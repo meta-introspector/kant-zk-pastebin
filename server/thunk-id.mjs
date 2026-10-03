@@ -118,6 +118,70 @@ function convert(x, path, depth) {
   return vObj(fs);
 }
 
+/** The eight value shapes `RequestProject.Kant.Codec` can name.
+ *
+ *  Six are the `Val` constructors (`Val.lean:37`): null, bool, int, str, list,
+ *  obj. Two more, `ref` and `annot`, are `Ipdl`'s (`Ipdl.lean`) and exist only
+ *  inside an IPDL document, where they live in reserved keys.
+ *
+ *  `Val.lean:422` proves `canonEnc_injective` over the six, and IPDL drops
+ *  floats for binary compatibility while proving its projection `LOSSLESS`. So
+ *  anything outside this list is a value the wire format is specified to
+ *  discard and no Lean proof covers: the JS `valHash` would agree with Lean's on
+ *  everything both can name and silently disagree on everything else. */
+export const LEAN_VAL_TAGS = Object.freeze([
+  "null", "bool", "int", "str", "list", "obj", "ref", "annot",
+]);
+
+/**
+ * Whether a canonical `Val` names only shapes Lean can also name.
+ *
+ * This is the check that a JS-side test suite cannot make on its own, and it is
+ * the one that matters: a seventh tag does not collide with the others, so every
+ * round-trip and injectivity test still passes while the two implementations
+ * have quietly stopped agreeing. Phase 1 added exactly such a tag -- a float --
+ * and nothing in JS noticed until the Lean source was read.
+ *
+ * @param {*} v  a canonical `Val`
+ * @returns {boolean}
+ */
+export function isLeanRepresentable(v) {
+  if (v === null || typeof v !== "object") return false;
+  if (!LEAN_VAL_TAGS.includes(v.t)) return false;
+  switch (v.t) {
+    case "list":
+      return Array.isArray(v.xs) && v.xs.every(isLeanRepresentable);
+    case "obj":
+      return Array.isArray(v.fs) && v.fs.every(([k, x]) => typeof k === "string" && isLeanRepresentable(x));
+    case "ref":
+      return typeof v.target === "string";
+    case "annot":
+      return isLeanRepresentable(v.body);
+    default:
+      // null, bool, int, str carry a scalar, and `toVal` has already refused
+      // anything that is not one.
+      return true;
+  }
+}
+
+/**
+ * The canonical value a thunk's id is computed over.
+ *
+ * Exposed so a checker can inspect what was hashed. `isLeanRepresentable` on
+ * this value is the guard against a JS-only type leaking into an id that Lean
+ * would have to reproduce.
+ *
+ * @param {string} source
+ * @param {string[]} [refs]
+ * @returns {object} a canonical `Val`
+ */
+export function thunkDefinitionVal(source, refs = []) {
+  return vObj([
+    ["bytes", vStr(stripComments(source))],
+    ["refs", vList([...refs].sort().map((r) => vStr(String(r))))],
+  ]);
+}
+
 /**
  * The content hash of a thunk definition.
  *
@@ -147,10 +211,7 @@ function convert(x, path, depth) {
  * @returns {string} 64 hex chars
  */
 export function thunkContentHash(source, refs = []) {
-  return valHash(vObj([
-    ["bytes", vStr(stripComments(source))],
-    ["refs", vList([...refs].sort().map((r) => vStr(String(r))))],
-  ]));
+  return valHash(thunkDefinitionVal(source, refs));
 }
 
 /** The hash of a call's arguments, independent of which thunk is running. */

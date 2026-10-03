@@ -331,6 +331,32 @@ t("an input with no content address is refused, not coerced", async () => {
   if (!threw) throw new Error("a cycle was hashed");
 });
 
+t("a thunk id is a value Lean could have computed", async () => {
+  // The guard that phase 1 needed and did not have. A seventh codec type does not
+  // collide with the others, so every round-trip and injectivity test keeps
+  // passing while the JS and the Lean stop agreeing -- and a thunk id that Lean
+  // cannot reproduce is an id the swarm cannot verify against a proof.
+  const { thunkDefinitionVal, isLeanRepresentable, LEAN_VAL_TAGS } =
+    await import("./thunk-id.mjs");
+  const t = await Thunk.load(CJS_THUNK, "counter", "1.0.0", {}, ["lake"]);
+  if (!isLeanRepresentable(thunkDefinitionVal(CJS_THUNK, ["lake"]))) {
+    throw new Error(`the id's preimage uses a shape Lean cannot name: ${LEAN_VAL_TAGS}`);
+  }
+  // Teeth: the type I actually added, at the top level and buried.
+  for (const foreign of [{ t: "float", n: 1.5 }, { t: "obj", fs: [["a", { t: "float", n: 1 }]] }]) {
+    if (isLeanRepresentable(foreign)) {
+      throw new Error(`a foreign shape passed: ${JSON.stringify(foreign)}`);
+    }
+  }
+  // `ref` and `annot` are Lean's too -- Ipdl defines them -- so they pass.
+  if (!isLeanRepresentable({ t: "ref", target: "x" })) {
+    throw new Error("ref is a Lean shape and must be allowed");
+  }
+  if (!isLeanRepresentable({ t: "annot", key: "k", note: "n", body: { t: "int", n: 1n } })) {
+    throw new Error("annot is a Lean shape and must be allowed");
+  }
+});
+
 t("the codec has exactly the six value types Lean has", async () => {
   // `RequestProject/Kant/Codec/Val.lean` defines `Val` with six constructors and
   // proves `canonEnc_injective` over them. IPDL drops floats for binary

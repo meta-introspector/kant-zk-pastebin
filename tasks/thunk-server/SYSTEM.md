@@ -249,6 +249,14 @@ call id.** A metric, a rate, a probability — none of those can be cached yet.
 When they need to be, the fix belongs in Lean first, with `canonEnc_injective`
 re-proved over seven constructors, and only then here.
 
+**The guard that would have caught it** is `isLeanRepresentable()` in
+`server/thunk-id.mjs`, over the eight shapes `Kant.Codec` can name (the six `Val`
+constructors plus `ref` and `annot`). It exists because a seventh tag does not
+collide with the other seven: every round-trip, injectivity and projection test
+keeps passing while the two implementations stop agreeing, so the float would
+have shipped on a fully green run. See
+[VERIFICATION.md](VERIFICATION.md) for what it can and cannot know.
+
 Three rules that were collisions before they were rules, each with a test:
 object keys are **sorted** (`canonEnc` walks fields in order and JS key order is
 not part of the value); differing arguments get **different** hashes; and the

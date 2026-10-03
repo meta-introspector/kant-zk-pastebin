@@ -98,6 +98,37 @@ That is the same shape as the three mistakes, one level up: I had a picture of
 the codec that was true of the JS and had stopped being true of the thing the JS
 is a transcription of.
 
+### The guard that closes it
+
+`LEAN_VAL_TAGS` in `server/thunk-id.mjs` is the list of shapes
+`RequestProject.Kant.Codec` can name — the six `Val` constructors plus `ref` and
+`annot` from `Ipdl`. `isLeanRepresentable()` walks a canonical value and answers
+whether Lean could have built it, and `thunkDefinitionVal()` exposes what a thunk
+id is actually hashed over so something can check it.
+
+This is the check a JS-only suite cannot make, and the reason is structural
+rather than an oversight: **a seventh tag does not collide with the other
+seven.** Every round-trip test, every injectivity test and every projection test
+keeps passing while the two implementations have quietly stopped agreeing. The
+float would have shipped on a fully green test run.
+
+Two things this guard is honest about:
+
+- It knows the tag list, not the Lean proofs. It cannot tell you `Val` changed;
+  it can only tell you that JS is using a shape the recorded list does not
+  contain. The list is transcribed by hand from `Val.lean:37` and `Ipdl.lean`,
+  and nothing in this repository re-derives it.
+- **The Lean source is not in this repository and not a flake input.** It lives
+  in git worktrees under `~/projects/worktrees/*/RequestProject/Kant/`, so the
+  guard cannot read it in CI and the list can go stale silently.
+
+What *is* checkable, and was checked by hand on 2026-10-03: `Tests.lean` defines
+`gSample` as "the value both implementations serialise" and pins all six outputs
+with `#guard`. The JS `codec-test.mjs` golden vector produces the identical
+`canonEnc`, `valHash` (`3c796f2f…`), `ipdlText`, `yamlEnc`, `xmlEnc` and
+`csvEncode`. So the transcription is currently faithful — verified once, by
+reading both sides, and not verifiable by any test in this tree.
+
 The CLI says which kind of red you are looking at, so a fix does not get mistaken
 for a regression:
 

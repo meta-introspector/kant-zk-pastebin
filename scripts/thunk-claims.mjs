@@ -286,6 +286,27 @@ export const CLAIMS = [
     },
   },
   {
+    id: "thunk-id-is-lean-representable",
+    claim: "a thunk id is a valHash of a value naming only shapes Kant.Codec defines",
+    doc: "VERIFICATION.md, SYSTEM.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    probe: async () => {
+      const { thunkDefinitionVal, isLeanRepresentable, LEAN_VAL_TAGS } =
+        await import(`${ROOT}/server/thunk-id.mjs`);
+      // `Val.lean:37` has six constructors; `Ipdl.lean` adds `ref` and `annot`.
+      // Anything else is a value the wire format is specified to discard.
+      if (LEAN_VAL_TAGS.length !== 8) return false;
+      if (!isLeanRepresentable(thunkDefinitionVal(THUNK_SRC, ["lake"]))) return false;
+      // And the guard has to notice a foreign shape, which is exactly what a
+      // JS-only round-trip suite cannot do: a new tag does not collide.
+      return !isLeanRepresentable({ t: "float", n: 1.5 })
+        && !isLeanRepresentable({ t: "obj", fs: [["a", { t: "float", n: 1 }]] })
+        && isLeanRepresentable({ t: "ref", target: "x" });
+    },
+  },
+  {
     id: "fractional-argument-refused",
     claim: "argsHash refuses a non-integer number and -0, because Val has no float",
     doc: "SYSTEM.md, THUNK-CYCLE.md",

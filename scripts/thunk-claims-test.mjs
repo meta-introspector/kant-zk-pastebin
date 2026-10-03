@@ -140,6 +140,25 @@ t("codec-has-no-float goes red when a seventh type appears", () =>
       return typeof C.vFloat === "function";
     }));
 
+t("thunk-id-is-lean-representable goes red when float joins the tag list", () =>
+  // The mutation is my float, re-admitted as if Lean had it. A seventh tag
+  // collides with nothing, so every round-trip and injectivity test keeps
+  // passing -- this is the only kind of check that could ever have caught it.
+  //
+  // The claim's load-bearing conjunct is that the guard *rejects* a float, so
+  // the mutation re-evaluates exactly that conjunct with "float" admitted.
+  mustFlipProbe("thunk-id-is-lean-representable", "float admitted as a Lean shape",
+    async () => {
+      const { LEAN_VAL_TAGS } = await import(`${ROOT}/server/thunk-id.mjs`);
+      const tags = [...LEAN_VAL_TAGS, "float"];
+      const guard = (v) =>
+        v !== null && typeof v === "object" && tags.includes(v.t)
+        && (v.t === "list" ? v.xs.every(guard)
+          : v.t === "obj" ? v.fs.every(([, x]) => guard(x))
+            : true);
+      return !guard({ t: "float", n: 1.5 });
+    }));
+
 t("fractional-argument-refused goes red when a fraction is hashed", () =>
   mustFlipProbe("fractional-argument-refused", "1.5 rounded to an int",
     async () => {
