@@ -75,14 +75,35 @@ FAIL  scripts/lean-codec-vectors.mjs   4/8 checks pass
 
 ### The ten broken suites
 
-Worth having in one place, since nothing had them:
+Worth having in one place, since nothing had them. Two of them are fixed now,
+so eight remain:
 
 | suites | why |
 |---|---|
 | `scripts/{cli-page,diagpage,handpage,page,site}-test.mjs` | look for `scripts/index.html`; the pages live in `web/`. Broken duplicates of passing `web/` twins |
-| `scripts/wasm-test.mjs`, `web/wasm-test.mjs` | read gitignored `dist/` — the open `wasm-test-reads-gitignored-dist` claim |
 | `scripts/carddebug-test.mjs`, `web/carddebug-test.mjs` | import `scripts/kant-debug.mjs`, which does not exist |
 | `web/cli-page-test.mjs` | a genuine assertion failure: `box.querySelectorAll is not a function` |
+
+**Fixed: `scripts/wasm-test.mjs` and `web/wasm-test.mjs`.** They read gitignored
+`dist/`, so both died with ENOENT on a clean checkout — and the defect was
+incomplete, because the second dependency was `dist/kernel-vectors.json`, which
+the claim never named. `scripts/embed-kernel.mjs` (referenced by seven tracked
+files, and previously present in none of them) now writes the binary and the 59
+golden vectors into `web/` as tracked artifacts, and `--check` verifies them
+against `lake exe emitwasm`'s output. The `scripts/` copy had become
+unfixable-by-duplication — `scripts/` has no tracked `kant_kernel.wasm`, so its
+"the default candidate list finds the binary" assertion could only pass via
+`dist/` — so it now delegates to the `web/` copy instead. Both are in the core
+set; the core run is 33 suites.
+
+One assertion in there was quietly unfalsifiable and is now honest. The old
+`/dist/../README.md` check could not fail: a client resolves a literal `..`
+against the URL before sending, so it never reached the mount as a traversal,
+and the percent-encoded forms the WHATWG parser does not collapse (`..%2f`) name
+a literal directory while the relay does not decode them. Removing the
+`startsWith(distRoot)` guard in `staticCandidates` left the test green.
+Measured: the traversal defence is `path.normalize` *plus* that guard, and the
+test goes red only when both are gone together — which is what it now says.
 
 One more, found while building this: **`scripts/net-test.mjs` is not hermetic**
 despite looking like its `web/` twin. It binds a real port and posts to a live
@@ -114,15 +135,23 @@ which is the only way a fix can announce itself:
 | `schedule-has-no-constraint` | the scheduler has no budget vocabulary | phase 6 lands |
 | `ref-never-resolved` | nothing calls a resolver on a ref target | the IPDL resolver lands |
 | `nora-wildcard-version` | `rust-unixfs` is still `version = "*"` | the version is pinned |
-| `wasm-test-reads-gitignored-dist` | the test still reads gitignored `dist/` | the test reads the embedded copy |
 
-Three defect claims have now done their job. `thunk-load-throws` and
+Four defect claims have now done their job. `thunk-load-throws` and
 `apply-double-wraps` went red the moment phase 0 landed, and `thunk-id-truncated`
 went red when phase 1 landed — all three were rewritten as health claims, and
 replacements took their place: `sandbox-has-no-require`, `sandbox-refuses-console`
 and `sandbox-refuses-dynamic-import` for phase 0; thirteen more for phase 1,
 covering the content hash, the call id, and the refusal of an argument that has
-no content address.
+no content address. `wasm-test-reads-gitignored-dist` went red when the kernel
+test was made hermetic, and became two health claims: `wasm-test-inputs-tracked`
+(asks git whether every artifact the test opens is tracked, so it fails on the
+`dist/` read returning) and `kernel-vectors-satisfy-wasm` (replays all 59 golden
+vectors against the tracked binary).
+
+That last pair is the first to be written the way this ledger wants: not
+"this line mentions `dist/`" but "git says whether these files are tracked", and
+not "the file has 59 entries" but "the binary satisfies all 59". Each was
+mutation-tested against the real regression, not a fabricated input.
 
 `thunk-id-truncated` is the one worth dwelling on. Its probe was
 `/\.slice\(0,\s*16\)/.test(src)` — a claim about a *spelling*. When phase 1

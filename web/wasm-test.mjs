@@ -1,22 +1,52 @@
 // Conformance test for the Lean-extracted WebAssembly kernel.
 //
-//   lake exe emitwasm dist && node web/wasm-test.mjs
+//   node web/wasm-test.mjs
 //
-// It validates `dist/kant_kernel.wasm` with the engine's own validator,
+// It validates `web/kant_kernel.wasm` with the engine's own validator,
 // instantiates it, and checks every exported function against the golden
-// vectors that `lake exe emitwasm` computed from the Lean semantics of the
-// very same module (`dist/kernel-vectors.json`).
+// vectors in `web/kernel-vectors.json`, which `lake exe emitwasm` computed from
+// the Lean semantics of the very same module.
+//
+// Both files are tracked copies of `lake exe emitwasm`'s output in `dist/`,
+// written by `scripts/embed-kernel.mjs` (`--check` verifies them against
+// `dist/`). They used to be read from `dist/` directly, which is gitignored,
+// so on a fresh checkout the test died with ENOENT and was filed as broken
+// rather than run — while being the only test tying the binary to Lean.
+// `scripts/wasm-test.mjs` delegates here, so there is one copy of these
+// assertions and one place they can drift.
 
 import { readFile } from "node:fs/promises";
 import { loadKernel } from "./kant-wasm.mjs";
 import * as js from "./kantzk.mjs";
 
-const wasmBytes = await readFile(new URL("../dist/kant_kernel.wasm", import.meta.url));
+const wasmBytes = await readFile(new URL("./kant_kernel.wasm", import.meta.url));
 const vectors = JSON.parse(
-  await readFile(new URL("../dist/kernel-vectors.json", import.meta.url), "utf8"),
+  await readFile(new URL("./kernel-vectors.json", import.meta.url), "utf8"),
 ).vectors;
 
 let failures = 0;
+/** The HTTP status of a request whose path is sent verbatim, unnormalised. */
+function rawStatusOf(port, rawPath) {
+  return new Promise((resolve, reject) => {
+    const sock = connect(port, "127.0.0.1", () => {
+      sock.write(`GET ${rawPath} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`);
+    });
+    let buf = "";
+    sock.on("data", (d) => { buf += d; });
+    sock.on("end", () => {
+      const m = /^HTTP\/1\.[01] (\d{3})/.exec(buf);
+      if (!m) reject(new Error(`no status line in ${JSON.stringify(buf.slice(0, 80))}`));
+      else resolve(Number(m[1]));
+    });
+    sock.on("error", reject);
+  });
+}
+/** True when a path was answered with the repository root's README.md. */
+async function readmeVia(port, rawPath) {
+  const res = await fetch(`http://127.0.0.1:${port}${rawPath}`);
+  const body = await res.text();
+  return body.includes("the repository root");
+}
 const check = (ok, msg) => {
   if (!ok) {
     failures += 1;
@@ -135,6 +165,10 @@ for (const [a, b] of [[0, 0], [1, 2], [2, 1], [7, 13], [1000, 999]]) {
 // loader used to hand a 404 error page to WebAssembly.validate.
 
 import { createServer } from "node:http";
+import { connect } from "node:net";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { kernelBytes as embeddedBytes, KERNEL_LENGTH } from "./kant-kernel-embedded.mjs";
 import { kernelSource, KERNEL_URLS } from "./kant-wasm.mjs";
 
@@ -144,7 +178,7 @@ check(embedded.length === wasmBytes.length, "embedded kernel has a different len
 check(KERNEL_LENGTH === wasmBytes.length, "KERNEL_LENGTH disagrees with the binary");
 check(
   embedded.every((b, i) => b === wasmBytes[i]),
-  "embedded kernel differs from dist/kant_kernel.wasm — rerun scripts/embed-kernel.mjs",
+  "embedded kernel differs from web/kant_kernel.wasm — rerun scripts/embed-kernel.mjs",
 );
 check(WebAssembly.validate(embedded), "embedded kernel fails WebAssembly.validate");
 
@@ -183,7 +217,7 @@ const live = `http://127.0.0.1:${serving.address().port}`;
 {
   const good = await kernelSource([new URL("/dist/kant_kernel.wasm", live)]);
   check(!good.source.startsWith("embedded"), "a served binary should be used in preference");
-  check(good.bytes.every((b, i) => b === wasmBytes[i]), "served bytes differ from dist/");
+  check(good.bytes.every((b, i) => b === wasmBytes[i]), "served bytes differ from the tracked copy");
   // An SPA that answers every path with index.html: bytes arrive, but they are
   // HTML. The loader must recognise that rather than blame validation.
   const spa = await kernelSource([new URL("/nowhere/kant_kernel.wasm", live)]);
@@ -191,35 +225,88 @@ const live = `http://127.0.0.1:${serving.address().port}`;
 }
 await new Promise((r) => serving.close(r));
 
-// The default candidate list finds the binary in a repository checkout.
+// The default candidate list finds the binary without reaching for `dist/`:
+// `web/kant_kernel.wasm` is the first candidate and is tracked, so a checkout
+// and a `web/`-only deployment both resolve it.
 {
   const { source } = await kernelSource(KERNEL_URLS);
   check(!source.startsWith("embedded"), "the checkout copy should be found by default");
 }
 
-// The relay serves /dist/ even when its document root is web/.
+// The relay serves /dist/ even when its document root is web/. Build a throwaway
+// tree — web/ as the static root, the kernel in the sibling dist/, and a
+// README.md in the root that mount must never reach — so this exercises the real
+// code path without depending on the gitignored `dist/` of a Lean build.
 {
   const { createServer: createRelay, CONFIG } = await import("../server/relay.mjs");
-  const relay = createRelay({
-    ...CONFIG,
-    staticDir: new URL(".", import.meta.url).pathname,
-  });
-  await new Promise((r) => relay.listen(0, "127.0.0.1", r));
-  const port = relay.address().port;
-  const res = await fetch(`http://127.0.0.1:${port}/dist/kant_kernel.wasm`);
-  check(res.ok, `relay --static web should serve /dist/kant_kernel.wasm, got HTTP ${res.status}`);
-  if (res.ok) {
-    check(
-      res.headers.get("content-type") === "application/wasm",
-      "the relay should label the kernel application/wasm",
-    );
-    const got = new Uint8Array(await res.arrayBuffer());
-    check(got.length === wasmBytes.length && got.every((b, i) => b === wasmBytes[i]),
-      "the relay served the wrong bytes for the kernel");
+  const tmp = await mkdtemp(join(tmpdir(), "kant-wasm-relay-"));
+  try {
+    const staticDir = join(tmp, "web");
+    await mkdir(staticDir);
+    await mkdir(join(tmp, "dist"));
+    await writeFile(join(staticDir, "index.html"), "<!doctype html><title>static root</title>\n");
+    await writeFile(join(tmp, "dist", "kant_kernel.wasm"), wasmBytes);
+    await writeFile(join(tmp, "README.md"), "the repository root\n");
+
+    const relay = createRelay({ ...CONFIG, staticDir });
+    await new Promise((r) => relay.listen(0, "127.0.0.1", r));
+    const port = relay.address().port;
+
+    // Controls, so the 404s below cannot be vacuous: the server is up and the
+    // static root answers, and the /dist/ mount reaches a file that exists.
+    const rootRes = await fetch(`http://127.0.0.1:${port}/`);
+    check(rootRes.ok, `the static root should answer, got HTTP ${rootRes.status}`);
+
+    const res = await fetch(`http://127.0.0.1:${port}/dist/kant_kernel.wasm`);
+    check(res.ok, `relay --static web should serve /dist/kant_kernel.wasm, got HTTP ${res.status}`);
+    if (res.ok) {
+      check(
+        res.headers.get("content-type") === "application/wasm",
+        "the relay should label the kernel application/wasm",
+      );
+      const got = new Uint8Array(await res.arrayBuffer());
+      check(got.length === wasmBytes.length && got.every((b, i) => b === wasmBytes[i]),
+        "the relay served the wrong bytes for the kernel");
+    }
+    // Nothing can reach the repository root through the /dist/ mount, for two
+    // separate reasons, and this pins both.
+    //
+    // A literal `..` is gone before the relay sees it: the handler parses the
+    // request with `new URL(req.url, …)`, and the WHATWG URL parser strips dot
+    // segments. `fetch` would have done the same on the client side, so this
+    // sends the path over a raw socket to reach the relay's own parser.
+    const rawStatus = await rawStatusOf(port, "/dist/../README.md");
+    check(rawStatus === 404,
+      `a literal .. must not escape the mount (raw /dist/../README.md → ${rawStatus})`);
+    check(!(await readmeVia(port, "/dist/../README.md")),
+      "a literal .. served the repository root's README.md");
+
+    // Percent-encoded traversal. `%2e%2e` is not actually a way past the URL
+    // parser — the WHATWG spec counts `.%2e`, `%2e.` and `%2e%2e` as dot
+    // segments, so both parsers collapse it before the relay sees anything. It
+    // is kept because that is the fact worth pinning. `..%2f` *does* survive,
+    // because an encoded slash is not a dot segment: it reaches the relay
+    // verbatim, and only `serveStatic`'s refusal to decode it stops it.
+    //
+    // So the live risk is a `decodeURIComponent` added to the static path — a
+    // natural change, to serve spaces and non-ASCII filenames — which would
+    // turn `/dist/..%2fREADME.md` into a real traversal unless
+    // `staticCandidates` still normalises and still refuses to leave distRoot.
+    // Verified: dropping the decode, `path.normalize` and the `startsWith`
+    // guard together makes this fail (HTTP 200, serving the root README).
+    // Dropping the guard alone does not, and cannot: nothing that parses as a
+    // URL reaches it. It is defence in depth behind the parser.
+    for (const escape of ["/dist/%2e%2e/README.md", "/dist/..%2fREADME.md"]) {
+      const r = await fetch(`http://127.0.0.1:${port}${escape}`);
+      check(r.status === 404,
+        `an encoded traversal must not escape the mount (${escape} → ${r.status})`);
+      check(!(await readmeVia(port, escape)),
+        `an encoded traversal served the repository root's README.md (${escape})`);
+    }
+    await new Promise((r) => relay.close(r));
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
   }
-  const escape = await fetch(`http://127.0.0.1:${port}/dist/../README.md`);
-  check(escape.status === 404, "the /dist/ mount must not expose the repository root");
-  await new Promise((r) => relay.close(r));
 }
 
 if (failures === 0) {

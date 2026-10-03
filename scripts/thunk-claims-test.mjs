@@ -325,10 +325,38 @@ t("kernel-imports-zero goes red when there is an import", async () => {
   if (after.ok) throw new Error("kernel-imports-zero passed on a module with an import");
 });
 
-t("wasm-test-reads-gitignored-dist goes red once dist is tracked", () =>
-  mustFlip("wasm-test-reads-gitignored-dist",
-    { test: read("web/wasm-test.mjs"), ignore: read(".gitignore").replace(/^dist\/?$/gm, "  ") },
-    "a .gitignore that no longer ignores dist"));
+// The old defect claim here mutated .gitignore. It is now a health claim, and
+// it reads the tree itself, so a fabricated input would only prove the probe's
+// boolean. This mutates the real file and restores it, because the regression it
+// exists to catch — reading the gitignored `dist/` again — is exactly a change
+// to that file.
+t("wasm-test-inputs-tracked goes red when the test reads gitignored dist/", async () => {
+  const path = resolve(ROOT, "web/wasm-test.mjs");
+  const before = readFileSync(path, "utf8");
+  const mutated = before.replace(
+    'new URL("./kant_kernel.wasm", import.meta.url)',
+    'new URL("../dist/kant_kernel.wasm", import.meta.url)',
+  );
+  // If the anchor moved, the mutation is a no-op and the claim would pass for
+  // the wrong reason — which is how a checker rots without going red.
+  if (mutated === before) throw new Error("mutation anchor not found in web/wasm-test.mjs");
+  try {
+    writeFileSync(path, mutated);
+    const c = claim("wasm-test-inputs-tracked");
+    const after = await evaluate(c, await resolveInput(c.input));
+    if (after.ok) throw new Error("still passed on a test that reads dist/");
+  } finally {
+    writeFileSync(path, before);
+  }
+});
+
+t("kernel-vectors-satisfy-wasm goes red on a vector the binary fails", () =>
+  mustFlipProbe("kernel-vectors-satisfy-wasm", "an unsatisfied golden vector",
+    async () => ({ vectors: 59, unsatisfied: ["rotate71(70, 1)"] })));
+
+t("kernel-vectors-satisfy-wasm goes red on a short vector file", () =>
+  mustFlipProbe("kernel-vectors-satisfy-wasm", "fewer than 59 vectors",
+    async () => ({ vectors: 58, unsatisfied: [] })));
 
 /**
  * A minimal valid wasm module with exactly one import (`env.abort`) and one

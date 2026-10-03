@@ -64,6 +64,14 @@ export const CORE = [
   "scripts/join-test.mjs",
   "web/net-test.mjs",
   "scripts/vacuum-bug-test.mjs",
+  // The kernel conformance test. It used to read the gitignored `dist/` and
+  // fail on a clean checkout, so it sat in EXCLUDED as "BROKEN" — while being
+  // the only suite tying the wasm to Lean. It now reads tracked artifacts
+  // (web/kant_kernel.wasm, web/kernel-vectors.json) and runs in 0.5s.
+  // scripts/wasm-test.mjs delegates to the web copy, so there is one set of
+  // assertions rather than two byte-identical copies that could drift.
+  "web/wasm-test.mjs",
+  "scripts/wasm-test.mjs",
 ];
 
 /**
@@ -93,8 +101,6 @@ export const EXCLUDED = {
   "scripts/handpage-test.mjs": "BROKEN: looks for scripts/index.html; the pages live in web/",
   "scripts/page-test.mjs": "BROKEN: looks for scripts/index.html; the pages live in web/",
   "scripts/site-test.mjs": "BROKEN: looks for scripts/index.html; the pages live in web/",
-  "scripts/wasm-test.mjs": "BROKEN: reads gitignored dist/ (claim wasm-test-reads-gitignored-dist)",
-  "web/wasm-test.mjs": "BROKEN: reads gitignored dist/ (claim wasm-test-reads-gitignored-dist)",
   "web/cli-page-test.mjs": "BROKEN: real assertion failure, box.querySelectorAll is not a function",
 };
 

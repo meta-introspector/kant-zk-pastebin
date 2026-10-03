@@ -290,10 +290,16 @@ constrained by measured budgets.
 
 ## Open
 
-- `web/wasm-test.mjs` reads `dist/kant_kernel.wasm` directly, and `dist/` is
+- ~~`web/wasm-test.mjs` reads `dist/kant_kernel.wasm` directly, and `dist/` is
   gitignored, so the test fails in a fresh checkout even though the embedded
-  copy is byte-identical. Same failure mode the loader's own comment complains
-  about. **Worth fixing before phases 1–3, since it will hide real breakage.**
+  copy is byte-identical.~~ **Fixed.** The test now reads tracked artifacts
+  (`web/kant_kernel.wasm`, `web/kernel-vectors.json`), which
+  `scripts/embed-kernel.mjs` writes from `lake exe emitwasm`'s output and whose
+  `--check` mode verifies them against it. Two claims replace the old
+  `wasm-test-reads-gitignored-dist` defect: `wasm-test-inputs-tracked` asks git
+  whether every file the test opens is tracked, and `kernel-vectors-satisfy-wasm`
+  replays the 59 vectors against the binary. Both were mutation-tested — they go
+  red when the `dist/` read is reintroduced and when a vector is corrupted.
 - `server/thunk-store.mjs` and `server/snapshot.mjs` are untracked and unreviewed.
   Phase 2 depends on the store.
 - Nothing here is tested against a live swarm. Every wasm claim in this document

@@ -19,6 +19,7 @@
 // is still there, so this file going red is the signal that phase 0 landed.
 
 import { readFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, relative, resolve } from "node:path";
 
@@ -645,19 +646,60 @@ export const CLAIMS = [
     probe: (found) => found,
   },
 
-  // ── a latent false failure ────────────────────────────────────
+  // ── the kernel conformance test ─────────────────────────────────
+  // This was a defect claim (`wasm-test-reads-gitignored-dist`): the test read
+  // `dist/`, which is gitignored, so it died with ENOENT on a clean checkout and
+  // was filed as broken — while being the only test tying the binary to Lean.
+  // Both claims below describe behaviour rather than a spelling, so they keep
+  // holding however the test is rewritten.
   {
-    id: "wasm-test-reads-gitignored-dist",
-    claim: "web/wasm-test.mjs reads dist/, which is gitignored, so it fails in a fresh checkout",
+    id: "wasm-test-inputs-tracked",
+    claim: "every artifact web/wasm-test.mjs reads is tracked in git, so it runs on a clean checkout",
     doc: "WASM.md",
-    kind: "defect",
-    input: D("wasm-test and gitignore", () => ({
-      test: read(ROOT, "web/wasm-test.mjs", "utf8"),
-      ignore: read(ROOT, ".gitignore", "utf8"),
-    })),
+    kind: "health",
+    input: D("wasm-test read targets against git", () => {
+      const src = read(ROOT, "web/wasm-test.mjs", "utf8");
+      // Whatever the test opens at start-up, resolved against the test's own
+      // directory and then asked of git. Reintroducing `../dist/` fails this
+      // because `dist/` is gitignored — not because a literal string came back.
+      const targets = [...src.matchAll(/readFile\(\s*new URL\(\s*"([^"]+)"/g)].map((m) => m[1]);
+      const dir = resolve(ROOT, "web");
+      const tracked = new Set(
+        execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" })
+          .split("\n").filter(Boolean).map((p) => resolve(ROOT, p)),
+      );
+      return targets.map((t) => ({
+        target: t,
+        path: relative(ROOT, resolve(dir, t)),
+        tracked: tracked.has(resolve(dir, t)),
+      }));
+    }),
+    // Non-empty (so a regex that stopped matching cannot pass vacuously), and
+    // every target tracked.
     expect: true,
-    probe: ({ test, ignore }) =>
-      /["'`]dist\/kant_kernel\.wasm/.test(test) && /^dist\/?$/m.test(ignore),
+    probe: (rows) => rows.length > 0 && rows.every((r) => r.tracked),
+  },
+  {
+    id: "kernel-vectors-satisfy-wasm",
+    claim: "all 59 tracked golden vectors are satisfied by the tracked binary, so the two agree",
+    doc: "WASM.md, SYSTEM.md",
+    kind: "health",
+    input: D("vectors replayed against the kernel", async () => {
+      const wasm = read(ROOT, "web/kant_kernel.wasm");
+      const vectors = JSON.parse(read(ROOT, "web/kernel-vectors.json", "utf8")).vectors;
+      const { instance } = await WebAssembly.instantiate(wasm, {});
+      const bad = [];
+      for (const v of vectors) {
+        const fn = instance.exports[v.f];
+        if (typeof fn !== "function") { bad.push(`${v.f}: missing export`); continue; }
+        // wasm i64 results arrive signed; the kernel is unsigned throughout.
+        const got = BigInt.asUintN(64, fn(...v.args.map((a) => BigInt(a))));
+        if (got !== BigInt(v.expected)) bad.push(`${v.f}(${v.args.join(",")})`);
+      }
+      return { vectors: vectors.length, unsatisfied: bad };
+    }),
+    expect: true,
+    probe: (r) => r.vectors === 59 && r.unsatisfied.length === 0,
   },
 ];
 
