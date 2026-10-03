@@ -265,7 +265,8 @@ the cost of many modules to fetch. One module is simpler and already fits a fram
 
 [THUNK-CYCLE.md](THUNK-CYCLE.md) is the loop these three feed: sops on every
 thunk, `apis + sops + args` ⇒ results, results as new thunks or cached values
-with history, everything a lens, and a schedule constrained by measured budgets.
+with history, a lens an expensive thunk over other thunks' results, and a schedule
+constrained by measured budgets.
 
 ## Open
 
