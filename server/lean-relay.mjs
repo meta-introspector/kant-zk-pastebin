@@ -8,7 +8,9 @@
 // Clients cannot tell them apart.
 //
 // Usage (Cloudflare):
-//   wrangler deploy --name kant-zk-relay-wasm --asset "ASSETS=./web"
+//   CLOUDFLARE_API_TOKEN=$(cat ~/.cloudflare) \
+//   CLOUDFLARE_ACCOUNT_ID=0ceffbadd0a04623896f5317a1e40d94 \
+//   wrangler deploy --config server/wrangler.lean.toml
 //
 // The WASM binary is fetched from the published URL at startup and cached in
 // CF KV namespace `WASM_KV` (optional; unbound by default).  The binary is
@@ -37,9 +39,24 @@ const WASM_URL = "https://solana.solfunmeme.com/kant-wasm/kant_kernel.wasm";
 const WASM_KV_KEY = "kant-wasm-cache";
 
 // Durable Object: one per room — append-only log
+// One room: an append-only log, in this isolate's memory.
+//
+// Not a Durable Object. This is a rendezvous, not a store — a room lives until
+// the isolate recycles and is gone after that. The DO free tier bills storage
+// *duration*, and holding rooms open is what exhausted the budget (PB-19). The
+// peers hold the record; every line carries its own witness.
+//
+// Two peers in different Cloudflare PoPs no longer share a room through this
+// worker; they reach each other over the mesh and the bus.
+const ROOM_OBJECTS = new Map();
+const roomFor = (id) => {
+  let r = ROOM_OBJECTS.get(id);
+  if (!r) { r = new Room(); ROOM_OBJECTS.set(id, r); }
+  return r;
+};
+
 class Room {
-  constructor(state) {
-    this.state = state;
+  constructor() {
     this.lines = [];
     this.cursor = 0;
   }
@@ -239,7 +256,8 @@ const handleWasmLoad = async (env) => {
   throw new Error("WASM kernel not available from any source");
 };
 
-// Durable Object binding for rooms
+// Router stub. The name is kept because it is what the deployed worker's `env`
+// carried; the rooms behind it are ROOM_OBJECTS in this isolate's memory.
 const ROOMS = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -249,8 +267,8 @@ const ROOMS = {
       return json({ ok: false, error: "room required" }, 400);
     }
 
-    // Get or create the Durable Object for this room
-    const room = env.ROOMS.get(roomId);
+    // Get or create the in-isolate room for this id.
+    const room = roomFor(roomId);
     return room.fetch(request, env);
   },
 };
@@ -281,7 +299,7 @@ export default {
       const roomId = url.searchParams.get("room");
       if (!roomId) return json({ ok: false, error: "room required" }, 400);
 
-      const room = env.ROOMS.get(roomId);
+      const room = roomFor(roomId);
       return room.fetch(request, env);
     }
 
@@ -290,7 +308,7 @@ export default {
       const roomId = url.searchParams.get("room") || path.split("/room/")[1];
       if (!roomId) return json({ ok: false, error: "room required" }, 400);
 
-      const room = env.ROOMS.get(roomId);
+      const room = roomFor(roomId);
       return room.fetch(request, env);
     }
 

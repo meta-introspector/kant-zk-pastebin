@@ -1,0 +1,44 @@
+name = "kant-zk-relay-wasm"
+main = "lean-relay.mjs"
+account_id = "0ceffbadd0a04623896f5317a1e40d94"
+compatibility_date = "2025-01-01"
+
+# No preview URLs.
+preview_urls = false
+
+# No Durable Object. lean-relay.mjs keeps rooms in isolate memory and forgets
+# them when the isolate recycles: this worker is a rendezvous, not a store. The
+# DO free tier bills storage *duration*, and holding rooms open is what
+# exhausted the budget (PB-19). The peers hold the record — every line carries
+# its own witness.
+#
+# Two peers in different Cloudflare PoPs no longer share a room through this
+# worker; they reach each other over the mesh and the bus.
+#
+# `WASM_KV`, the cache the header comment describes, is not bound and cannot be
+# created with the token in ~/.cloudflare (it deploys Workers and nothing else).
+# The loader treats it as optional, so the wasm is fetched at startup instead.
+#
+# v1 stays declared even though it adds nothing: wrangler derives the class list
+# from the tags in this file rather than from what is deployed, and without it
+# v2 is rejected as "non-existent class Room".
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+# Removes the ROOMS namespace and the storage behind it. Cloudflare refuses to
+# drop a class without this (code 10064). What it deletes was the relay's own
+# copy of room logs.
+#
+# Rollback: redeploy version 9f32f50e-c403-4121-a758-4f2608412bfc. A migration
+# tag cannot be un-applied, so the deleted logs do not come back with it.
+[[migrations]]
+tag = "v2"
+deleted_classes = ["Room"]
+
+[assets]
+directory = "../web"
+binding = "ASSETS"
+
+[observability]
+enabled = false
