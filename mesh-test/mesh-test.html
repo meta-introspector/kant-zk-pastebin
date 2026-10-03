@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kant Pastebin Mesh Test (Rust + WASM)</title>
+<style>
+:root { color-scheme: dark; }
+body { font-family: monospace; margin: 0 auto; max-width: 80rem; padding: 1rem; background: #0d1117; color: #c9d1d9; }
+h1 { font-size: 1.2rem; } a { color: #58a6ff; }
+button { background: #2d3748; color: #c9d1d9; border: 1px solid #4a5568; padding: .5rem 1rem; cursor: pointer; border-radius: 4px; }
+button:hover { border-color: #718096; }
+#log { white-space: pre-wrap; word-break: break-all; background: #010409; border: 1px solid #30363d; border-radius: 6px; padding: .5rem; height: 18rem; overflow-y: auto; font-size: .9rem; }
+fieldset { border: 1px solid #30363d; border-radius: 6px; margin: 0 0 1rem; }
+legend { padding: 0 .4rem; color: #8b949e; }
+div { margin: .5rem 0; }
+</style>
+</head>
+<body>
+<h1>Kant Pastebin Mesh Test (Rust + WASM)</h1>
+<p>
+  Browser instance (WASM core) mesh testing against Rust backend at<br>
+  <strong>http://127.0.0.1:8090/api/mesh/peers</strong> and other mesh endpoints.
+</p>
+
+<fieldset>
+  <legend>Setup</legend>
+  <div>
+    <label>Room ID (for mesh identities): <input id="room-id" value="test-room-1"></label>
+  </div>
+  <div>
+    <label>Peer ID (this browser instance): <input id="peer-id" value="wasm-client-1"></label>
+  </div>
+  <div>
+    <button id="load-wasm">Load WASM Core</button>
+    <button id="announce-identity" disabled>Announce Identity to Rust Mesh</button>
+    <button id="fetch-peers" disabled>Fetch Peers from Rust</button>
+    <button id="ping-peers" disabled>Ping Peers</button>
+  </div>
+  <div id="status"></div>
+</fieldset>
+
+<fieldset>
+  <legend>Log</legend>
+  <div id="log"></div>
+</fieldset>
+
+<script type="module">
+const log = (msg) => {
+  const d = document.createElement("div");
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  document.getElementById("log").appendChild(d);
+};
+let wasmCore = null;
+let roomId = null;
+let peerId = null;
+let statusEl = null;
+
+const loadWASM = async () => {
+  try {
+    statusEl.innerHTML = "Loading WASM core...";
+    const mod = await import('./pastebin_wasm.js');
+    await mod.default();
+    wasmCore = mod;
+    statusEl.innerHTML = "<span class='ok'>WASM core loaded</span>";
+    document.getElementById("announce-identity").disabled = false;
+    document.getElementById("fetch-peers").disabled = false;
+    document.getElementById("ping-peers").disabled = false;
+    log("WASM core loaded successfully");
+    log(`Available WASM functions: wasm_unixfs_cid=${typeof wasmCore.wasm_unixfs_cid}, wasm_cid_of_bytes=${typeof wasmCore.wasm_cid_of_bytes}`);
+  } catch (e) {
+    statusEl.innerHTML = `<span class='err'>WASM load failed: ${e.message}</span>`;
+    log(`WASM load error: ${e.message}`);
+  }
+};
+
+const cidOf = async (bytes) => {
+  if (!wasmCore) throw new Error("WASM not loaded");
+  try {
+    return await wasmCore.wasm_unixfs_cid(bytes);
+  } catch (e) {
+    log(`wasm_unixfs_cid failed, trying wasm_cid_of_bytes: ${e.message}`);
+    return wasmCore.wasm_cid_of_bytes(bytes);
+  }
+};
+
+const announceIdentity = async () => {
+  try {
+    statusEl.innerHTML = "Announcing identity to Rust mesh...";
+    const identity = {
+      id: `${roomId}#${peerId}`,
+      name: peerId,
+      display_name: `Browser Client ${peerId}`,
+      avatar_id: null,
+      bio: `WASM browser instance mesh testing`,
+      relays: ["http://127.0.0.1:8090"],
+      created: Math.floor(Date.now() / 1000),
+      updated: Math.floor(Date.now() / 1000)
+    };
+    
+    const identityJson = JSON.stringify(identity, null, 2);
+    const identityCid = await cidOf(new TextEncoder().encode(identityJson));
+    log(`Identity JSON CID (computed via WASM): ${identityCid}`);
+    
+    const response = await fetch('http://127.0.0.1:8090/api/mesh/announce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(identity)
+    });
+    
+    if (response.ok) {
+      statusEl.innerHTML = "<span class='ok'>Identity announced successfully</span>";
+      log(`Identity announced to Rust mesh (status: ${response.status})`);
+    } else {
+      const errorText = await response.text();
+      statusEl.innerHTML = `<span class='err'>Announce failed: ${errorText}</span>`;
+      log(`Identity announce failed: ${errorText}`);
+    }
+  } catch (e) {
+    statusEl.innerHTML = `<span class='err'>Error: ${e.message}</span>`;
+    log(`Announce identity error: ${e.message}`);
+  }
+};
+
+const fetchPeers = async () => {
+  try {
+    statusEl.innerHTML = "Fetching peers from Rust mesh...";
+    const response = await fetch('http://127.0.0.1:8090/api/mesh/peers');
+    
+    if (response.ok) {
+      const peers = await response.json();
+      statusEl.innerHTML = `<span class='ok'>Found ${peers.length} peers</span>`;
+      log(`Peers from Rust mesh: ${JSON.stringify(peers, null, 2)}`);
+    } else {
+      const errorText = await response.text();
+      statusEl.innerHTML = `<span class='err'>Fetch failed: ${errorText}</span>`;
+      log(`Fetch peers failed: ${errorText}`);
+    }
+  } catch (e) {
+    statusEl.innerHTML = `<span class='err'>Error: ${e.message}</span>`;
+    log(`Fetch peers error: ${e.message}`);
+  }
+};
+
+const pingPeers = async () => {
+  try {
+    statusEl.innerHTML = "Pinging peers...";
+    const pingMessage = {
+      id: crypto.randomUUID(),
+      from: peerId,
+      to: null,
+      kind: "RelayPing",
+      payload: JSON.stringify({ source: peerId, timestamp: Date.now() }),
+      timestamp: Math.floor(Date.now() / 1000)
+    };
+    
+    const response = await fetch('http://127.0.0.1:8090/api/mesh/ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pingMessage)
+    });
+    
+    if (response.ok) {
+      const result = await response.json();
+      statusEl.innerHTML = "<span class='ok'>Ping sent successfully</span>";
+      log(`Ping to Rust mesh sent (status: ${response.status}): ${JSON.stringify(result)}`);
+    } else {
+      const errorText = await response.text();
+      statusEl.innerHTML = `<span class='err'>Ping failed: ${errorText}</span>`;
+      log(`Ping failed: ${errorText}`);
+    }
+  } catch (e) {
+    statusEl.innerHTML = `<span class='err'>Error: ${e.message}</span>`;
+    log(`Ping error: ${e.message}`);
+  }
+};
+
+const setup = () => {
+  roomId = document.getElementById("room-id").value;
+  peerId = document.getElementById("peer-id").value;
+  document.getElementById("load-wasm").onclick = loadWASM;
+  document.getElementById("announce-identity").onclick = announceIdentity;
+  document.getElementById("fetch-peers").onclick = fetchPeers;
+  document.getElementById("ping-peers").onclick = pingPeers;
+};
+
+window.onload = () => {
+  setup();
+  statusEl = document.getElementById("status");
+  log("Mesh test page loaded. Configure room/peer IDs and click 'Load WASM Core'.");
+};
+</script>
+</body>
+</html>

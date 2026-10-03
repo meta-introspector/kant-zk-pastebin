@@ -35,7 +35,7 @@
     <button id="join">join</button>
     <span id="status" class="dim"></span>
   </div>
-  <div class="row dim">ipfs: <span id="ipfs-status">probing…</span> · kernel: <span id="kernel-status">not loaded</span> · core: <span id="core-status">probing…</span></div>
+  <div class="row dim">ipfs: <span id="ipfs-status">probing…</span> · kernel: <span id="kernel-status">not loaded</span> · core: <span id="core-status">probing…</span> · helia: <span id="helia-status">probing…</span></div>
 </fieldset>
 
 <fieldset>
@@ -95,6 +95,17 @@ if (gatewayIsLocal && !onLocalhost) {
     $("ipfs-status").textContent = r ? "gateway reachable" : noGateway;
   }).catch(() => { $("ipfs-status").textContent = noGateway; });
 }
+
+import("./kant-helia.mjs").then(async ({ heliaNode, heliaAvailable }) => {
+  const ok = await heliaAvailable();
+  if (!ok) { $("helia-status").textContent = "helia unavailable (no wasm/ipfs support)"; return; }
+  try {
+    const node = await heliaNode();
+    $("helia-status").textContent = `helia node ready (${node.peerId?.toString().slice(0, 8) ?? "?"})`;
+  } catch (e) {
+    $("helia-status").textContent = `helia unavailable: ${e.message}`;
+  }
+}).catch(() => { $("helia-status").textContent = "helia unavailable"; });
 
 loadKernel().then((k) => {
   $("kernel-status").textContent = `proved kernel ok (${k.source ?? "wasm"})`;

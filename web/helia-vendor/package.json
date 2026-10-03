@@ -1,0 +1,8 @@
+{
+  "name": "kant-helia-vendor",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "helia": "^5.4.1"
+  }
+}

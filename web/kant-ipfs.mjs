@@ -23,6 +23,7 @@
 // notes there are the ones that actually change the hash.
 
 import { utf8, fromUtf8, hexDecode } from "./kantzk.mjs";
+import { heliaCat, heliaAdd, heliaNode } from "./kant-helia.mjs";
 
 // ── the Rust core (pastebin-wasm), preferred over the JS path ──────────
 //
@@ -187,7 +188,7 @@ function unixfsData(filesize, blocksizes) {
 }
 
 /** The dag-pb root PBNode for a flat UnixFS file. */
-function unixfsRoot(links, filesize, blocksizes) {
+export function unixfsRoot(links, filesize, blocksizes) {
   const out = [];
   for (const { hash, tsize } of links) {
     const link = [
@@ -256,13 +257,16 @@ export function cidBytes(cid) {
 // ── kubo RPC / gateway (both optional at runtime) ───────────────────────
 
 /**
- * Add + pin via a local kubo RPC. Returns the CID string, or null when kubo
- * is unreachable/CORS-blocked — callers then fall back to embedding the bytes
- * in the room record. `rpcBase` injectable for tests.
+ * Add + pin via Helia (in-browser js-ipfs) first, then kubo RPC fallback.
+ * Returns the CID string, or null when neither is reachable — callers
+ * then fall back to embedding the bytes in the room record.
  */
 export async function ipfsAdd(bytes, name = "artifact.bin", rpcBase = KUBO_RPC) {
-  // No size ceiling here: kubo applies the same 256 KiB chunking this module
-  // does and returns the same root CID, so large artifacts pin fine.
+  const heliaCid = await heliaAdd(bytes, name);
+  if (heliaCid !== null) {
+    const heliaVerified = await cidOf(bytes);
+    if (heliaCid === heliaVerified) return heliaCid;
+  }
   try {
     const form = new FormData();
     form.append("file", new Blob([bytes]), name);
@@ -274,27 +278,24 @@ export async function ipfsAdd(bytes, name = "artifact.bin", rpcBase = KUBO_RPC) 
     const lines = (await res.text()).trim().split("\n");
     const last = JSON.parse(lines[lines.length - 1]);
     return last.Hash ?? null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 /**
- * Fetch artifact bytes from an IPFS gateway. Returns null when unreachable —
- * callers then ask the room for an embedded copy. `gwBase` injectable.
+ * Fetch artifact bytes from Helia (in-browser js-ipfs) first, then IPFS gateway.
+ * Returns null when unreachable — callers then ask the room for an embedded copy.
  */
 export async function ipfsCat(cid, gwBase = GATEWAY, timeoutMs = 8000) {
+  const heliaBytes = await heliaCat(cid);
+  if (heliaBytes !== null) return heliaBytes;
+
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     const res = await fetch(`${gwBase}/ipfs/${cid}`, { signal: ctl.signal });
     if (!res.ok) return null;
     return new Uint8Array(await res.arrayBuffer());
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  } catch { return null; } finally { clearTimeout(timer); }
 }
 
 // ── kzcid room records ──────────────────────────────────────────────────

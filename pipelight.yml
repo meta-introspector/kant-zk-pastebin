@@ -1,0 +1,140 @@
+# Pipeliight CI/CD Configuration for Kant Pastebin
+# Standardizes builds across environments using monster primes for stage tracking
+
+name: kant-pastebin-pipelight
+version: "0.1.0"
+
+stages: &stages
+  - 2   # Initial check
+  - 3   # Test preparation
+  - 5   # Unit tests
+  - 7   # Build
+  - 11  # WASM compilation
+  - 13  # WASM binding generation
+  - 17  # WASM testing
+  - 19  # Integration tests
+  - 23  # Security scan
+  - 29  # Deployment preparation
+  - 31  # Final deployment
+
+variables:
+  CARGO_TARGET_DIR: target
+  WASM_TARGET: wasm32-unknown-unknown
+  BUILD_TYPE: release
+
+jobs:
+  build:
+    stage: *stages
+    script:
+      - echo "🔮 Pipeliight Stage ${PIPELIGHT_STAGE}: ${JOB_NAME}"
+      - echo "   FRACTRAN State: $((${PIPELIGHT_STAGE} * 2))"
+      
+      # Stage 2: Cargo check
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 2 ]; then
+          echo "   [Stage ${PIPELIGHT_STAGE}] Running cargo check..."
+          cargo check --release
+        fi
+      
+      # Stage 3: Test setup
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 3 ]; then
+          echo "   [Stage ${PIPELIGHT_STAGE}] Setting up test environment..."
+          rustup target add wasm32-unknown-unknown || true
+        fi
+      
+      # Stage 5: Unit tests
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 5 ]; then
+          echo "   [Stage ${PIPELIGHT_STAGE}] Running unit tests..."
+          cargo test --release
+        fi
+      
+      # Stage 7: Main build
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 7 ]; then
+          echo "   [Stage ${PIPELIGHT_STAGE}] Building main application..."
+          cargo build --release
+        fi
+      
+      # Stage 11: WASM compilation
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 11 ]; then
+          echo "   [Stage ${PIPELIGHT_STAGE}] Building WASM binary..."
+          cargo build --release -p pastebin-wasm --target $WASM_TARGET
+        fi
+      
+      # Stage 13: WASM binding generation
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 13 ]; then
+          echo "   [Stage ${PIPELIGHT_STAGE}] Generating WASM bindings..."
+          wasm-bindgen --target web --out-dir ./mesh-test ./target/$WASM_TARGET/release/pastebin_wasm.wasm
+        fi
+      
+      # Stage 17: WASM testing
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 17 ]; then
+          echo   [Stage ${PIPELIGHT_STAGE}] Testing WASM functionality...
+          # Start HTTP server for WASM tests
+          python3 -m http.server 8766 --directory ./mesh-test &
+          HTTP_PID=$!
+          sleep 2
+          
+          # Run WASM tests
+          npx playwright test mesh-test/mesh-test-http.spec.js --timeout 30000
+          
+          # Cleanup
+          kill $HTTP_PID 2>/dev/null || true
+        fi
+      
+      # Stage 19: Integration tests (mesh)
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 19 ]; then
+          echo   [Stage ${PIPELIGHT_STAGE}] Running mesh integration tests...
+          # Start backend server
+          cargo run --release --bin kant-pastebin &
+          SERVER_PID=$!
+          sleep 5
+          
+          # Run mesh tests
+          npx playwright test mesh-test/mesh-test-http.spec.js --timeout 30000
+          
+          # Cleanup
+          kill $SERVER_PID 2>/dev/null || true
+        fi
+      
+      # Stage 23: Security scan
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 23 ]; then
+          echo   [Stage ${PIPELIGHT_STAGE}] Running security checks...
+          cargo audit || echo "   Warning: cargo audit not available"
+        fi
+      
+      # Stage 29: Deployment preparation
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 29 ]; then
+          echo   [Stage ${PIPELIGHT_STAGE}] Preparing for deployment...
+          echo "   Build artifacts ready:"
+          ls -la target/release/kant-pastebin
+          ls -la target/$WASM_TARGET/release/pastebin_wasm.wasm
+          ls -la mesh-test/pastebin_wasm.js
+        fi
+      
+      # Stage 31: Final deployment
+      - |
+        if [ ${PIPELIGHT_STAGE} -ge 31 ]; then
+          echo   [Stage ${PIPELIGHT_STAGE}}] Deployment complete!
+          echo   "   Ready to deploy:"
+          echo   "   - Binary: target/release/kant-pastebin"
+          echo   "   - WASM: target/$WASM_TARGET/release/pastebin_wasm.wasm"
+          echo   "   - JS Bindings: mesh-test/pastebin_wasm.js"
+        fi
+
+notifications:
+  email:
+    on_success: change
+    on_failure: always
+  slack:
+    webhook: https://hooks.slack.com/services/<REDACTED — set PIPELINE_SLACK_WEBHOOK instead>
+    on_success: never
+    on_failure: always

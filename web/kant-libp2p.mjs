@@ -16,11 +16,14 @@
 //
 // Two constraints shape the design:
 //
-//  - CHUNK_SIZE is 256 KiB. gossipsub's default maxMessageSize is much
-//    smaller (64 KiB in libp2p's own defaults), so a Kant chunk cannot be
-//    published as one message. Chunks are sliced into FRAME-sized pieces
-//    and reassembled, and the frame size is a parameter because the right
-//    value depends on the swarm's actual limit.
+//  - CHUNK_SIZE is 256 KiB. js-libp2p's gossipsub 17.1.2 has NO
+//    `maxMessageSize` option at all — I had claimed a 64 KiB cap and cited it
+//    as fact; that number is go-libp2p's, not this codebase's. The real
+//    constraint is upstream of gossipsub: the swarm's stream and muxer
+//    limits, which differ per transport and per peer. So the frame size here
+//    is a PARAMETER bounded to something any plausible swarm accepts, rather
+//    than a number pretending to be a constant of the protocol. Frames stay
+//    well under the smallest limit that matters and are reassembled by index.
 //  - A topic name is public. It is therefore derived from the ROOM (which
 //    the relay already knows) and the MANIFEST WITNESS (which every peer in
 //    the room already knows), and never from the room secret. A secret-derived
@@ -43,17 +46,25 @@ const HEADER = 41;
 const U32 = 4294967296;
 
 /**
- * Frame size for the wire. Comfortably under libp2p's 64 KiB default
- * maxMessageSize, leaving room for the header and for a transport that
- * wraps our message in its own framing.
+ * Frame size for the wire: 16 KiB, plus the 41-byte header.
+ *
+ * Deliberately conservative and deliberately a PARAMETER. gossipsub 17.1.2
+ * exposes no message-size option, so the binding limit is whatever the
+ * transport and muxer on the far side allow. 16 KiB fits inside every
+ * libp2p transport's default stream window by a wide margin, which is the
+ * property worth having: a frame is small enough that no plausible peer
+ * rejects it outright.
  */
-export const FRAME_BYTES = 24 * 1024;
+export const FRAME_BYTES = 16 * 1024;
 
 /** The smallest frame worth sending; below this the overhead dominates. */
 export const MIN_FRAME_BYTES = 1024;
 
 /** Refuse a frame larger than this regardless of what a peer claims. */
 export const MAX_FRAME_BYTES = 64 * 1024;
+
+/** Longest request nonce we will carry. */
+export const MAX_NONCE_BYTES = 8;
 
 /** A chunk bigger than this is not a file share, it is an attack. */
 export const MAX_CHUNK_BYTES = 1024 * 1024;
@@ -103,8 +114,14 @@ export const asWitness = (s) => {
   return /^[0-9a-f]{64}$/.test(lower) ? lower : null;
 };
 
-/** Encode one wire message. Pure — the tests round-trip this directly. */
-export const encode = ({ tag, witness, index = 0, total = 0, payload = null }) => {
+/** Encode one wire message. Pure — the tests round-trip this directly.
+ *
+ *  `nonce` rides in the reserved bytes of the header on a `want`. It exists
+ *  because gossipsub de-duplicates by message bytes: two identical requests
+ *  for the same chunk are the same message, and the second is refused. */
+export const encode = ({
+  tag, witness, index = 0, total = 0, payload = null, nonce = null,
+}) => {
   const w = asWitness(witness);
   if (w === null) throw new Libp2pError(`not a witness: ${witness}`, { code: "bad-witness" });
   if (!Number.isInteger(index) || index < 0 || !Number.isInteger(total) || total < 1) {
@@ -121,7 +138,49 @@ export const encode = ({ tag, witness, index = 0, total = 0, payload = null }) =
   out.set(u32(index), 33);
   out.set(u32(total), 37);
   out.set(body, HEADER);
+  // The nonce lives AFTER the payload, so a `have` frame's length still
+  // equals header + payload and the decoder needs no special case.
+  if (nonce !== null && nonce !== undefined) {
+    const tail = Uint8Array.from(nonce).slice(0, MAX_NONCE_BYTES);
+    const grown = new Uint8Array(HEADER + body.length + tail.length);
+    grown.set(out);
+    grown.set(tail, HEADER + body.length);
+    return grown;
+  }
   return out;
+};
+
+/** Request counter, so two asks for the same chunk are different messages. */
+let _nonce = 0;
+const nextNonce = () => {
+  _nonce = (_nonce + 1) >>> 0;
+  return u32(_nonce);
+};
+
+/**
+ * Pull the bytes out of whatever a handler was handed.
+ *
+ * gossipsub delivers a `message` CustomEvent, so the payload is at
+ * `evt.detail.data` (verified in @libp2p/gossipsub 17.1.2: `message:
+ * CustomEvent<Message>`, and `Message` is `{ topic, data }`). The adapter
+ * above normalises to `{ data }` before calling a handler, but this module's
+ * handlers also run against a plain `{ data }` in the tests and against raw
+ * bytes if anyone wires a different transport — so unwrap all three.
+ *
+ * The old `msg?.data ?? msg` form silently produced `undefined` for a
+ * CustomEvent, which `decode` turned into a null message: the handler ran,
+ * saw nothing, and the peer looked like it had simply never answered.
+ */
+const bytesOf = (msg) => {
+  if (msg == null) return null;
+  if (msg instanceof Uint8Array) return msg;
+  if (Array.isArray(msg)) return Uint8Array.from(msg);
+  if (msg.data != null && typeof msg.data !== "object") return msg.data;
+  if (msg.data?.data != null) return msg.data.data; // { data: { data } }
+  const detail = msg.detail;
+  if (detail != null) return bytesOf(detail);
+  if (msg.data != null) return msg.data;
+  return null;
 };
 
 /** Decode one wire message. Returns null for anything malformed — a
@@ -198,7 +257,7 @@ export const libp2pFetcher = (pubsub, {
   const held = new Map(); // chunk witness -> { frames: Map<index, bytes>, total }
 
   const off = pubsub.subscribe(topic, (msg) => {
-    const m = decode(msg?.data ?? msg);
+    const m = decode(bytesOf(msg));
     // Only `have` frames. A `want` from another peer is not ours to answer —
     // serving is `serveChunks`' job, and a client that also served would
     // answer every request twice.
@@ -256,13 +315,39 @@ export const libp2pFetcher = (pubsub, {
     // frame and states the count; asking frame-by-frame would multiply the
     // message count by the chunk size for no gain, since pubsub has no
     // per-request reply channel anyway.
-    pubsub.publish(topic, encode({
-      tag: TAG_WANT, witness: w, index: 0, total: totalGuess,
-    }));
+    //
+    // `nonce` makes each request a DISTINCT pubsub message. gossipsub keeps
+    // a seen-cache and `publish` throws PublishError.Duplicate for anything
+    // already seen, so two byte-identical `want` frames for the same chunk —
+    // which is exactly what a retry after a timeout looks like — would be
+    // refused as a duplicate and the chunk could never be requested twice.
+    //
+    // `publish` is awaited because it is async and can reject. A rejection
+    // here means nobody was listening (NoPeersSubscribedToTopic) or the
+    // router is unhappy; either way the request did not go out, so there is
+    // nothing to wait for and the right thing is to fail now rather than sit
+    // out the whole timeout on a request that was never made.
+    const ask = () => Promise.resolve(pubsub.publish(topic, encode({
+      tag: TAG_WANT, witness: w, index: 0, total: totalGuess, nonce: nextNonce(),
+    })));
+    try {
+      await ask();
+    } catch (e) {
+      throw new Libp2pError(
+        `the chunk request could not be published: ${e?.message ?? e}`,
+        { code: "no-peers", witness: w });
+    }
 
     // Poll rather than subscribe-per-request: the handler above is already
     // collecting, and one subscription per chunk would leak a listener per
     // file into a long-lived node.
+    //
+    // One re-ask partway through: a peer that joined the topic after the
+    // first request never saw it, and pubsub has no replay, so a request
+    // that was sent into an empty room is simply lost. That is the common
+    // case here — the reader often arrives before the holder does.
+    const reaskAt = Date.now() + Math.max(250, Math.floor(timeoutMs / 2));
+    let reasked = false;
     for (;;) {
       const slot = held.get(w);
       if (slot && slot.frames.size === slot.total) {
@@ -280,7 +365,12 @@ export const libp2pFetcher = (pubsub, {
           return got;
         }
       }
-      if (Date.now() > deadline) break;
+      const now = Date.now();
+      if (!reasked && now >= reaskAt) {
+        reasked = true;
+        try { await ask(); } catch { /* nobody to ask yet; keep waiting */ }
+      }
+      if (now > deadline) break;
       await new Promise((r) => setTimeout(r, 25));
     }
     throw new Libp2pError(
@@ -327,12 +417,18 @@ export const serveChunks = (pubsub, {
   // visible instead of silently costing a download.
   const mismatched = new Set();
 
+  // `publish` is async and throws. Every send below is chained and swallowed
+  // on purpose: a handler that returns a rejected promise surfaces as an
+  // unhandled rejection, and refusing to answer is not an error worth
+  // crashing a page over.
+  const send = (bytes) => Promise.resolve(pubsub.publish(topic, bytes)).catch(() => null);
+
   return pubsub.subscribe(topic, (msg) => {
-    const m = decode(msg?.data ?? msg);
+    const m = decode(bytesOf(msg));
     if (!m || m.tag !== TAG_WANT) return;
     const bytes = chunks.get(m.witness);
     if (!bytes) {
-      pubsub.publish(topic, encode({ tag: TAG_DENY, witness: m.witness, index: 0, total: 1 }));
+      void send(encode({ tag: TAG_DENY, witness: m.witness, index: 0, total: 1 }));
       return;
     }
     const body = Uint8Array.from(bytes);
@@ -344,80 +440,227 @@ export const serveChunks = (pubsub, {
         mismatched.add(m.witness);
         onMismatch?.(m.witness);
       }
-      pubsub.publish(topic, encode({ tag: TAG_DENY, witness: m.witness, index: 0, total: 1 }));
+      void send(encode({ tag: TAG_DENY, witness: m.witness, index: 0, total: 1 }));
       return;
     }
     const total = Math.max(1, Math.ceil(body.length / frameBytes));
+    // Sequential, not parallel: gossipsub de-duplicates by message bytes and
+    // a burst of publishes is also a burst of work on the router. Chaining
+    // keeps frame order on the wire and keeps the seen-cache happy.
+    let chain = Promise.resolve();
     for (let i = 0; i < total; i += 1) {
-      pubsub.publish(topic, encode({
+      chain = chain.then(() => send(encode({
         tag: TAG_HAVE,
         witness: m.witness,
         index: i,
         total,
         payload: body.subarray(i * frameBytes, (i + 1) * frameBytes),
-      }));
+      })));
     }
+    void chain;
   });
 };
 
 // -------------------------------------------------------------- real node
 
 /**
- * A real js-libp2p node with gossipsub, from esm.sh — the same
- * no-bundler-import shape as the Helia vendor bundle. Returns null when the
- * CDN is unreachable so a page without it still works on the relay path;
- * libp2p is an accelerator for artifacts here, never a requirement.
+ * Pinned versions, read off the actual sources in the js-libp2p worktree
+ * (each package's package.json) rather than guessed. Guessing is what
+ * produced a v2-era `@chainsafe/` import set and a `tcp()` listener that
+ * cannot exist in a browser; both are gone below.
  *
- * Kept deliberately small: no bootstrap peers, no relay transport. A node
- * that cannot find peers simply never answers, and the relay path still
- * serves every file.
+ *   libp2p            3.3.11
+ *   @libp2p/gossipsub 17.1.2   (the `@chainsafe/*` names are dead upstream)
+ *   @libp2p/identify / noise / yamux / websockets / webrtc / webtransport
  */
-export const libp2pNode = async ({ onError = null } = {}) => {
-  try {
-    const [{ createLibp2p }, { gossipsub }] = await Promise.all([
-      import("https://esm.sh/libp2p@2"),
-      import("https://esm.sh/@chainsafe/libp2p-gossipsub"),
-    ]);
-    const { tcp } = await import("https://esm.sh/@chainsafe/libp2p-net-tcp");
-    const { noise } = await import("https://esm.sh/@chainsafe/libp2p-noise");
-    const { yamux } = await import("https://esm.sh/@chainsafe/libp2p-yamux");
-    const { identify } = await import("https://esm.sh/@chainsafe/libp2p-identify");
+export const LIBP2P_VERSIONS = Object.freeze({
+  "libp2p": "3.3.11",
+  "@libp2p/gossipsub": "17.1.2",
+  "@libp2p/identify": "3.3.9",
+  "@libp2p/noise": "2.1.6",
+  "@libp2p/yamux": "7.1.4",
+  "@libp2p/websockets": "10.1.21",
+  "@libp2p/webrtc": "6.0.33",
+  "@libp2p/webtransport": "6.0.40",
+});
 
-    const node = await createLibp2p({
-      addresses: { listen: ["/ip4/0.0.0.0/tcp/0"] },
-      transports: [tcp()],
-      connectionEncrypters: [noise()],
-      streamMuxers: [yamux()],
-      services: {
-        identify: identify(),
-        pubsub: gossipsub({ allowPublishToZeroTopicPeers: true }),
-      },
+const esm = (spec, version) => `https://esm.sh/${spec}@${version}`;
+
+/**
+ * A real js-libp2p node with gossipsub, loaded from esm.sh — the same
+ * no-bundler shape as the Helia vendor bundle. Returns null when the CDN is
+ * unreachable so a page without it still works on the relay path; libp2p is
+ * an accelerator for artifacts here, never a requirement.
+ *
+ * The API this is written against, verified in the sources:
+ *
+ *  - `node.services.pubsub` is the router. `subscribe(topic)` RETURNS
+ *    NOTHING and is idempotent — there is no per-subscription unsubscribe
+ *    function, and calling it twice is harmless. Messages arrive as a
+ *    `message` CustomEvent whose `detail` is `{ topic, data, ... }`, so the
+ *    payload is `evt.detail.data`, NOT `evt.data` and not a bare Uint8Array.
+ *  - `publish(topic, data)` is ASYNC and THROWS. `PublishError.NoPeersSub-
+ *    cribedToTopic` when nobody is on the topic (which is the normal case
+ *    for a peer that has not yet met anyone) and `PublishError.Duplicate`
+ *    for a repeat of a message already seen. An un-awaited publish rejects
+ *    and, in a browser, that surfaces as an unhandled rejection.
+ *  - Because `subscribe` returns void, this adapter keeps its OWN
+ *    per-topic listener bookkeeping and returns a real unsubscribe, which is
+ *    what the rest of this module and its tests are written against.
+ *
+ * On transports: a browser CANNOT listen on TCP, and js-libp2p's WebTransport
+ * transport explicitly "only allows dialing to other nodes" — it does not
+ * listen. So a browser peer dials out and is reachable through a circuit
+ * relay; `circuitRelayTransport` is what makes an inbound relayed address
+ * work. A node that cannot find peers simply never answers a request, and
+ * the relay path still serves every file.
+ */
+export const libp2pNode = async ({
+  onError = null,
+  relay = "",
+  rendezvous = [],
+  inBrowser = typeof window !== "undefined",
+} = {}) => {
+  try {
+    const V = LIBP2P_VERSIONS;
+    const [core, gs, id, noiseMod, yamuxMod, wsMod, circuitMod] = await Promise.all([
+      import(esm("libp2p", V["libp2p"])),
+      import(esm("@libp2p/gossipsub", V["@libp2p/gossipsub"])),
+      import(esm("@libp2p/identify", V["@libp2p/identify"])),
+      import(esm("@libp2p/noise", V["@libp2p/noise"])),
+      import(esm("@libp2p/yamux", V["@libp2p/yamux"])),
+      import(esm("@libp2p/websockets", V["@libp2p/websockets"])),
+      import(esm("@libp2p/circuit-relay-v2", "4.2.13")),
+    ]);
+
+    // WebTransport cannot listen in a browser, so a browser node listens on
+    // nothing and dials. Under Node the same node CAN listen on WebSocket,
+    // which is what makes the local two-peer test possible at all.
+    const transports = [];
+    if (!inBrowser) transports.push(wsMod.webSockets());
+    else {
+      const wt = await import(esm("@libp2p/webtransport", V["@libp2p/webtransport"]))
+        .catch(() => null);
+      const rtc = await import(esm("@libp2p/webrtc", V["@libp2p/webrtc"]))
+        .catch(() => null);
+      if (wt?.webTransport) transports.push(wt.webTransport());
+      if (rtc?.webRTC) transports.push(rtc.webRTC());
+    }
+    if (transports.length === 0) {
+      throw new Error("no usable transport in this environment");
+    }
+
+    const services = {
+      identify: id.identify(),
+      // `allowPublishToZeroTopicPeers` is a PUBLISH-time opt, not a
+      // constructor one; it is passed per publish below. Without it,
+      // answering a chunk request while alone throws NoPeersSubscribedToTopic
+      // — and a peer serving a file with no peers connected is not an error,
+      // it is the normal state of a browser tab that has not met anyone yet.
+      pubsub: gs.gossipsub({ emitSelf: false }),
+    };
+    if (relay) services.relay = circuitMod.circuitRelay();
+
+    const node = await core.createLibp2p({
+      addresses: { listen: inBrowser ? [] : ["/ip4/127.0.0.1/tcp/0/ws"] },
+      transports,
+      connectionEncrypters: [noiseMod.noise()],
+      streamMuxers: [yamuxMod.yamux()],
+      connectionGater: { denyDialMultiaddr: () => false },
+      peerDiscovery: rendezvous.length ? [await bootstrap(rendezvous)] : undefined,
+      services,
     });
-    if (onError) node.addEventListener("error", (e) => onError(e));
-    return {
-      node,
-      pubsub: node.services.pubsub,
-      /** Minimal `{ subscribe, publish }` over gossipsub's subscribe API. */
-      transport: {
-        subscribe: (topic, handler) => {
-          // gossipsub handlers are called as ({ topic, data }) in v11 and
-          // ({ topic, data }) via the SubscriptionEmitter in some versions;
-          // normalise to a plain SubscriptionEmitter-free shape.
-          const h = (msg) => handler({ data: msg?.data });
-          node.services.pubsub.subscribe(topic);
-          node.services.pubsub.addEventListener("message", h);
-          return () => {
-            node.services.pubsub.removeEventListener("message", h);
+    if (onError) node.addEventListener?.("error", (e) => onError(e));
+
+    const pubsub = node.services.pubsub;
+    // One listener per topic, not per subscription: `subscribe()` is void and
+    // idempotent, so the handler count is this module's to manage.
+    const byTopic = new Map();
+    const publishQueue = new Map(); // topic -> Promise, to serialise per topic
+
+    const transport = {
+      subscribe(topic, handler) {
+        let entry = byTopic.get(topic);
+        if (!entry) {
+          entry = { handlers: new Set(), onMessage: null };
+          pubsub.subscribe(topic);
+          entry.onMessage = (evt) => {
+            const detail = evt?.detail ?? evt;
+            if (detail?.topic !== undefined && detail.topic !== topic) return;
+            const data = detail?.data;
+            if (data == null) return;
+            for (const h of [...entry.handlers]) {
+              try { h({ data }); } catch { /* one bad handler must not stop the rest */ }
+            }
           };
-        },
-        publish: (topic, bytes) => node.services.pubsub.publish(topic, bytes),
+          pubsub.addEventListener("message", entry.onMessage);
+          byTopic.set(topic, entry);
+        }
+        entry.handlers.add(handler);
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          entry.handlers.delete(handler);
+          // Leave the topic subscribed but stop listening once nobody wants
+          // it: `unsubscribe()` makes gossipsub apply a prune backoff, and
+          // re-subscribing inside that window is refused. Keeping the
+          // subscription avoids that entirely.
+          if (entry.handlers.size === 0) {
+            pubsub.removeEventListener?.("message", entry.onMessage);
+            byTopic.delete(topic);
+          }
+        };
+      },
+
+      // Serialised per topic and always resolved: a caller of this module
+      // awaits nothing here, and an unhandled rejection from
+      // NoPeersSubscribedToTopic would surface as a console error on every
+      // chunk we offer to an empty room.
+      publish(topic, bytes) {
+        const prev = publishQueue.get(topic) ?? Promise.resolve();
+        const next = prev.then(async () => {
+          try {
+            return await pubsub.publish(topic, bytes, {
+              allowPublishToZeroTopicPeers: true,
+              ignoreDuplicatePublishError: true,
+            });
+          } catch (e) {
+            // Duplicate and no-peers are ordinary here, not failures.
+            if (onError && !/Duplicate|NoPeersSubscribedToTopic/.test(e?.message ?? "")) {
+              onError(e);
+            }
+            return { recipients: [] };
+          }
+        }).catch(() => ({ recipients: [] }));
+        publishQueue.set(topic, next);
+        return next;
       },
     };
+
+    if (relay) {
+      await circuitMod.circuitRelay().relayListen?.(node.services.relay).catch(() => {});
+    }
+    return { node, pubsub, transport, stop: async () => {
+      for (const topic of byTopic.keys()) pubsub.unsubscribe(topic);
+      byTopic.clear();
+      await node.stop().catch(() => {});
+    } };
   } catch (e) {
     if (onError) onError(e);
     return null;
   }
 };
+
+/** Bootstrap peer discovery, only when peers were actually named. */
+async function bootstrap(addrs) {
+  const { bootstrap } = await import(
+    `https://esm.sh/@libp2p/bootstrap@${LIBP2P_VERSIONS["@libp2p/identify"]}`.replace(
+      "@libp2p/identify", "@libp2p/bootstrap"))
+    .catch(() => ({}));
+  if (!bootstrap) return { start: () => {}, stop: () => {} };
+  return bootstrap({ list: addrs });
+}
 
 // The confidentiality property, stated where a reader will find it.
 // Ciphertext only; the room secret never enters this module. A peer in the
