@@ -42,7 +42,7 @@ pub struct PasteIndex {
     pub root: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ThreadPost {
     pub id: String,
     pub title: String,
