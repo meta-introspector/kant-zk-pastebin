@@ -2,14 +2,16 @@
 
 **Date:** 2026-10-03 · **Status:** proposed · **Companion to** [PLAN.md](PLAN.md)
 
-> **Open PRs on 2026-10-03** — four, and they are not the branches below.
+> **Open PRs on 2026-10-03** — three (of the four below), and they are not the
+> branches here.
 > PR #10 `feat/build-feed` (**Chain A tip**, 1442 files, `CONFLICTING`) is the
 > one that matters: it is the tip this lattice's Step 4 exists for, and it is
 > far larger than the 57-file conflict count suggested. PR #9 is
 > `feature/big-merge` — this branch. PR #2 `feature/wip` is `MERGEABLE` but
-> `UNSTABLE` (298 files). PR #1 is an external contributor's fix, reviewed
-> separately in PLAN.md's Review log: it introduces reflected XSS and does not
-> compile, so it needs a fix before it can merge regardless of the lattice.
+> `UNSTABLE` (298 files). PR #1 (an external contributor's fix) turned out
+> to be **already merged** while still open, and was closed; its one surviving
+> finding is fixed in **#11**, which targets `main` and is independent of this
+> lattice. See PLAN.md's Review log for the retraction.
 
 Thirteen remote branches carry work that is in neither `feature/big-merge` nor
 `main`. They are not a stack — they are two independent chains plus a set of

@@ -246,13 +246,22 @@ exist:
 | `scripts/relay-measure-test.mjs` | 18 |
 | `scripts/relay-telemetry-test.mjs` | 16 |
 | `cargo test --lib` (see `docs/RUST_TESTS.md` for the invocation) | 75 |
+| `src/view.rs` (`js_string_escape`, on `main`, PR #11) | 7 |
 | `scripts/frames-crosscheck.sh` | 20 |
 
 ### A test suite that cannot fail is a liability, not evidence
 
-The `rust-ipfs` submodule must be initialised (`git submodule update --init
-vendor/rust-ipfs`) or the crate will not build at all — this bit during review
-of PR #1.
+Three separate occasions now, and they fail differently:
+
+- **A submodule that was not initialised.** On `feature/big-merge`,
+  `git submodule update --init vendor/rust-ipfs` is required or the crate will
+  not build at all. `main` has no `vendor/` — it gets `rust-unixfs` from a
+  nix input — so the instruction is branch-specific and being wrong about it
+  looks like a broken change.
+- **`main` does not resolve offline.** `multihash-codetable` pins `core2 0.4.0`,
+  which is now yanked upstream. A red build on `main` is not evidence about your
+  change; check the branch before believing it.
+- **Tests that cannot fail.** See below.
 
 Of the sixteen telemetry tests, **three mutations survived the first pass**:
 `requestsPerPoll` halved, `durable` coerced from `null` to `false`, and
@@ -266,47 +275,33 @@ to be doing today.
 ## Review log
 
 **PR #1** (`twilwa`, `fix(access): use public paste access urls`) — reviewed
-2026-10-03. The intent is right and the two tests are genuinely good: they
-assert the absence of `localhost:8090` and of the old `ipfs cat` line, which is
-the actual regression. Three findings, in the order they block a merge:
+2026-10-03, then **retracted in part**. Kept here because the retraction is the
+useful part.
 
-1. **It introduces reflected XSS.** `normalized_base_url()` derives the origin
-   from `connection_info().host()`, which prefers `X-Forwarded-Host` over
-   `Host`, and interpolates it into the paste page **unescaped** inside an
-   `onclick` attribute. Before the PR that value came from `BASE_URL`, an
-   operator-controlled env var; after, it comes from the request. Verified by
-   probe, not by reading: a request with
-   `X-Forwarded-Host: evil"><script>alert(1)</script>` returns
-   `raw_tag=true escaped=false`, with the tag intact in all three command
-   divs. Needs HTML-escaping on the interpolated origin, and a test with a
-   hostile header that fails against the current code.
-2. **It does not compile.** Against this tree: `PasteIndex` has gained a `root`
-   field the PR's base predates, and `store_blocks()` in `ipfs.rs` assumes one
-   `cid` type where `rust-unixfs` and `ipld-core` resolve the crate from two
-   different registries and get distinct types. The PR's own `cargo test` claim
-   in its description is not reproducible here. (A bridge exists — convert by
-   bytes — but that belongs in the PR, not in review.)
-3. **143 of its ~1454 diff lines are `rustfmt`.** The substantive change is
-   about 70 lines. Worth splitting so the security fix is reviewable on its own.
+The first review reported three blockers. Two were wrong:
 
-The two rust changes are otherwise sound and better than what they replace:
-`write_block` now returns whether it wrote, so a partial DAG cannot report
-success, and `ipfs_add_bytes` fails closed when no repo exists rather than
-returning a CID that resolves to nothing.
+1. ~~"It does not compile."~~ **Wrong.** `0ddb10a3` is an ancestor of `main`;
+   the PR was already merged while still showing open. The
+   `PasteIndex.root` error came from `feature/big-merge`, where that field
+   exists and never existed on `main`.
+2. ~~"It introduces reflected XSS via `onclick`."~~ **Superseded.** The
+   `view::W` refactor landed afterwards and moved the value out of the handler
+   into an escaped `data-v`. The refactor was correct; the review predated it.
+3. **rustfmt noise** — real but trivial.
 
-**A suite that cannot go red is not evidence.** Every workstream above should
-add at least one test, and each new test should be shown to fail against the
-current code before it is shown to pass. Three defects this cycle were green
-under a passing suite: a bridge that reported success having carried nothing, a
-relay filter keyed on the wrong witness, and a nonce test that passed against a
-code path never taken.
+What actually survived is the same defect one sink over, and it is fixed in
+**#11**. `Page::render` wrote js_vars as `const k='<value>'` escaping only `'`.
+Inside a `<script>` element the HTML parser looks for `</script>` and decodes
+nothing, so `&lt;` would not have helped either. Three js_vars (`basePath`,
+`pasteUrl`, `dataUrl`) carry `base_url`, which comes from `connection_info()` —
+and actix prefers `X-Forwarded-Host` over `Host`.
 
-## Out of scope
+**The lesson worth keeping: verify a PR's merge state before reviewing its
+diff.** Reviewing an already-landed commit against the wrong branch produced
+two confident, wrong findings, and both were only caught by going back to
+`git merge-base --is-ancestor`. A review that does not first establish what
+the base actually contains is measuring the reviewer's branch, not the PR.
 
-- Federation between networks (spec Phase 4) — blocked on W6.
-- Production migration off the Free plan (Phase 5) — a decision, not code.
-- `helia-integration` — separate task; can sit on top of this later.
-- Anything requiring a second Cloudflare account. Two accounts is only
-  legitimate if N and M are genuinely separately administered with independent
-  membership, keys, and operations. If they share an operator and a user base,
-  the spec's own non-goals forbid it.
+Related: `main` currently **does not resolve offline** —
+`multihash-codetable` pins `core2 0.4.0`, yanked upstream. `feature/big-merge`
+resolves fine. Worth knowing before assuming a red build is your own change.
