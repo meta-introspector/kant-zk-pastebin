@@ -69,7 +69,13 @@ class Room {
       return json({ ok: true, name: "kant-zk-relay-wasm", version: VERSION, rooms: this.lines.length, lines: this.lines.length });
     }
 
-    if (request.method === "POST" && path === "/room" + url.search) {
+    // `path` is url.pathname, which never contains the query string, so the
+    // old guard `path === "/room" + url.search` compared "/room" against
+    // "/room?room=x" and was false for every request: POST to a room always
+    // fell through to the 404 at the bottom. GET worked because its guard is
+    // `path.startsWith("/room")`. This matches how the router above extracts
+    // the room id — `?room=<id>` or `/room/<id>`.
+    if (request.method === "POST" && (path === "/room" || path.startsWith("/room/"))) {
       try {
         const body = await request.json();
         const roomId = url.searchParams.get("room");
