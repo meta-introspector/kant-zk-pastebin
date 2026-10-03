@@ -292,18 +292,34 @@ because the corrections are the useful part.
    answered yes; `origin/main` says no. `gh pr view 1` reports `mergedAt: null`.
    **PR #1 was never merged.** The `PasteIndex.root` error came from
    `feature/big-merge`, where that field exists and never existed on `main`.
-2. ~~"It introduces reflected XSS via `onclick`."~~ Superseded. The `view::W`
-   refactor on `origin/main` moved the value out of the handler into an escaped
-   `data-v` — the correct pattern. My review predated it.
+2. **"It introduces reflected XSS via `onclick`."** — **also wrong**, in the
+   same way. The `view::W` refactor that moves the value into an escaped
+   `data-v` exists on *other branches*; it is **not on `origin/main`**, which
+   still inlines at `src/handlers.rs:904-906`. I claimed it had landed because I
+   had been reading a branch that contained it.
 3. rustfmt noise — real, and trivial.
+
+So both substantive findings were artefacts of reading the wrong tree. What
+survives is only that the PR is open and needs a **rebase**: its merge-base is
+213 commits behind `origin/main` and both files it touches have moved. Its two
+tests are the valuable part — they assert the *absence* of `localhost:8090` and
+of the old `ipfs cat` line, which is the regression rather than a restatement of
+the new behaviour. Asked the contributor to rebase rather than rewriting their
+branch.
+
+**The real hazard, stated correctly:** on `origin/main` the inline `onclick`
+receives `base_url` from `env::var("BASE_URL")`, which is operator-controlled —
+a latent hazard. `normalized_base_url()` is what makes it request-derived, and
+therefore live. So the rebase should move the values into an escaped `data-v`
+*at the same time*, rather than carrying the inline attribute into `main`.
 
 **Round 2 retracted the retraction.** Having "proved" the PR was merged, I
 closed it. That was wrong and I reopened it with an apology: the only real
 error was *which ref* I asked git about.
 
-**What is actually true, per `origin/main` today:** the `view::W` refactor is
-there and correct, so the `onclick` finding does not apply; the commit is
-**not** merged; the PR genuinely is open and deserves a decision.
+**What is actually true, per `origin/main` today:** the commit is **not**
+merged; the `view::W` refactor is **not** on `main`; the PR is genuinely open
+and its only outstanding requirement is a rebase.
 
 **PR #11** (`view: a js_var value could close the script element it lives in`)
 — opened, then **closed as fixing nothing**. Same shape of mistake again.
