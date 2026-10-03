@@ -10,6 +10,7 @@
 // directly, so importing readBudget() here costs nothing.
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { CLAIMS, evaluate, resolveInput, runClaims, Thunk } from "./thunk-claims.mjs";
@@ -169,6 +170,52 @@ t("js-codec-matches-lean-source goes red when the codec grows a type", async () 
       }
     } finally {
       writeFileSync(codec, before, "utf8");
+    }
+  } finally {
+    writeFileSync(codec, before, "utf8");
+  }
+});
+
+t("golden-vector-matches-lean goes red when a tag byte changes", () => {
+  // One character: `S` becomes `s` in canonEnc. That is enough to move the
+  // canonical text, the IPDL text and the digest, so those rows must go red.
+  //
+  // This runs the checker as a child process rather than importing it, because
+  // `compareVectors` imports the codec and Node caches ES modules: writing the
+  // mutated file and re-checking in the same process compares the *old* module
+  // and reports nothing. That is why the mutation appeared to have no teeth.
+  // A subprocess is also how CI would run it.
+  //
+  // The mutation also has to touch something gSample actually exercises -- an
+  // earlier attempt flipped the `false` branch of bool, which gSample never
+  // reaches, and the checker was right to report nothing.
+  const codec = `${ROOT}/scripts/kant-codec.mjs`;
+  const before = readFileSync(codec, "utf8");
+  // The CLI exits non-zero when a check fails, which is exactly the case this
+  // mutation wants, so the exit code is captured rather than allowed to throw.
+  const run = () => {
+    const r = spawnSync(process.execPath, [`${ROOT}/scripts/lean-codec-vectors.mjs`, "--json"], {
+      encoding: "utf8",
+      cwd: ROOT,
+    });
+    if (r.status === 2) throw new Error(`checker could not read Lean: ${r.stderr}`);
+    return JSON.parse(r.stdout);
+  };
+  try {
+    if (!run().rows.every((r) => r.ok)) {
+      throw new Error("golden-vector-matches-lean does not hold to begin with");
+    }
+    const mutated = before.replace(
+      'case "str": return `S${encStr(v.s)}`;',
+      'case "str": return `s${encStr(v.s)}`;',
+    );
+    if (mutated === before) throw new Error("the mutation did not apply");
+    writeFileSync(codec, mutated, "utf8");
+    const failed = run().rows.filter((r) => !r.ok);
+    for (const fn of ["canonEnc", "ipdlText", "valHash"]) {
+      if (!failed.some((r) => r.check.includes(fn))) {
+        throw new Error(`${fn} did not go red; failed rows were ${failed.map((r) => r.check).join(", ")}`);
+      }
     }
   } finally {
     writeFileSync(codec, before, "utf8");

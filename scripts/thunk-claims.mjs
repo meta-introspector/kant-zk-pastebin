@@ -306,6 +306,25 @@ export const CLAIMS = [
     },
   },
   {
+    id: "golden-vector-matches-lean",
+    claim: "the JS codec produces the six values Lean's #guard pins for gSample",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    // The value counterpart to `js-codec-matches-lean-source`: that one compares
+    // which types each side can name, this one compares what they produce for
+    // the value both are documented to serialise. A codec can agree with Lean
+    // about its shapes and still serialise differently.
+    probe: async () => {
+      const { compareVectors } = await import(`${ROOT}/scripts/lean-codec-vectors.mjs`);
+      const out = await compareVectors();
+      return out.rows.every((r) => r.ok)
+        ? true
+        : `vector mismatch: ${out.rows.filter((r) => !r.ok).map((r) => r.detail).join(" | ")}`;
+    },
+  },
+  {
     id: "thunk-id-is-lean-representable",
     claim: "a thunk id is a valHash of a value naming only shapes Kant.Codec defines",
     doc: "VERIFICATION.md, SYSTEM.md",

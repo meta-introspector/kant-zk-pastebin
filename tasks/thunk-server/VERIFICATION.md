@@ -162,12 +162,52 @@ checks reads as a green run, which is the failure it exists to catch.
 
 What remains unverified, and cannot be verified from here: constructor
 *semantics* drifting, a `#guard` vector changing, or a Lean proof being weakened.
-It compares declarations, not proofs. On 2026-10-03 the `gSample` vectors were
-compared by hand — `Tests.lean` defines it as "the value both implementations
-serialise" and pins all six outputs, and `codec-test.mjs` produces the
-identical `canonEnc`, `valHash` (`3c796f2f…`), `ipdlText`, `yamlEnc`, `xmlEnc`
-and `csvEncode`. That check is real but manual, and reading the vectors out of
-`Tests.lean` the same way the types are read would make it automatic.
+It compares declarations, not proofs.
+
+### The values, not just the types
+
+`scripts/lean-codec-vectors.mjs` closes the other half. A codec can agree with
+Lean about which types exist and still serialise them differently, so this reads
+the six `#guard` assertions about `gSample` out of `Tests.lean` and compares
+them against what the JS codec actually produces:
+
+```
+ok  JS canonEnc matches Lean's #guard      39 chars
+ok  JS yamlEnc  matches Lean's #guard     52 chars
+ok  JS xmlEnc   matches Lean's #guard    164 chars
+ok  JS ipdlText matches Lean's #guard     48 chars
+ok  JS valHash  matches Lean's #guard     64 chars
+ok  JS csvEncode matches Lean's #guard   281 chars
+```
+
+**It does not parse `gSample`'s Lean term.** Since Lean proves
+`canonEnc_injective`, two values with the same canonical text are the same value,
+so matching all six outputs is enough. Reading the term would be more work and
+would prove less.
+
+Two things that bit while writing it, both recorded here because they would bite
+again:
+
+- **Lean string literals are not JavaScript's.** `\"` and `\\` are shared, but
+  the CSV vector uses the *gap* — a backslash at end of line, which continues the
+  string and eats the next line's indentation, six times. Unhandled, the expected
+  value silently truncates to its first row and the failure looks like a codec
+  bug rather than a parser bug. A raw newline with no backslash is rejected, since
+  Lean has no other line-continuation.
+- **A `#guard` may wrap onto the next line**, so extraction runs over the whole
+  file with the string bodies scanned out first. A line-anchored parse makes a
+  wrapped guard invisible, and the vector then goes *unchecked* rather than red.
+
+The mutation flips one byte — `S` to `s` in the `str` tag — and `canonEnc`,
+`ipdlText` and `valHash` must all go red. It runs the checker as a **child
+process**, because `compareVectors` imports the codec and Node caches ES
+modules: re-checking in the same process compares the old module and reports
+nothing. The first version of this mutation had no teeth for exactly that
+reason, and looked like a passing check. A subprocess is also how CI runs it.
+
+Still not verified: constructor semantics drifting, or a `#guard` that was
+weakened rather than satisfied. Both are properties of the Lean side that a JS
+comparison cannot see.
 
 The CLI says which kind of red you are looking at, so a fix does not get mistaken
 for a regression:
