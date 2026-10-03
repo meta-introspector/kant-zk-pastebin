@@ -72,6 +72,54 @@ state or process can be its own thunk. This is the foundation for:
 | `server/archive.mjs` | reference | Per-topic/archive logic |
 | `tasks/do-scheduler-modes/` | parent task | Scheduler modes |
 
+## Payload decision: content-addressable wasm
+
+**Thunks are content-addressable wasm and JS, deployed and managed as
+experiments.** Native is not being decided — it stays available as a backend
+under the same thunk id. Full reasoning, measurements and phases are in
+[WASM.md](WASM.md).
+
+The short version, measured rather than argued: `web/kant_kernel.wasm` is 799
+bytes with **zero imports**, so isolation is a property of the artifact instead
+of a policy around it, and the payload is 5% of one 16 KiB swarm frame. Three
+consequences for the design above:
+
+- `definition.transducers[].source` becomes `definition.bytes` — a module, not
+  JS source text
+- `id` becomes the full sha256 of those bytes, matching `asWitness`'s 64-hex
+  convention rather than today's 16-char prefix
+- an experiment is `{ thunk, hypothesis, inputs, cadence, observations, verdict }`,
+  after the shape `scripts/relay-measure.mjs` established
+
+**`server/thunk.mjs` does not currently work**, which blocks everything above.
+`Thunk.load` throws `ReferenceError: require is not defined` on every input: the
+file is an ES module, so bare `require` is undefined in its scope and the sandbox
+context object `{ module, exports, require }` throws before `runInNewContext` is
+called. Two related problems — `new Function` parses its body as a script, so
+the `export function reduce` form shown in DESIGN.md is a `SyntaxError`; and the
+vm's `module` is not the object passed in, so nothing is exported back.
+
+Two more findings, both from rebuilding the loader in a scratch copy:
+
+- **The `require` leak becomes reachable the moment the loader is fixed.** With
+  `createRequire` in place, a thunk doing
+  `require("node:child_process").execSync("id -u")` returned `REACHED:1000` — it
+  spawned a process and read the uid. So `createRequire`, the obvious fix for the
+  first finding, is also what makes the isolation comment false. **Phase 0 must
+  decide the sandbox policy, not just make loading work.**
+- **`apply()` double-wraps state.** `server/thunk.mjs:107` stores the
+  transducer's whole `{state, effects}` return as the new state, so a second
+  apply reads `state.n` as `undefined`. Independent of the loader.
+
+I first wrote this up as "the sandbox leaks `require`, so it is remote code
+execution by design" and then, when the probe refused to demonstrate it, as "not
+currently exploitable". Both were wrong: it is not exploitable *now* because
+nothing loads, and it is exploitable as soon as that is fixed.
+
+`server/thunk-test.mjs` pins all of this as red-to-green gates (10 tests, all
+currently failing). Under wasm this whole class of question disappears: a module
+with zero imports cannot reach the host, so there is no policy to get wrong.
+
 ## Design summary (see `DESIGN.md`)
 
 **Thunk** — serializable state machine:
@@ -102,8 +150,15 @@ state or process can be its own thunk. This is the foundation for:
 
 ## Next Actions
 
-1. Write `server/thunk.mjs` and `server/thunk-store.mjs` with one example
-   transducer; verify load, apply, snapshot, restore, share.
+0. **Make `Thunk.load` work at all** — it throws on every input today. Use
+   `createRequire(import.meta.url)` or drop `require` from the sandbox entirely
+   (preferable: the isolation comment already promises it), and make the vm's
+   `module` actually the object that gets read back. Also fix
+   `web/wasm-test.mjs`, which reads the gitignored `dist/` and so fails in a
+   fresh checkout even though the embedded copy is byte-identical.
+1. Then: `server/thunk.mjs` and `server/thunk-store.mjs` with one example
+   transducer; verify load, apply, snapshot, restore, share. Per `WASM.md`, make
+   the identity the full sha256 of the module bytes while doing it.
 2. Write `server/schedule.mjs` and the systemd driver `server/scheduler.mjs`;
    update `kant-relay.service` so the systemd service runs the scheduler loop.
 3. Extend `relay.mjs` to host thunks and expose an API for scheduling.
