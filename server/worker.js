@@ -30,9 +30,6 @@ const COMMIT = "88c142a9";
 const MAX_LINE = 262144;
 const MAX_LINES = 4096;
 const MAX_BODY = 1048576;
-// Longest long poll, in seconds. The bridge asks for 10 every 60s; this is
-// the ceiling for anything that asks for more.
-const MAX_HOLD = 10;
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -46,19 +43,6 @@ const json = (obj, status = 200) =>
     status,
     headers: { "content-type": "application/json", ...CORS },
   });
-
-/**
- * The PoP serving this request, echoed in the payload.
- *
- * Not decoration. Rooms and blobs are Durable Objects, so correctness rests
- * on `idFromName` resolving to one object worldwide. That cannot be checked
- * from a single vantage point — every request from one machine pins to one
- * PoP, which is exactly how an isolate-local Map passes the same tests. So
- * the answer is carried in the data: write from one PoP, read from another,
- * and each response names where it was served. `pop` on a read that returns
- * another PoP's line is the proof.
- */
-const colo = (request) => request.cf?.colo ?? "unknown";
 
 // --------------------------------------------------------------- IPFS store
 //
@@ -84,16 +68,16 @@ const colo = (request) => request.cf?.colo ?? "unknown";
 // right CID, which is a content-addressed blob map.
 //
 // This is a tiny IPFS server for the chat, not an IPFS node: no blocks, no
-// pinning, no DHT, no exchange. It is a Durable Object for the same reason
-// the rooms are — an isolate-local Map is per-PoP, so a chunk added by a peer
-// in one region would be a 404 for a peer in another. The bytes also ride
-// the p2p relay, which is the real transport; this store is what makes a
-// cold join cheap rather than what makes it correct.
+// pinning, no DHT, no exchange. And like the rooms it is in isolate memory,
+// so a chunk a peer has not fetched yet is lost on recycle. That is the
+// intended trade — the bytes also ride the p2p relay, which is the real
+// transport, and losing the server's cache costs latency, not correctness.
 
-/** One blob name for every chunk, so the store is one object worldwide. */
-const BLOB_ROOM = "__kant_ipfs_blobs__";
+/** Blobs on this isolate: cid -> bytes. Bounded so a chat cannot OOM it. */
+const BLOBS = new Map();
 const MAX_BLOB_BYTES = 1024 * 1024;      // 1 MiB, one 256 KiB chunk plus slack
 const MAX_BLOB_TOTAL = 16 * 1024 * 1024;  // whole-store ceiling
+let blobBytes = 0;
 
 /** RFC4648 base32, lowercase, no padding — the multibase identity for `b`. */
 function base32NoPad(bytes) {
@@ -137,45 +121,7 @@ async function multipartBytes(request) {
   return null;
 }
 
-/** The whole IPFS store, as a Durable Object so it is one store worldwide. */
-export class BlobStore {
-  constructor(state) {
-    this.state = state;
-    this.blobs = new Map();   // cid -> Uint8Array
-    this.blobBytes = 0;
-    this.loaded = this.state.blockConcurrencyWhile(async () => {
-      const idx = (await this.state.storage.get("idx")) ?? [];
-      for (const cid of idx) {
-        const buf = await this.state.storage.get(`b:${cid}`);
-        if (!buf) continue;
-        const bytes = new Uint8Array(buf);
-        this.blobs.set(cid, bytes);
-        this.blobBytes += bytes.length;
-      }
-      console.log("BLOB_LOAD", "blobs=", this.blobs.size, "bytes=", this.blobBytes);
-    });
-  }
-
-  /** Insertion-ordered eviction, so the first key is the least recently added. */
-  async evictFor(incoming) {
-    const order = [...this.blobs.keys()];
-    while (this.blobBytes + incoming > MAX_BLOB_TOTAL && order.length > 0) {
-      const oldest = order.shift();
-      const got = this.blobs.get(oldest);
-      this.blobBytes -= got.length;
-      this.blobs.delete(oldest);
-      await this.state.storage.delete(`b:${oldest}`);
-    }
-    return order;
-  }
-
-  async fetch(request) {
-    await this.loaded;
-    return ipfsStore(request, new URL(request.url), this);
-  }
-}
-
-async function ipfsStore(request, url, store) {
+async function ipfsStore(request, url) {
   // Same-origin only. The page and its RPC share a host, so no CORS is
   // involved and no other site can drive this store through the worker.
   const origin = request.headers.get("origin");
@@ -186,7 +132,7 @@ async function ipfsStore(request, url, store) {
     const m = url.pathname.match(/^\/ipfs-gw\/ipfs\/([^/]+)$/);
     if (!m) return refuse("only /ipfs-gw/ipfs/ is served", 404);
     const cid = decodeURIComponent(m[1]);
-    const got = store.blobs.get(cid);
+    const got = BLOBS.get(cid);
     if (!got) return refuse("no such block", 404);
     return new Response(got, {
       headers: {
@@ -218,24 +164,25 @@ async function ipfsStore(request, url, store) {
       return refuse(`block too large (${got.bytes.length} > ${MAX_BLOB_BYTES})`, 413);
     }
     const cid = await rawCidOf(got.bytes);
-    if (!store.blobs.has(cid)) {
-      await store.evictFor(got.bytes.length);
-      store.blobs.set(cid, got.bytes);
-      store.blobBytes += got.bytes.length;
-      await store.state.storage.put({
-        [`b:${cid}`]: got.bytes.buffer,
-        idx: [...store.blobs.keys()],
-      });
+    if (!BLOBS.has(cid)) {
+      // Evict oldest first once over the ceiling. Insertion order is the
+      // Map's, so the first key is the least recently added.
+      while (blobBytes + got.bytes.length > MAX_BLOB_TOTAL && BLOBS.size > 0) {
+        const oldest = BLOBS.keys().next().value;
+        blobBytes -= BLOBS.get(oldest).length;
+        BLOBS.delete(oldest);
+      }
+      BLOBS.set(cid, got.bytes);
+      blobBytes += got.bytes.length;
     }
-    console.log("IPFS_ADD", cid, "size=", got.bytes.length, "stored=", store.blobs.size,
-                "bytes=", store.blobBytes);
+    console.log("IPFS_ADD", cid, "size=", got.bytes.length, "stored=", BLOBS.size);
     // The shape kant-ipfs.mjs parses: one JSON object per line, Hash read
     // off the last one.
     return json({ Name: got.name, Hash: cid, Size: String(got.bytes.length) });
   }
   if (method === "cat" || method === "stat" || method === "block/stat") {
     const cid = url.searchParams.get("arg");
-    const got = cid ? store.blobs.get(cid) : null;
+    const got = cid ? BLOBS.get(cid) : null;
     if (!got) return refuse("no such block", 404);
     if (method === "cat") {
       return new Response(got, {
@@ -344,9 +291,13 @@ function senderOfLine(line) {
 const PEER_LIMIT = 10;
 const PEER_WINDOW_MS = 10 * 60 * 1000;
 
-/** The two object namespaces, addressed by name so every PoP agrees. */
-const roomStub = (env, room) => env.ROOMS.get(env.ROOMS.idFromName(room));
-const blobStub = (env) => env.BLOBS.get(env.BLOBS.idFromName(BLOB_ROOM));
+/** Rooms on this isolate. No Durable Object, so this is the whole store. */
+const ROOMS = new Map();
+const roomFor = (name) => {
+  let r = ROOMS.get(name);
+  if (!r) { r = new Room(name); ROOMS.set(name, r); }
+  return r;
+};
 
 export default {
   async fetch(request, env) {
@@ -359,16 +310,15 @@ export default {
     }
 
     if (url.pathname === "/health") {
-      console.log("HEALTH", request.url, "pop=", colo(request));
-      return json({ ok: true, name: "kant-zk-relay", version: VERSION, commit: COMMIT,
-                    platform: "cloudflare", pop: colo(request) });
+      console.log("HEALTH", request.url);
+      return json({ ok: true, name: "kant-zk-relay", version: VERSION, commit: COMMIT, platform: "cloudflare" });
     }
 
     // Before the room match, which would 404 these: the page's IPFS client
     // derives both endpoints from location.origin with no path prefix, so
     // they arrive at the root of this worker.
     if (url.pathname.startsWith("/ipfs-rpc") || url.pathname.startsWith("/ipfs-gw")) {
-      return blobStub(env).fetch(request);
+      return ipfsStore(request, url);
     }
 
     const m = url.pathname.match(/^\/(room|ws)\/([^/]+)$/);
@@ -379,7 +329,7 @@ export default {
 
     const [, kind, roomRaw] = m;
     const room = decodeURIComponent(roomRaw);
-    const rm = roomStub(env, room);
+    const rm = roomFor(room);
     console.log("ROUTE", kind, room, "url=", request.url, "method=", request.method);
 
     try {
@@ -395,64 +345,56 @@ export default {
 };
 
 /**
- * One room: an append-only log, some pollers, some sockets.
+ * One room: an append-only log, some pollers, some sockets — all in memory.
  *
- * This is a Durable Object because `env.ROOMS.idFromName(room)` is the only
- * thing that makes "the relay finds peers" true. An isolate-local Map does
- * not: every PoP gets its own Map, so two peers in Frankfurt and Sao Paulo
- * would meet, find different rooms, and each see an empty log. The DO is the
- * rendezvous, not a cache.
+ * There is no Durable Object. The log lives in a plain Map on the isolate,
+ * so it is lost when the isolate is recycled; that is the deliberate trade.
+ * The room log is not the system of record for a file share: every line
+ * carries its own witness, `web/kant-net.mjs` re-checks each one against
+ * the client's own key, and the bytes themselves ride the p2p relay
+ * (the `pinned:false` + `b64` embed path in kant-ipfs.mjs). A peer that
+ * reconnects re-derives what it needs from the other peers, so losing the
+ * server's copy degrades latency, not correctness.
  *
- * The billing problem that pushed this class into memory was never the DO
- * being here — it was a 10s poll loop with a 10s long poll, holding the room
- * open ~100% of the time against a free tier that bills storage *duration*.
- * That is fixed in the bridge (6604d52): --interval 60 --wait 10, so a room
- * is held ~17% of the time. The long poll is also capped here, in case a
- * client asks for more than the bridge ever did.
- *
- * Losing an object's memory no longer loses the log: `persist` writes it to
- * storage, so eviction costs latency and not state. Pass spends are stored
- * for the same reason — a limited pass must not become spendable twice.
+ * What this buys: no Durable Object duration bill at all, which is what
+ * exhausted the free tier in the first place (PB-19). The cost: a room
+ * that nobody polls is gone, and pass spend counters reset with the
+ * isolate, so a pass can be spent again after a recycle. The relay is a
+ * convenience and a rendezvous point, not an authority.
  */
 export class Room {
-  constructor(state, env) {
-    this.state = state;
-    this.env = env;
+  constructor(name = "") {
+    this.name = name;
     this.base = 0;
     this.lines = [];
     this.sockets = new Set(); // { ws, cursor }
     this.waiters = new Set();
     this.peerPosts = new Map(); // sender -> [timestamps]
-    this.loaded = this.state.blockConcurrencyWhile(async () => {
-      const kept = await this.state.storage.get("log");
-      if (kept) { this.base = kept.base; this.lines = kept.lines; }
-    });
-    console.log("ROOM_INIT", "loaded=", this.lines.length, "base=", this.base);
+    this.passes = new Map();   // pass id hex -> { spent, limit }
+    this.loaded = Promise.resolve();
+    console.log("ROOM_INIT", name || "(unnamed)", "base=", this.base);
   }
 
-  async persist() {
-    await this.state.storage.put("log", { base: this.base, lines: this.lines });
-    console.log("ROOM_PERSIST", "lines=", this.lines.length, "base=", this.base);
-  }
+  /** A no-op kept so call sites read the same and a DO can return later. */
+  async persist() {}
 
   /**
-   * Admit one POST under the pass rules.  Pass spends live in DO storage
-   * (`pass:<id>` -> { spent, limit }) so a recycle cannot make a limited
-   * pass spendable again; the passless rate limit lives in `peerPosts`
-   * (sender -> timestamps) and is per-isolate, which is the right scope
-   * for a rate limit. Same rules as the Node relay's PassStore, so the
-   * twins agree on what a pass buys.
+   * Admit one POST under the pass rules.  Pass spends and the passless
+   * per-sender rate limit both live in Maps on this instance, so both
+   * reset when the isolate does — see the class comment for why that is
+   * accepted. Same rules as the Node relay's PassStore, so the twins
+   * agree on what a pass buys while it lasts.
    */
   async admitPass(pass, lines, roomName) {
     const now = Date.now();
     if (pass && pass.limit > 0) {
-      const key = "pass:" + pass.id.map((b) => b.toString(16).padStart(2, "0")).join("");
-      const cur = (await this.state.storage.get(key)) ?? { spent: 0, limit: pass.limit };
+      const key = pass.id.map((b) => b.toString(16).padStart(2, "0")).join("");
+      const cur = this.passes.get(key) ?? { spent: 0, limit: pass.limit };
       if (cur.spent >= cur.limit) {
         return { ok: false, status: 429, error: `pass spent (${cur.limit} post(s) allowed)` };
       }
       cur.spent += 1;
-      await this.state.storage.put(key, cur);
+      this.passes.set(key, cur);
       return { ok: true, remaining: cur.limit - cur.spent };
     }
     // No pass (or the owner's unlimited invite): per-sender rate limit.
@@ -550,11 +492,7 @@ export class Room {
 
     if (request.method === "GET") {
       const cursor = Number(url.searchParams.get("cursor") ?? 0) || 0;
-      const pop = colo(request);
-      // Capped at MAX_HOLD, not 30: this wait is what keeps the object
-      // resident, and resident is what the free tier bills. A client that
-      // asks for a long poll gets a bounded one.
-      const wait = Math.min(Number(url.searchParams.get("wait") ?? 0) || 0, MAX_HOLD);
+      const wait = Math.min(Number(url.searchParams.get("wait") ?? 0) || 0, 30);
       let out = this.fetchFrom(cursor);
       if (wait > 0 && out.lines.length === 0) {
         console.log("ROOM_GET", "wait=", wait, "cursor=", cursor);
@@ -562,9 +500,8 @@ export class Room {
         out = this.fetchFrom(cursor);
       }
       const ms = Date.now() - started;
-      console.log("ROOM_GET", "cursor=", cursor, "->", out.cursor, "lines=", out.lines.length,
-                  "ms=", ms, "pop=", pop);
-      return json({ ok: true, pop, ...out });
+      console.log("ROOM_GET", "cursor=", cursor, "->", out.cursor, "lines=", out.lines.length, "ms=", ms);
+      return json({ ok: true, ...out });
     }
 
     console.log("ROOM_METHOD_NOT_ALLOWED", request.method, url.pathname);

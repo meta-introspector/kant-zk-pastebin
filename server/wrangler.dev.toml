@@ -20,56 +20,18 @@ compatibility_date = "2025-01-01"
 
 # Same protocol as the Node relay, so a client cannot tell the twins apart.
 #
-# Two Durable Objects, and both are load-bearing.
+# There is no Durable Object here, and that is the point. The DO free tier
+# bills storage DURATION, and a 10s poll loop with a 10s long poll held
+# every room open permanently — which is what exhausted the budget (PB-19).
+# Rooms and IPFS blocks now live in isolate memory and the bytes travel over
+# the p2p relay, so a recycled isolate costs latency, not correctness.
+# Pass spend counters do reset with the isolate; the relay is a rendezvous
+# point, not an authority.
 #
-# ROOMS is what makes "the relay finds peers" true: idFromName(room) is one
-# address worldwide, so two peers in different PoPs meet in the same room.
-# An isolate-local Map does not — every PoP gets its own, and they find
-# different rooms.
-#
-# BLOBS is the same argument for chunks: a block stored by a peer in one
-# region must not 404 for a peer in another.
-#
-# What exhausted the free tier (PB-19) was never the existence of a DO. It
-# was the bridge: a 10s poll loop with a 10s long poll held every room open
-# ~100% of the time, against a tier that bills storage DURATION. That is
-# fixed in server/forward.mjs (6604d52) --interval 60 --wait 10, so a room
-# is held ~17% of the time, and the long poll is additionally capped at
-# MAX_HOLD in worker.js so no client can pin a room open by asking for more.
-#
-# The log is persisted to storage, so evicting an object costs latency
-# rather than state, and a limited pass stays spent.
-#
-# No KV and no R2: both would need an API token with their own scope, and
-# the token in ~/.cloudflare has neither (it can deploy Workers, nothing
-# else). At this volume the DO storage bill is negligible.
+# Storage is deliberately in-memory only: no DO binding, no KV, no R2. An
+# R2 bucket would cost nothing at this volume but needs an API token with
+# R2 scope, and the token in ~/.cloudflare does not have it.
 
 [assets]
 directory = "../web"
 binding = "ASSETS"
-
-# Both classes are SQLite-backed, matching server/wrangler.toml: the same
-# Room class must not be SQLite in one worker and KV-backed in the other.
-[[durable_objects.bindings]]
-name = "ROOMS"
-class_name = "Room"
-
-[[durable_objects.bindings]]
-name = "BLOBS"
-class_name = "BlobStore"
-
-# `new_sqlite_classes`, not `new_classes`: the latter declares a KV-backed
-# class. A migration tag is permanent — a class cannot be moved between
-# backends later — so this has to be right the first time.
-# v1 was applied to kant-relay-v1-dev with Room alone. Migration tags are
-# immutable and are applied in order, so the class added later gets its own
-# tag; adding it to v1 fails with code 10061 ("not currently configured to
-# implement Durable Objects") because v1 is already recorded as applied and
-# a tag cannot be edited after the fact.
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["Room"]
-
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["BlobStore"]
