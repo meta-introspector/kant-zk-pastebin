@@ -311,10 +311,14 @@ mod tests {
             let state = MeshState::new(MeshConfig::default(), storage.clone());
 
             let identity = sample_identity();
+            println!("Saving identity: {:?}", identity);
             let result = state.save_identity(&identity).await;
+            println!("Save result: {:?}", result);
             assert!(result.is_ok());
 
+            println!("Loading identity 'ident-1'");
             let loaded = state.load_identity("ident-1").await;
+            println!("Loaded identity: {:?}", loaded);
             assert_eq!(loaded, Some(identity.clone()));
 
             let list = state.list_identities().await;
