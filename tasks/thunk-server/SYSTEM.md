@@ -79,6 +79,14 @@ experiments.** Native is not being decided — it stays available as a backend
 under the same thunk id. Full reasoning, measurements and phases are in
 [WASM.md](WASM.md).
 
+**The payload is not one format.** `js`, `wasm`, `lean`, `rust` and `nix` fall
+into three groups: wasm is self-contained; `js` and a Rust dylib reach the host;
+and `lean`/`rust`/`nix` are *inputs* that a toolchain turns into an artifact, so
+they are referenced rather than embedded. The wrapper for those references is
+**IPDL over IPFS** — and the codec already exists, at
+`scripts/kant-codec.mjs`, with `ref`/`annot` and a full 64-hex `valHash`.
+See [IPFS-IPDL.md](IPFS-IPDL.md).
+
 The short version, measured rather than argued: `web/kant_kernel.wasm` is 799
 bytes with **zero imports**, so isolation is a property of the artifact instead
 of a policy around it, and the payload is 5% of one 16 KiB swarm frame. Three

@@ -227,6 +227,14 @@ thunk to hash.
 Phases 0–3 are one afternoon each and need nothing from the network. Phase 4 is
 the first one that touches the relay.
 
+## Related
+
+[IPFS-IPDL.md](IPFS-IPDL.md) extends this from one payload format to several, and
+covers the case where the payload is a *source* (`lean`, `rust`, `nix`) rather
+than an artifact. It reuses `valHash` from `scripts/kant-codec.mjs` as the thunk
+id, so phase 1 and the IPDL resolver should be built together rather than
+sequenced.
+
 ## Decisions needed
 
 **Does the swarm carry `js` thunks at all?** Phase 6 is blocked on this. Either
