@@ -640,7 +640,7 @@ $("btn-leave").onclick = () => {
  * wrapped in a sentence, in brackets, with a full stop after it, or with a
  * trailing newline.
  */
-function joinFrom(text, msgId) {
+async function joinFrom(text, msgId) {
   const inv = F.findInvite(text);
   if (!inv) {
     // Say what it *is*, not only what it is not (`Kant.CardDebug.classify`).
@@ -662,8 +662,17 @@ function joinFrom(text, msgId) {
   }
   const fresh = newNode();
   fresh.joinInvite(N.copyInvite(inv));
+  // The relay in the invite is used only if it answers; otherwise the one
+  // serving this page, loudly. `joinFrom` was synchronous and is now not —
+  // every caller is a click handler or startup, so awaiting is safe.
+  const settled = await fresh.settleRelay({ fallback: D.effectiveRelay(reach) });
   attach(fresh);
-  $(msgId).textContent = `joined room ${fresh.room.slice(0, 12)}…`;
+  $(msgId).textContent = settled.fellBack
+    ? `joined room ${fresh.room.slice(0, 12)}… — but the relay this invitation names ` +
+      `(${settled.from}) did not answer, so this is <b>not</b> the room the sender is in. ` +
+      "Ask them to send a fresh invitation."
+    : `joined room ${fresh.room.slice(0, 12)}…`;
+  $(msgId).className = settled.fellBack ? "meta bad" : "meta";   // `.bad` is colour only
   dispatch({ type: "joinText", text });
   return true;
 }
@@ -693,7 +702,8 @@ async function startCamera() {
       const found = await detector.detect(video).catch(() => []);
       if (found.length) {
         const text = found[0].rawValue;
-        joinFrom(text, "scanmsg");
+        camera = null;          // stop scanning before awaiting the join
+        await joinFrom(text, "scanmsg");
         return;
       }
       requestAnimationFrame(tick);
@@ -922,8 +932,10 @@ $("btn-diagpage").onclick = () => {
   $("icon").value = cfg.picture;
 
   // An invite link opened in the browser walks straight into the room.
+  // Awaited: `joinFrom` settles the relay before attaching, and rendering
+  // before it finishes would paint a page with no room on it.
   const frag = location.hash.slice(1);
-  if (frag && F.findInvite(frag)) joinFrom(frag, "joinmsg");
+  if (frag && F.findInvite(frag)) await joinFrom(frag, "joinmsg");
 
   render();
   renderDiag();
