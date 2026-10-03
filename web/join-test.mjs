@@ -8,6 +8,9 @@
 //   node web/join-test.mjs
 
 import { createServer, CONFIG, Rooms } from "../server/relay.mjs";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as N from "./kant-net.mjs";
 import * as F from "./kant-flow.mjs";
 
@@ -24,7 +27,16 @@ const cfg = {
   alt: "the Kant pastebin logo",
 };
 
-const relayCfg = { ...CONFIG, port: 0, host: "127.0.0.1", staticDir: "" };
+// Its own pass database, in tmpdir, for the reason web/net-test.mjs gives:
+// `passDb` defaults to /var/lib/kant-zk/passes.sqlite, which is production
+// state. `createServer` opens that store eagerly and every POST writes a
+// `peer_posts` row, so this suite was appending its own lines to the live
+// relay's rate-limit ledger — measured at five rows per run, on a database that
+// also belongs to whatever is deployed on this machine. The rows are pruned
+// only once the 10-minute window passes, so a test run leaves state behind that
+// outlives it.
+const passDb = join(tmpdir(), `kant-join-test-${process.pid}.sqlite`);
+const relayCfg = { ...CONFIG, port: 0, host: "127.0.0.1", staticDir: "", passDb };
 const server = createServer(relayCfg, new Rooms(relayCfg));
 
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -141,6 +153,9 @@ try {
 } finally {
   server.close();
   server.closeAllConnections?.();
+  // The store holds the handle, so the file goes after the server is closed.
+  // -wal and -shm are SQLite's own and are removed with it.
+  for (const suffix of ["", "-wal", "-shm"]) rmSync(`${passDb}${suffix}`, { force: true });
 }
 
 console.log(`${checks - fail.length}/${checks} checks passed`);

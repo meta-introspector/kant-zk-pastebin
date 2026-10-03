@@ -135,6 +135,62 @@ failed every run after. That is why the core set is a hand-written manifest with
 a stated reason per entry rather than something inferred by grepping for
 `fetch(`: a grep would have called it hermetic too.
 
+### Six suites were writing production state
+
+That last entry turned out to be the visible symptom of something larger, and
+the diagnosis inverted twice on the way.
+
+**The bind was never the problem.** `scripts/net-test.mjs` flaked with
+`relay post 2 line(s) failed: 429`, which reads like a port conflict. It is the
+rate limiter: `passes.admit` allows `peerLimit` (10) posts per `peerWindowMs`
+(10 minutes) per (room, sender), counted in SQLite. The suite configured its
+relay with `{ ...CONFIG, port: 0, host: "127.0.0.1", staticDir: "" }`, leaving
+`passDb` at its default of `/var/lib/kant-zk/passes.sqlite`. That is
+deployment state. Its counters are windowed, so they accumulated across runs:
+three passes, then a 429 of its own making. Its `web/` twin already had the fix
+— a per-PID SQLite in `tmpdir()`, and a comment explaining exactly this — so the
+stale copy was simply the one written before it.
+
+**`createServer` is not the only way in.** Auditing every suite by watching
+`/var/lib/kant-zk/passes.sqlite` during `npm run verify` found four more
+writers, and three of them were invisible to the obvious grep:
+
+| suite | how it reached production | rows per run |
+|---|---|---|
+| `scripts/net-test.mjs` | in-process `createServer`, `passDb` left at the default | 3–10 |
+| `web/join-test.mjs` | in-process, and **in the core run** | 5 |
+| `web/diag-test.mjs` | *spawns* `server/relay.mjs` with no `--pass-db` | prunes + writes |
+| `web/cli-page-test.mjs` | spawns it — **my own file, from the previous commit** | 3 |
+| `scripts/diag-test.mjs`, `web/cli-test.mjs` | spawn it (both in `EXCLUDED`, so a core-only audit misses them) | 3, 6 |
+
+`createServer` opens the pass store eagerly, so even a suite that never POSTs
+opens the live ledger. All nine relay-touching suites now pass their own
+database, and `npm run verify` adds **zero rows** to production where it
+previously added a dozen.
+
+**A suite that could not fail.** `scripts/vacuum-bug-test.mjs` had no
+`process.exit` anywhere: `main().catch(console.error)` swallowed even a crash,
+so it exited 0 unconditionally. It also talked to whatever was listening on
+`127.0.0.1:8787` — a relay it never started — so with no relay up, every CLI
+call errored and it still reported success. It now starts its own relay on a
+reserved port with its own pass database, treats every step as a precondition,
+and exits non-zero when one fails.
+
+What it still cannot do is see the bug it is named for. The symptom was a tab
+that was open but not polling; a CLI `read` resumes from a stored cursor and so
+always sees the message. The script says so in its output rather than claiming
+the bug is fixed.
+
+`suites-never-use-the-production-pass-db` now guards all of this, and it earns
+its keep: it caught `web/wasm-test.mjs` — the file I had written the previous
+commit — and then caught two more suites the core-only audit had missed. Its
+first two drafts were wrong in instructive ways. Grepping the file for the word
+`passDb` passed a suite that declared it and never passed it, so it now resolves
+the config that actually reaches `createServer`/`createRelay`. It then matched
+`node:http`'s own `createServer` — the 404 stubs — and built a `RegExp` out of
+the string `(_req`. Both were found by mutating a suite and watching the claim
+stay green, which is the only reason they were found at all.
+
 Known limitation: one run of `npm run verify` exited 1 with no failing suite
 printed, and four subsequent runs were clean. The failing suite was not
 captured, so the cause is unknown — most likely contention with the concurrent

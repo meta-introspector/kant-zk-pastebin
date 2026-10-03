@@ -32,9 +32,16 @@ const html = readFileSync(join(here, "index.html"), "utf8");
 
 // ------------------------------------------------------------- the relay
 
+// Its own pass database. The relay's `passDb` defaults to
+// /var/lib/kant-zk/passes.sqlite, so spawning it without `--pass-db` made this
+// suite append its lines to a live relay's rate-limit ledger — three rows a run.
+// Passing it explicitly also stops the relay falling back to a shared tmpdir
+// copy if the path is unusable.
+const passDb = join(tmpdir(), `kant-cli-page-test-${process.pid}.sqlite`);
 function startRelay(port) {
   const proc = spawn(process.execPath,
-    [join(root, "server", "relay.mjs"), "--port", String(port), "--static", here],
+    [join(root, "server", "relay.mjs"), "--port", String(port), "--static", here,
+      "--pass-db", passDb],
     { stdio: ["ignore", "pipe", "pipe"] });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
@@ -261,6 +268,8 @@ try {
 } finally {
   try { unlinkSync(scratch); } catch { /* already gone */ }
   relay.kill();
+  // The relay holds the handle, so its database goes after the kill.
+  for (const s of ["", "-wal", "-shm"]) rmSync(`${passDb}${s}`, { force: true });
   rmSync(dir, { recursive: true, force: true });
 }
 

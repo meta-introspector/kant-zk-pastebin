@@ -92,6 +92,12 @@ export const CORE = [
   "scripts/handpage-test.mjs",
   "scripts/page-test.mjs",
   "scripts/site-test.mjs",
+  // The network suite, twice: web/net-test.mjs carries the coverage, and
+  // scripts/net-test.mjs used to be a stale copy that wrote rate-limit rows
+  // into /var/lib/kant-zk/passes.sqlite. It now delegates. Kept in the core run
+  // rather than hidden in --all because a delegation is code, and this one had
+  // already silently diverged once.
+  "scripts/net-test.mjs",
 ];
 
 /**
@@ -111,7 +117,7 @@ export const EXCLUDED = {
   // posts to a real relay, so it 429s under repetition -- it passed the first
   // survey by luck and failed every run after. Not a flaky test; a networked
   // one, filed next to a hermetic twin that looks identical.
-  "scripts/net-test.mjs": "posts to a live relay; 429s when run twice",
+  
 
   // Broken, and deliberately visible rather than quietly skipped. Empty: every
   // suite that was here has been fixed. The reason each one was wrong is in

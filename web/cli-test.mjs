@@ -91,9 +91,15 @@ eq("...and on the same relay",
 // be here, because the clients are separate processes too and this one waits
 // for each of them in turn.
 const relayPath = join(root, "server", "relay.mjs");
+// The relay's pass database, which defaults to /var/lib/kant-zk/passes.sqlite —
+// production state. Without `--pass-db` this suite posted its lines into a live
+// relay's rate-limit ledger: six peer_posts rows a run, left behind to be pruned
+// only once the 10-minute window turned.
+const passDb = join(tmpdir(), `kant-cli-test-${process.pid}.sqlite`);
 function startRelay(port) {
   const proc = spawn(process.execPath,
-    [relayPath, "--port", String(port), "--static", join(root, "web")],
+    [relayPath, "--port", String(port), "--static", join(root, "web"),
+      "--pass-db", passDb],
     { stdio: ["ignore", "pipe", "pipe"] });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
@@ -266,6 +272,9 @@ try {
   ok("the state file exists", existsSync(join(dir, viaFetch.stateA)));
 } finally {
   relay.kill();
+  // The relay holds the handle, so its database goes after the kill. -wal and
+  // -shm are SQLite's own and are removed with it.
+  for (const s of ["", "-wal", "-shm"]) rmSync(`${passDb}${s}`, { force: true });
   rmSync(dir, { recursive: true, force: true });
 }
 

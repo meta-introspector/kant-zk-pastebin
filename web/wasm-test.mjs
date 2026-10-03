@@ -240,6 +240,12 @@ await new Promise((r) => serving.close(r));
 {
   const { createServer: createRelay, CONFIG } = await import("../server/relay.mjs");
   const tmp = await mkdtemp(join(tmpdir(), "kant-wasm-relay-"));
+  // Its own pass database. `createServer` opens the pass store eagerly, and
+  // `passDb` defaults to /var/lib/kant-zk/passes.sqlite — production state. This
+  // suite only GETs, so it wrote no rows today, but it was still opening (and
+  // running migrations on) a live relay's ledger. Found by the
+  // `suites-never-use-the-production-pass-db` claim.
+  const passDb = join(tmp, "passes.sqlite");
   try {
     const staticDir = join(tmp, "web");
     await mkdir(staticDir);
@@ -248,7 +254,7 @@ await new Promise((r) => serving.close(r));
     await writeFile(join(tmp, "dist", "kant_kernel.wasm"), wasmBytes);
     await writeFile(join(tmp, "README.md"), "the repository root\n");
 
-    const relay = createRelay({ ...CONFIG, staticDir });
+    const relay = createRelay({ ...CONFIG, staticDir, passDb });
     await new Promise((r) => relay.listen(0, "127.0.0.1", r));
     const port = relay.address().port;
 

@@ -7,6 +7,7 @@ import * as D from "./kant-diag.mjs";
 import * as N from "./kant-net.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -174,9 +175,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const relayPath = path.join(here, "..", "server", "relay.mjs");
 
 const logFile = path.join(here, ".diag-relay.log");
+// The relay's pass database, which defaults to /var/lib/kant-zk/passes.sqlite —
+// production state. Passing `--pass-db` explicitly also makes the relay rethrow
+// instead of silently falling back to a shared tmpdir copy if it is unusable,
+// so a broken path here fails loudly rather than quietly sharing a ledger.
+const passDb = path.join(tmpdir(), `kant-diag-test-${process.pid}.sqlite`);
 function startRelay(port) {
   const proc = spawn(process.execPath,
-    [relayPath, "--port", String(port), "--static", here, "--log", logFile, "--quiet"],
+    [relayPath, "--port", String(port), "--static", here, "--log", logFile,
+      "--pass-db", passDb, "--quiet"],
     { stdio: ["ignore", "pipe", "pipe"] });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
@@ -299,6 +306,8 @@ if (relay) {
   alice.stop(); bob.stop();
   relay.kill();
   rmSync(logFile, { force: true });
+  // The relay holds the handle, so its database goes after the kill.
+  for (const s of ["", "-wal", "-shm"]) rmSync(`${passDb}${s}`, { force: true });
 }
 
 // ------------------------- polling with no relay must idle, never spin

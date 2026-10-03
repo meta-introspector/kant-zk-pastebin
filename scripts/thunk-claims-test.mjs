@@ -358,6 +358,36 @@ t("kernel-vectors-satisfy-wasm goes red on a short vector file", () =>
   mustFlipProbe("kernel-vectors-satisfy-wasm", "fewer than 59 vectors",
     async () => ({ vectors: 58, unsatisfied: [] })));
 
+t("suites-never-use-the-production-pass-db goes red on a relay left at the default", () =>
+  mustFlipProbe("suites-never-use-the-production-pass-db",
+    "a suite whose relay config has no passDb",
+    async () => [{ suite: "web/join-test.mjs", mode: "PRODUCTION", calls: 1, unsafe: 1 }]));
+
+t("suites-never-use-the-production-pass-db goes red when a suite drops its passDb", async () => {
+  // A real mutation, not a fabricated input. The claim reads the config that
+  // actually reaches createServer, and the first draft only grepped the file for
+  // the word "passDb" — so a suite could declare it and forget to pass it, and
+  // the claim called that safe. Only mutating the call proves otherwise.
+  const path = resolve(ROOT, "web/wasm-test.mjs");
+  const before = readFileSync(path, "utf8");
+  const mutated = before.replace(
+    "{ ...CONFIG, staticDir, passDb }", "{ ...CONFIG, staticDir }");
+  if (mutated === before) throw new Error("mutation anchor not found in web/wasm-test.mjs");
+  try {
+    writeFileSync(path, mutated);
+    const c = claim("suites-never-use-the-production-pass-db");
+    const after = await evaluate(c, await resolveInput(c.input));
+    if (after.ok) throw new Error("still passed on a relay using the production passDb");
+  } finally {
+    writeFileSync(path, before);
+  }
+});
+
+t("suites-never-use-the-production-pass-db sees a suite that parses no config", () =>
+  mustFlipProbe("suites-never-use-the-production-pass-db",
+    "a relay whose config could not be found",
+    async () => [{ suite: "web/join-test.mjs", mode: "NO CONFIG FOUND", calls: 0 }]));
+
 /**
  * A minimal valid wasm module with exactly one import (`env.abort`) and one
  * export. Assembled by hand because there is no wat2wasm here and adding a

@@ -646,6 +646,103 @@ export const CLAIMS = [
     probe: (found) => found,
   },
 
+  // ── a suite must not write production state ──────────────────────────
+  //
+  // `passDb` in server/relay.mjs defaults to /var/lib/kant-zk/passes.sqlite,
+  // and `createServer` opens that store eagerly. Two tracked suites were
+  // starting a real relay without overriding it, so every run appended
+  // peer_posts rows to a live relay's rate-limit ledger. One of them was in
+  // the core run.
+  {
+    id: "suites-never-use-the-production-pass-db",
+    claim: "every tracked suite that starts a relay gives it its own pass database, never the production default",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    input: D("relay-creating suites and their passDb", async () => {
+      const { trackedSuites } = await import(`${ROOT}/scripts/check-all.mjs`);
+      // The config actually handed to createServer/createRelay — not merely the
+      // presence of the word. A suite can declare `passDb` and still forget to
+      // pass it, and a claim that only greps for the name reports that as safe;
+      // that is exactly the gap this claim was written after, when mutating
+      // web/wasm-test.mjs to drop `passDb` from the call left it "own db".
+      const configsFor = (src) => {
+        const out = [];
+        for (const m of src.matchAll(/create(?:Server|Relay)\s*\(/g)) {
+          let i = m.index + m[0].length, depth = 1;
+          const start = i;
+          while (i < src.length && depth > 0) {
+            if (src[i] === "(") depth += 1;
+            else if (src[i] === ")") depth -= 1;
+            i += 1;
+          }
+          const args = src.slice(start, i - 1).trim();
+          // Resolve the argument to the config object first — most suites pass a
+          // variable (`createServer(cfg, new Rooms(cfg))`), so the config is not
+          // in the call text at all.
+          let config = args;
+          if (!args.startsWith("{")) {
+            const name = args.split(",")[0].trim();
+            // A relay config is an object literal or a plain identifier. Anything
+            // else as the first argument is a request handler — node:http's own
+            // createServer, which these suites also use for the 404 and SPA
+            // stubs — and is not a relay at all, so it is skipped rather than
+            // counted as an unconfigured relay.
+            if (!/^[A-Za-z_$][\w$]*$/.test(name)) continue;
+            const decl = new RegExp(`\\b${name}\\s*=\\s*\\{[^}]*\\}`).exec(src);
+            config = decl ? decl[0] : args;
+          }
+          // `createServer` is also node:http's, and these suites use both: the
+          // first draft of this scanner matched a 404 stub
+          // (`createServer((_req, res) => {...})`). Every relay config here
+          // spreads CONFIG, so that is the discriminator — checked on the
+          // resolved config, not on the call.
+          if (!/CONFIG/.test(config)) continue;
+          out.push(config);
+        }
+        return out;
+      };
+      return trackedSuites().flatMap((f) => {
+        const src = read(ROOT, f, "utf8");
+        // A suite reaches production state by running a relay, either in-process
+        // or as a child process. The second form was missed entirely by the first
+        // draft of this claim: web/diag-test.mjs and web/cli-page-test.mjs spawn
+        // `server/relay.mjs` rather than calling createServer, and both were
+        // writing peer_posts rows that a createServer-only scan reported as safe.
+        const inProcess = /createServer\s*\(|createRelay\s*\(/.test(src);
+        const spawns = /(spawn|execFile|execSync|spawnSync)\s*\(/s.test(src)
+          && /relay\.mjs/.test(src);
+        if (!/relay\.mjs/.test(src) || (!inProcess && !spawns)) return [];
+        // A delegating suite inherits its twin's config, so `passDb` correctly
+        // does not appear in its own source.
+        if (/^import\s+["']\.\.\/web\//m.test(src.trim())) {
+          return [{ suite: f, mode: "delegates", calls: 0 }];
+        }
+        // A spawned relay reads the same default off its argv, so `--pass-db`
+        // (or KANT_PASS_DB in the child's env) is what it needs.
+        if (spawns) {
+          return [{
+            suite: f,
+            mode: /pass-db|passDb|KANT_PASS_DB/.test(src) ? "own db" : "PRODUCTION",
+            calls: 1,
+            unsafe: /pass-db|passDb|KANT_PASS_DB/.test(src) ? 0 : 1,
+          }];
+        }
+        const configs = configsFor(src);
+        if (!configs.length) return [{ suite: f, mode: "NO CONFIG FOUND", calls: 0 }];
+        const unsafe = configs.filter((c) => !/passDb/.test(c));
+        return [{
+          suite: f,
+          mode: unsafe.length ? "PRODUCTION" : "own db",
+          calls: configs.length,
+          unsafe: unsafe.length,
+        }];
+      });
+    }),
+    // Non-empty, so a scan that stopped matching cannot pass vacuously.
+    expect: true,
+    probe: (rows) => rows.length > 0 && rows.every((r) => r.mode !== "PRODUCTION" && r.mode !== "NO CONFIG FOUND"),
+  },
+
   // ── the kernel conformance test ─────────────────────────────────
   // This was a defect claim (`wasm-test-reads-gitignored-dist`): the test read
   // `dist/`, which is gitignored, so it died with ENOENT on a clean checkout and
