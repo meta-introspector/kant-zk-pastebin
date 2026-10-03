@@ -11,6 +11,23 @@ pub fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Escape a value for a single-quoted JavaScript string literal inside a
+/// `<script>` element.
+///
+/// This is NOT `html_escape`. The HTML parser inside `<script>` does not decode
+/// entities, so `&lt;` stays `&lt;` and `</script>` closes the element anyway.
+/// Only a `<` that is not a literal `<` works here, which is what `\u003c` is.
+///
+/// The order is load-bearing: `\\` is escaped before `'`, or the backslash
+/// added for the quote would itself be doubled and the quote left bare.
+pub fn js_string_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('<', "\\u003c")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
 // ── Widget ──────────────────────────────────────────────────
 
 pub enum W {
@@ -136,7 +153,7 @@ impl Page {
         // JS
         h.push_str("<script>\n");
         for (k, v) in &self.js_vars {
-            h.push_str(&format!("const {}='{}';\n", k, v.replace('\'', "\\'")));
+            h.push_str(&format!("const {}='{}';\n", k, js_string_escape(v)));
         }
         for block in &self.js_blocks {
             h.push_str(block);
@@ -359,3 +376,107 @@ function showDA51(){
 }
 "#;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const BREAKOUT: &str = "</script><script>alert(1)</script>";
+
+    #[test]
+    fn js_string_escape_defeats_a_script_close_tag() {
+        let out = js_string_escape(BREAKOUT);
+        assert!(!out.to_lowercase().contains("</script"), "still closes: {out}");
+        assert!(out.contains("\\u003c"));
+    }
+
+    #[test]
+    fn backslash_before_quotes() {
+        assert_eq!(js_string_escape("a\\"), "a\\\\");
+        assert_eq!(js_string_escape("it's"), "it\\'s");
+    }
+
+    #[test]
+    fn quotes_are_escaped_but_the_rest_is_untouched() {
+        // Quotes DO have to go -- they are real in a curl command, and they
+        // delimit the literal. What must not change is everything else, or
+        // the copied command stops working.
+        assert_eq!(
+            js_string_escape("curl -X POST https://x/paste -H 'Content-Type: application/json'"),
+            "curl -X POST https://x/paste -H \\'Content-Type: application/json\\'"
+        );
+        // These need no escaping at all, and must come through byte-identical.
+        for plain in [
+            "https://example.com/paste/abc#z=AAAA",
+            "100% done & ready",
+            "curl https://example.com/ipfs/QmdckCoPuhEtiNzREtqpYn8dBgY8ifcG82Q4eyEdGCLEiu",
+        ] {
+            assert_eq!(js_string_escape(plain), plain, "mangled: {plain}");
+        }
+    }
+
+    #[test]
+    fn nothing_that_closes_a_tag_survives() {
+        // The single property that matters for this sink: the output must
+        // contain no `<` at all, so it cannot open or close a tag no matter
+        // what follows it. `>` needs no escaping -- only `<` can start a tag.
+        for hostile in [
+            "</script>",
+            "</SCRIPT >",
+            "<!--",
+            "<img src=x onerror=alert(1)>",
+            "</script><script>alert(1)</script>",
+            "javascript:alert(1)",
+        ] {
+            let out = js_string_escape(hostile);
+            assert!(!out.contains('<'), "left a `<` in {hostile:?} -> {out:?}");
+        }
+    }
+
+    #[test]
+    fn escaping_is_idempotent_on_neutral_input() {
+        // A value with nothing to escape must not grow on each round trip,
+        // or re-rendering a page would inflate it.
+        let plain = "https://example.com/paste/abc#z=AAAA";
+        assert_eq!(js_string_escape(&js_string_escape(plain)), js_string_escape(plain));
+    }
+
+    #[test]
+    fn backslash_must_be_escaped_before_the_quote() {
+        // The order is load-bearing. If `\\` is escaped AFTER the quote, then
+        // an input ending in a backslash has its backslash doubled into
+        // `\\\\`, and the doubled pair leaves the following quote unescaped
+        // -- the literal breaks open. Pin it with the exact input that
+        // distinguishes the two orderings.
+        assert_eq!(js_string_escape("a\\"), "a\\\\");
+        // Same input, but now check the quote right after the backslash.
+        let out = js_string_escape("a\\'b");
+        // Correct order: the input is `a`, backslash, quote, `b`. The
+        // backslash doubles first, then the quote gets its own backslash.
+        // Built in code rather than written as a literal so the intended
+        // byte sequence is unambiguous.
+        let expected: String = ["a", "\\\\", "\\'", "b"].concat();
+        assert_eq!(out, expected, "wrong order: {out}");
+        // Whatever the order, the result must not contain a bare unescaped
+        // quote, which is what would terminate the literal early.
+        let terminates_early = out.find("'").is_some_and(|i| i > 0 && out.as_bytes()[i - 1] != b'\\');
+        assert!(!terminates_early, "quote left unescaped in {out:?}");
+    }
+
+    #[test]
+    fn rendered_js_var_does_not_close_the_script_element() {
+        // The assertion that pins the bug. Pre-fix, `render` inlined the
+        // value into `const k='...'` escaping only `'`, so a `</script>`
+        // inside it ended the element and the remainder became markup.
+        // `basePath`, `pasteUrl` and `dataUrl` all carry the request origin,
+        // which actix takes from X-Forwarded-Host ahead of Host.
+        let mut p = Page::new("t");
+        p.js_var("dataUrl", BREAKOUT);
+        let html = p.render();
+        let lower = html.to_lowercase();
+        assert_eq!(
+            lower.matches("<script").count(),
+            lower.matches("</script").count(),
+            "tag imbalance: a js_var value closed the script element"
+        );
+        assert!(!html.contains(BREAKOUT), "the raw breakout survived into the page");
+    }
+}
