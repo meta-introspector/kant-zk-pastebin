@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # deploy-cloudflare-worker.sh — Deploy Cloudflare Workers for kant-zk-pastebin
 #
-# Deploys two workers:
-#   1. kant-zk-relay-wasm — Lean WASM relay (Durable Objects)
-#   2. kant-zk-pastebin-wasm — Rust-in-WASM pastebin tool
+# Deploys workers:
+#   deploy     kant-zk-relay-wasm (Lean WASM relay with Durable Objects)
+#   test-deploy  kant-zk-test (minimal /health Worker, iterated before release)
+#   verify     check health of deployed workers
+#   status     show deployment status
 #
 # Usage:
 #   ./deploy-cloudflare-worker.sh deploy
+#   ./deploy-cloudflare-worker.sh test-deploy
 #   ./deploy-cloudflare-worker.sh verify
 #   ./deploy-cloudflare-worker.sh status
 
@@ -270,6 +273,36 @@ EOF
   log_success "Lean WASM Relay Worker deployed at https://kant-zk-relay-wasm.workers.dev"
 }
 
+deploy_test_worker() {
+  log "=== Deploying test Worker (minimal /health) ==="
+
+  local commit
+  commit="$(git -C "${PASTEBIN_DIR}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+  log "Test deploy commit: ${commit}"
+
+  if ! check_prerequisites; then
+    log_err "Prerequisites not met"
+    return 1
+  fi
+
+  decrypt_secrets || {
+    log_err "Failed to decrypt secrets"
+    return 1
+  }
+
+  cd "${PASTEBIN_DIR}/server"
+
+  log "Deploying kant-zk-test worker..."
+  wrangler deploy --config wrangler-test.toml --name "kant-zk-test" 2>>"$LOG_FILE" || {
+    log_err "Failed to deploy test worker"
+    return 1
+  }
+
+  log_success "Test worker deployed"
+  local url="https://kant-zk-test.${CF_ACCOUNT_ID:-0ceffbadd0a04623896f5317a1e40d94}.workers.dev/health"
+  log "Verify: curl ${url}"
+}
+
 deploy() {
   log "=== Cloudflare Worker Deployment ==="
   log "Pastebin dir: $PASTEBIN_DIR"
@@ -350,6 +383,9 @@ status() {
 }
 
 case "${1:-deploy}" in
+  test-deploy)
+    test_deploy_worker
+    ;;
   deploy)
     deploy
     ;;
@@ -361,12 +397,13 @@ case "${1:-deploy}" in
     ;;
   *)
     cat <<EOF
-Usage: $0 [deploy|verify|status]
+Usage: $0 [deploy|test-deploy|verify|status]
 
 Commands:
-  deploy    Deploy all Cloudflare Workers (Lean WASM relay + Rust WASM pastebin)
-  verify    Check health of deployed workers
-  status    Show deployment status
+  deploy      Deploy all Cloudflare Workers (Lean WASM relay + Rust WASM pastebin)
+  test-deploy Deploy minimal /health test worker (kant-zk-test)
+  verify      Check health of deployed workers
+  status      Show deployment status
 EOF
     exit 2
     ;;
