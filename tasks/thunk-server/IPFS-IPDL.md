@@ -149,6 +149,12 @@ the Lean toolchain is formalised and the kernel is reachable by reflection in
 chain only terminates in a pinned `rustc`. So "verified" and "pinned" are
 different claims and a ref should be able to distinguish them.
 
+## Related
+
+[THUNK-CYCLE.md](THUNK-CYCLE.md) is the loop these three feed: sops on every
+thunk, `apis + sops + args` ⇒ results, results as new thunks or cached values
+with history, everything a lens, and a schedule constrained by measured budgets.
+
 ## Open
 
 - **Does `refs` belong in the thunk id?** I argue yes — two peers with the same

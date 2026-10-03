@@ -217,6 +217,12 @@ pinned through the same resolver that handles sources, then "compilers are
 thunks" stops being a slogan and becomes a mechanism — and it needs no Lean work
 to get there.
 
+## Related
+
+[THUNK-CYCLE.md](THUNK-CYCLE.md) is the loop these three feed: sops on every
+thunk, `apis + sops + args` ⇒ results, results as new thunks or cached values
+with history, everything a lens, and a schedule constrained by measured budgets.
+
 ## Open
 
 - **Is `nixpkgs` a ref, or the mechanism that resolves refs?** Today it is both,

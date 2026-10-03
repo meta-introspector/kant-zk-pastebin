@@ -261,6 +261,12 @@ when a state first exceeds a frame.
 Per-declaration means smaller payloads and finer-grained content addressing, at
 the cost of many modules to fetch. One module is simpler and already fits a frame.
 
+## Related
+
+[THUNK-CYCLE.md](THUNK-CYCLE.md) is the loop these three feed: sops on every
+thunk, `apis + sops + args` ⇒ results, results as new thunks or cached values
+with history, everything a lens, and a schedule constrained by measured budgets.
+
 ## Open
 
 - `web/wasm-test.mjs` reads `dist/kant_kernel.wasm` directly, and `dist/` is

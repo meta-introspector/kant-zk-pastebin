@@ -99,6 +99,15 @@ terminates in a pinned `rustc`. So "verified" and "pinned" are different claims
 and the refs should be able to tell them apart. See
 [TOOLCHAIN-THUNKS.md](TOOLCHAIN-THUNKS.md).
 
+**The cycle.** Every thunk needs sops; `apis + sops + args` ⇒ results; a result
+is either a new thunk or a cached value carrying history; everything is a lens;
+constraints are respected and the schedule is optimal. Two consequences worth
+stating early — a thunk id covers `{bytes, refs}` and excludes sealed args, so
+there must be a **second key**, `callId = {thunkId, argsHash, secretRefs}`, or a
+credential ends up in a shared id. And "optimal" does not mean "fewest writes":
+`scripts/relay-measure.mjs` measured that admission control binds before cadence
+does. See [THUNK-CYCLE.md](THUNK-CYCLE.md).
+
 The short version, measured rather than argued: `web/kant_kernel.wasm` is 799
 bytes with **zero imports**, so isolation is a property of the artifact instead
 of a policy around it, and the payload is 5% of one 16 KiB swarm frame. Three
