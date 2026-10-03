@@ -2,16 +2,18 @@
 
 **Date:** 2026-10-03 · **Status:** proposed · **Companion to** [PLAN.md](PLAN.md)
 
-> **Open PRs on 2026-10-03** — three (of the four below), and they are not the
+> **Open PRs on 2026-10-03** — three (of the four mentioned below), and they are not the
 > branches here.
 > PR #10 `feat/build-feed` (**Chain A tip**, 1442 files, `CONFLICTING`) is the
 > one that matters: it is the tip this lattice's Step 4 exists for, and it is
 > far larger than the 57-file conflict count suggested. PR #9 is
 > `feature/big-merge` — this branch. PR #2 `feature/wip` is `MERGEABLE` but
-> `UNSTABLE` (298 files). PR #1 (an external contributor's fix) turned out
-> to be **already merged** while still open, and was closed; its one surviving
-> finding is fixed in **#11**, which targets `main` and is independent of this
-> lattice. See PLAN.md's Review log for the retraction.
+> `UNSTABLE` (298 files). PR #1 (an external contributor's fix) is **open and
+> unmerged** — I wrongly closed it for a few minutes by asking git about the
+> local `main` instead of `origin/main`. PR #11 was opened and closed in the
+> same session; it fixed a sink that `origin/main` had already removed.
+> PLAN.md's Review log has both retractions, and `scripts/base-check.sh` now
+> catches the class of error.
 
 Thirteen remote branches carry work that is in neither `feature/big-merge` nor
 `main`. They are not a stack — they are two independent chains plus a set of

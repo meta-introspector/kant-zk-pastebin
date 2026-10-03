@@ -12,6 +12,12 @@ Every "gap" below was checked against a file and line on 2026-10-03. Where the
 spec and the code disagree, both positions are stated rather than only the one
 that is easier to implement.
 
+**Every line citation below is against `feature/big-merge`, not `main`.** The
+two have diverged heavily: `main` is 213 commits ahead of where it was on
+2026-10-03 and has rewritten `src/view.rs` and `src/handlers.rs` out from under
+this document. A citation here is not a citation there. Re-verify before acting
+on any of them.
+
 ## Status
 
 Three commits landed after this plan was written and change what it says. Read
@@ -275,32 +281,75 @@ to be doing today.
 ## Review log
 
 **PR #1** (`twilwa`, `fix(access): use public paste access urls`) — reviewed
-2026-10-03, then **retracted in part**. Kept here because the retraction is the
-useful part.
+2026-10-03. Reviewed twice, retracted once, retracted again. Kept in full
+because the corrections are the useful part.
 
-The first review reported three blockers. Two were wrong:
+**Round 1 reported three blockers. Two were wrong.**
 
-1. ~~"It does not compile."~~ **Wrong.** `0ddb10a3` is an ancestor of `main`;
-   the PR was already merged while still showing open. The
-   `PasteIndex.root` error came from `feature/big-merge`, where that field
-   exists and never existed on `main`.
-2. ~~"It introduces reflected XSS via `onclick`."~~ **Superseded.** The
-   `view::W` refactor landed afterwards and moved the value out of the handler
-   into an escaped `data-v`. The refactor was correct; the review predated it.
-3. **rustfmt noise** — real but trivial.
+1. ~~"It does not compile."~~ Wrong, twice over. I ran
+   `git merge-base --is-ancestor 0ddb10a3 main` — against the **local** `main`
+   branch, which has **diverged from `origin/main`** (ahead 59, behind 213). It
+   answered yes; `origin/main` says no. `gh pr view 1` reports `mergedAt: null`.
+   **PR #1 was never merged.** The `PasteIndex.root` error came from
+   `feature/big-merge`, where that field exists and never existed on `main`.
+2. ~~"It introduces reflected XSS via `onclick`."~~ Superseded. The `view::W`
+   refactor on `origin/main` moved the value out of the handler into an escaped
+   `data-v` — the correct pattern. My review predated it.
+3. rustfmt noise — real, and trivial.
 
-What actually survived is the same defect one sink over, and it is fixed in
-**#11**. `Page::render` wrote js_vars as `const k='<value>'` escaping only `'`.
-Inside a `<script>` element the HTML parser looks for `</script>` and decodes
-nothing, so `&lt;` would not have helped either. Three js_vars (`basePath`,
-`pasteUrl`, `dataUrl`) carry `base_url`, which comes from `connection_info()` —
-and actix prefers `X-Forwarded-Host` over `Host`.
+**Round 2 retracted the retraction.** Having "proved" the PR was merged, I
+closed it. That was wrong and I reopened it with an apology: the only real
+error was *which ref* I asked git about.
 
-**The lesson worth keeping: verify a PR's merge state before reviewing its
-diff.** Reviewing an already-landed commit against the wrong branch produced
-two confident, wrong findings, and both were only caught by going back to
-`git merge-base --is-ancestor`. A review that does not first establish what
-the base actually contains is measuring the reviewer's branch, not the PR.
+**What is actually true, per `origin/main` today:** the `view::W` refactor is
+there and correct, so the `onclick` finding does not apply; the commit is
+**not** merged; the PR genuinely is open and deserves a decision.
+
+**PR #11** (`view: a js_var value could close the script element it lives in`)
+— opened, then **closed as fixing nothing**. Same shape of mistake again.
+
+The finding was real *on the `main` I had checked out*: `Page::render` emitted
+`const k='<value>'` escaping only `'`, which is insufficient inside a `<script>`
+element, and `basePath`/`pasteUrl`/`dataUrl` carried a `base_url` from
+`connection_info()`. The fix and its seven mutation-checked tests are sound.
+
+But that branch was cut from a `main` **213 commits stale**, merge-base an old
+`wip`. On current `origin/main`: no `Page`, no `W`, no `js_vars`;
+`normalized_base_url()` gone; `connection_info()` and `X-Forwarded-Host`
+appear **nowhere** in `src/`; `base_url` is back to `env::var("BASE_URL")`.
+The sink no longer exists, so hardening it fixes nothing.
+
+The tell was on screen: GitHub reported **645 changed files** for a commit that
+touched one. That number was read and not treated as information.
+
+## Before reviewing or branching: run `scripts/base-check.sh`
+
+Three mistakes, one cause — acting on a stale picture of the base. This is now a
+script rather than advice, because advice did not work twice:
+
+```bash
+scripts/base-check.sh <pr-number>        # before reviewing a PR
+scripts/base-check.sh --branch <name>    # before pushing a branch
+```
+
+It checks four things and exits non-zero if the base is wrong:
+
+1. **local `main` vs `origin/main`** — divergent here, and the direct cause of
+   the false "already merged". Every other check names `origin/<ref>`
+   explicitly so this cannot recur.
+2. **already merged?** — against `origin/<base>`, not the local name. Also
+   reports *where* the commit does live, which distinguishes "not merged" from
+   "landed elsewhere".
+3. **how stale is the base?** — a large number means no line number or file
+   content can be trusted.
+4. **does the diff have the shape I expect?** — the cheapest check and the one
+   skipped. It is what printed `645 files` for a one-file commit.
+
+Verified against five cases: a genuinely merged PR (#6, red), an open unmerged
+one (#1, red on divergence), the stale branch behind #11 (red on shape), a
+healthy branch (warns on size only), and a nonexistent branch (red).
+
+Check 4 is the one to keep. **Read a diff's shape before reading its contents.**
 
 Related: `main` currently **does not resolve offline** —
 `multihash-codetable` pins `core2 0.4.0`, yanked upstream. `feature/big-merge`
