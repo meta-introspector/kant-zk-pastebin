@@ -48,6 +48,28 @@ const WASM_KV_KEY = "kant-wasm-cache";
 //
 // Two peers in different Cloudflare PoPs no longer share a room through this
 // worker; they reach each other over the mesh and the bus.
+/**
+ * Read posted lines, in whichever of the two shapes a client used.
+ *
+ * The shipped page client (web/kant-net.mjs) sends `text/plain` with lines
+ * joined by newlines; the lean lineage sent `{"lines":[...]}`. Both are
+ * accepted, because this worker serves that page, and a relay its own client
+ * cannot write to is a dead end — which is what happened when only the JSON
+ * shape was understood: every POST from the lab page failed to parse and the
+ * room stayed empty.
+ */
+async function readLines(request) {
+  const raw = await request.text();
+  const type = (request.headers.get("content-type") ?? "").split(";")[0].trim();
+  if (type === "application/json" || /^[[{]/.test(raw)) {
+    try {
+      const body = JSON.parse(raw);
+      if (Array.isArray(body?.lines)) return body.lines;
+    } catch { /* fall through to the plain-text reading */ }
+  }
+  return raw.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+}
+
 const ROOM_OBJECTS = new Map();
 const roomFor = (id) => {
   let r = ROOM_OBJECTS.get(id);
@@ -77,9 +99,12 @@ class Room {
     // the room id — `?room=<id>` or `/room/<id>`.
     if (request.method === "POST" && (path === "/room" || path.startsWith("/room/"))) {
       try {
-        const body = await request.json();
         const roomId = url.searchParams.get("room");
-        const lines = body.lines || [];
+        // The shipped client (web/kant-net.mjs) posts text/plain, lines joined
+        // by newlines. The lean lineage posted {"lines":[...]}. Both are
+        // accepted, because this worker serves that page and a relay that
+        // cannot be written to by its own client is a dead end.
+        const lines = await readLines(request);
         const pass = request.headers.get("x-kant-pass");
         const invite = request.headers.get("x-kant-invite");
 
@@ -94,11 +119,7 @@ class Room {
         const now = Date.now();
         for (const line of lines) {
           if (line.length > MAX_LINE) continue; // reject oversized
-          const entry = {
-            id: line.substring(0, 64),
-            body: line,
-            ts: now,
-          };
+          const entry = { body: line, ts: now };
           this.lines.push(entry);
           accepted.push(entry);
           if (this.lines.length > MAX_LINES) {
@@ -133,7 +154,9 @@ class Room {
         }
       }
 
-      const lines = this.lines.slice(cursor);
+      // kant's client ingests strings and rejects anything that is not one, so
+      // this must not hand back the stored {body, ts} envelope.
+      const lines = this.lines.slice(cursor).map((e) => e.body);
       const truncated = this.cursor > cursor + lines.length;
 
       return json({ ok: true, cursor: this.cursor, lines, truncated });
