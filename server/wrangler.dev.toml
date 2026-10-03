@@ -1,0 +1,42 @@
+# wrangler.dev.toml — the dev/integrated relay as its own Cloudflare Worker.
+#
+# A copy of wrangler.toml with a different worker name and its own Durable
+# Object namespace, so deploying dev work cannot touch the live
+# kant-relay-v1. Same source (worker.js) and same ../web assets: what differs
+# is where it lands, not what it is.
+#
+# Deploy with the token in ~/.cloudflare:
+#
+#   CLOUDFLARE_API_TOKEN=$(cat ~/.cloudflare) \
+#   CLOUDFLARE_ACCOUNT_ID=2c5da35f915a13c131bead97f3f7bc75 \
+#   wrangler deploy --config server/wrangler.dev.toml
+#
+# Which lands at https://kant-relay-v1-dev.<subdomain>.workers.dev. The
+# account_id differs from wrangler.toml's: that one names the personal account,
+# this names `kant`, which is where kant-relay-v1 actually lives.
+name = "kant-relay-v1-dev"
+main = "worker.js"
+account_id = "2c5da35f915a13c131bead97f3f7bc75"
+compatibility_date = "2025-01-01"
+
+# Same protocol as the Node relay, so a client cannot tell the twins apart.
+# The class is prefixed `Dev` because Durable Object classes are addressed by
+# name within the worker, but the SQLite storage is separate per worker anyway
+# — the prefix keeps the two namespaces unmistakable in the Cloudflare
+# dashboard and in any error message.
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+# The browser client from the same origin, so the page and its relay share a
+# host and no CORS is needed. This is what makes the whole file-share capture
+# runnable against the worker, including the IPFS checks — those need the
+# page's own /ipfs-rpc, which the worker does not provide, so expect those
+# five to report "via unreachable" here and pass only behind nginx.
+[assets]
+directory = "../web"
+binding = "ASSETS"
