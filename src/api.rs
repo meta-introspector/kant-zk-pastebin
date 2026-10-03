@@ -21,8 +21,8 @@ fn slugify(s: &str) -> String {
 }
 
 /// POST /api/paste - Create new paste
-pub async fn create_paste(data: web::Json<Paste>) -> HttpResponse {
-    let content = data.content.as_ref().map(|s| s.as_str()).unwrap_or("");
+pub async fn create_paste(data: web::Json<crate::model::Paste>) -> HttpResponse {
+    let content = data.content.as_str();
     let title = data
         .title
         .as_ref()
@@ -41,15 +41,18 @@ pub async fn create_paste(data: web::Json<Paste>) -> HttpResponse {
     let filename = format!("{}_{}.txt", ts, slug_title);
     let id = filename.trim_end_matches(".txt").to_string();
 
-    HttpResponse::Ok().json(Response {
-        id: id.clone(),
-        cid,
+    HttpResponse::Ok().json(crate::model::Response {
+        ok: true,
+        data: None,
+        id: Some(id.clone()),
+        cid: Some(cid),
+        witness: Some(witness),
         ipfs_cid: None,
-        witness,
-        url: format!("/paste/{}", id),
-        permalink: format!("/paste/{}", id),
-        uucp_path: format!("/var/spool/uucp/{}", filename),
+        url: Some(format!("/paste/{}", id)),
+        permalink: Some(format!("/paste/{}", id)),
+        uucp_path: Some(format!("/var/spool/uucp/{}", filename)).into(),
         reply_to: data.reply_to.clone(),
+        error: None,
     })
 }
 
