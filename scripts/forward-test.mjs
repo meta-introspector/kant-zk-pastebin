@@ -13,7 +13,7 @@
 //   node scripts/forward-test.mjs
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
 const { copyInvite, invite, roomOf } = await import(`${root}/web/kant-net.mjs`);
+const { Bridge } = await import(`${root}/server/forward.mjs`);
 
 let pass = 0, fail = 0;
 const t = async (name, fn) => {
@@ -73,8 +74,20 @@ const post = async (base, room, lines) => {
 };
 
 // One carry, in its own process — the point of the test.
+//
+// `--state` is load-bearing here and was silently not passed for a while.
+// forward.mjs hardcoded its state directory to /tmp and ignored any state
+// path it was handed, so this test was reading and writing a *global* carry
+// ledger: it passed on a clean machine, and on every later run the previous
+// run's ledger said the backlog was already carried and nothing was posted.
+// A test that inherits its subject's state from a previous run is not a
+// test. `a clean ledger carries a backlog` below now fails if the flag
+// stops being honoured.
 const carry = (args) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [join(root, "server/forward.mjs"), "--once", ...args], {
+  const child = spawn(process.execPath, [
+    join(root, "server/forward.mjs"), "--once",
+    "--state", dir, ...args,
+  ], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, KANT_QUIT_AFTER: "" },
   });
@@ -88,6 +101,44 @@ try {
   const secret = Array.from({ length: 32 }, (_, i) => (i * 7 + 3) & 0xff);
   const room = roomOf(secret);
   const inviteText = copyInvite(invite(A, secret, "testpeer"));
+
+  // Two rooms whose names share a 64-bit prefix is not something to arrange,
+  // so this asserts the weaker and still-true property: the ledger file is
+  // named for the whole room, so no two rooms can collide on it. The old
+  // name used the first 8 hex chars.
+  await t("the carry ledger is named for the whole room, not a prefix", () => {
+    const r = "84da04cc9b78467fe79638de47a1336cdca4b910cf30c1c568856fc5d60c9152";
+    const long = new Bridge({
+      from: A, to: B, room: r,
+      statePath: join(dir, "kant-forward-" + r + "-fwd.json"),
+      invite: inviteText,
+    });
+    const short = new Bridge({
+      from: A, to: B, room: "84da04cc",
+      statePath: join(dir, "kant-forward-" + r + "-fwd.json"),
+      invite: inviteText,
+    });
+    assert.equal(long.sent.file, short.sent.file,
+      "two rooms must not share one carry ledger");
+    assert.ok(long.sent.file.includes(r),
+      `the ledger ${long.sent.file} is not named for the full room`);
+  });
+
+  await t("a failed carry exits non-zero instead of reporting success", () => {
+    // forward.mjs used to swallow a backlog carry's error into a log line,
+    // so `--once` exited 0 having carried nothing — a bridge that reports
+    // success while doing nothing, which is the whole failure this rewrite
+    // is about. A destination that is not listening must fail loudly.
+    const out = spawnSync(process.execPath, [
+      join(root, "server/forward.mjs"), "--once",
+      "--state", dir,
+      "--invite", inviteText,
+      "--from", A,
+      "--to", "http://127.0.0.1:1", // nothing listens here
+    ], { encoding: "utf8", timeout: 30000 });
+    assert.notEqual(out.status, 0,
+      `a carry that could not post exited 0\n${out.stderr}`);
+  });
 
   console.log("two local relays");
   startRelay(PORT_A, "a");

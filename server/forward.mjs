@@ -23,7 +23,12 @@
 //   node server/forward.mjs --invite '<link>' \
 //       --from https://solana.solfunmeme.com/relay \
 //       --to   https://kant-zk-relay.jmikedupont2.workers.dev \
-//       [--interval 10] [--state f.json]
+//       [--interval 10] [--state <dir>] [--once]
+//
+// --state names the directory holding this room's carry ledger and cursor
+// state: one `<room>-<dir>.json` plus one `<room>-<dir>.sent.sqlite` per
+// bridge. It defaults to /tmp, which is fine for a one-off carry and wrong
+// for anything long-lived.
 //
 // The invite's room (a digest of the secret, which neither relay ever
 // learns) names the same room on both relays: that is the interlink.
@@ -68,7 +73,7 @@ const error = (m, e) => console.error(`${new Date().toISOString()} error forward
 
 // --------------------------------------------------------------- bridge
 
-class Bridge {
+export class Bridge {
   constructor({ from, to, room, statePath, interval = 10, invite = null }) {
     this.src = new RelayClient(from);
     this.dst = new RelayClient(to);
@@ -152,15 +157,11 @@ class Bridge {
   }
 }
 
-// ----------------------------------------------------------------- main
-
-const invite = arg("invite", null);
-const roomsDir = arg("rooms", null);
-const from = arg("from", null);
-const to = arg("to", null);
-const interval = Number(arg("interval", 10)) || 10;
-const once = arg("once", false);
-
+// ----------------------------------------------------------------- invites
+//
+// Above the main guard on purpose: the Bridge constructor reads
+// `fragOfInvite`, so these cannot live inside a block the module only
+// enters when it is the process entry point.
 const { witness, hexDecode } = await import("../web/kantzk.mjs");
 
 // The invite fragment, from either shape an invite arrives in:
@@ -190,115 +191,162 @@ const roomOfInvite = (link) => {
   return witness(hexDecode(fields[1]));
 };
 
-async function pump(fwd, label) {
-  for (;;) {
-    try {
-      const out = await fwd.src.poll(fwd.room, { wait: 10 });
-      // Loop guard: never re-post a line this bridge already carried, and
-      // never carry back one the opposite bridge brought in.
-      const lines = fwd.other
-        ? fwd.uncarried(out.lines ?? []).filter((l) => !fwd.other.sent.known(fwd.room, [l]))
-        : fwd.uncarried(out.lines ?? []);
-      if (lines.length) {
-        await fwd.dst.post(fwd.room, lines, fwd.writeHeaders);
-        fwd.markCarried(lines);
-        // The destination's own record of what it now holds, so a later poll
-        // of it does not read as new lines to carry back.
-        fwd.other?.markCarried(lines);
-        fwd.state.carried += lines.length;
-        fwd.save();
-        info(`${label}: carried ${lines.length} line(s)`, `total ${fwd.state.carried}`);
-      }
-    } catch (e) {
-      error(`${label} poll cycle failed`, e.message ?? e);
-      await new Promise((r) => setTimeout(r, fwd.interval * 1000));
-    }
-  }
-}
+// ----------------------------------------------------------------- main
+//
+// Guarded so the module can be imported for its classes without
+// running the bridge: a test that constructs a Bridge should not
+// start carrying anything.
+if (import.meta.main) {
 
-async function runBridge(room, fromRelay, toRelay, stateDir, { both = false } = {}) {
-  const r8 = room.slice(0, 8);
-  const mk = (from2, to2, tag) => {
-    const b = new Bridge({
-      from: from2, to: to2, room,
-      statePath: `${stateDir}/kant-forward-${r8}-${tag}.json`,
-      interval,
-      invite,
-    });
-    return b;
-  };
-  const fwd = mk(fromRelay, toRelay, both ? "ab" : "fwd");
-  info(`room ${r8}…`, both ? `${fromRelay} <-> ${toRelay}` : `${fromRelay} -> ${toRelay}`);
-  if (both) {
-    const back = mk(toRelay, fromRelay, "ba");
-    fwd.other = back; back.other = fwd;
-    // Seed both sides' carry records from the initial carry so backfill
-    // doesn't bounce: after carry, anything on a side is "known".
-    info(`carrying the backlog (both directions)`);
-    await fwd.carry().catch((e) => error("backlog carry fwd failed", e.message ?? e));
-    await back.carry().catch((e) => error("backlog carry back failed", e.message ?? e));
-    // Snapshot each side's current contents into the other's carry record, so
-    // polls don't re-bounce what is already there on both ends.
-    for (const [b, other] of [[fwd, back], [back, fwd]]) {
+
+  const invite = arg("invite", null);
+  const roomsDir = arg("rooms", null);
+  const from = arg("from", null);
+  const to = arg("to", null);
+  const interval = Number(arg("interval", 10)) || 10;
+  const once = arg("once", false);
+
+  async function pump(fwd, label) {
+    for (;;) {
       try {
-        other.markCarried((await b.src.poll(b.room, { wait: 0 })).lines ?? []);
-      } catch { /* best effort */ }
-    }
-    if (once) return;
-    await Promise.all([pump(fwd, `fwd ${r8}…`), pump(back, `back ${r8}…`)]);
-    return;
-  }
-  info(`carrying the backlog`);
-  await fwd.carry().catch((e) => error("backlog carry failed", e.message ?? e));
-  if (once) return;
-  await pump(fwd, `fwd ${r8}…`);
-}
-
-if (roomsDir) {
-  // Self-maintaining mode: scan the rooms dir, keep one bridge per room.
-  // Each room config can add `"forward": [{ "from": "...", "to": "..." }, ...]`;
-  // absent, the default is local relay -> CF twin.
-  const { readdirSync, readFileSync, mkdirSync } = await import("node:fs");
-  const defaultFrom = arg("default-from", "https://solana.solfunmeme.com/relay");
-  const defaultTo = arg("default-to", "https://kant-zk-relay.jmikedupont2.workers.dev");
-  const stateDir = arg("state-dir", "/var/lib/kant-zk/forward");
-  mkdirSync(stateDir, { recursive: true });
-  const running = new Map(); // room8 -> true
-  const scan = () => {
-    for (const f of readdirSync(roomsDir).filter((f) => f.endsWith(".json"))) {
-      let cfg;
-      try { cfg = JSON.parse(readFileSync(`${roomsDir}/${f}`, "utf8")); } catch { continue; }
-      if (!cfg.invite) continue;
-      const room = roomOfInvite(cfg.invite);
-      const r8 = room.slice(0, 8);
-      if (running.has(r8)) continue;
-      running.set(r8, true);
-      const pairs = cfg.forward?.length ? cfg.forward : [{ from: defaultFrom, to: defaultTo }];
-      for (const p of pairs) {
-        runBridge(room, p.from, p.to, stateDir, { both: Boolean(p.both ?? cfg.both ?? arg("both", false)) }).catch((e) => {
-          error(`bridge ${r8}… died`, e.message ?? e);
-          running.delete(r8); // allow rescan to restart it
-        });
+        const out = await fwd.src.poll(fwd.room, { wait: 10 });
+        // Loop guard: never re-post a line this bridge already carried, and
+        // never carry back one the opposite bridge brought in.
+        const lines = fwd.other
+          ? fwd.uncarried(out.lines ?? []).filter((l) => !fwd.other.sent.known(fwd.room, [l]))
+          : fwd.uncarried(out.lines ?? []);
+        if (lines.length) {
+          await fwd.dst.post(fwd.room, lines, fwd.writeHeaders);
+          fwd.markCarried(lines);
+          // The destination's own record of what it now holds, so a later poll
+          // of it does not read as new lines to carry back.
+          fwd.other?.markCarried(lines);
+          fwd.state.carried += lines.length;
+          fwd.save();
+          info(`${label}: carried ${lines.length} line(s)`, `total ${fwd.state.carried}`);
+        }
+      } catch (e) {
+        error(`${label} poll cycle failed`, e.message ?? e);
+        await new Promise((r) => setTimeout(r, fwd.interval * 1000));
       }
-      info(`watching room ${r8}… (${f})`, `${pairs.length} bridge(s)`);
     }
-  };
-  scan();
-  if (!once) setInterval(scan, 15000);
-  setInterval(() => {}, 1 << 30);
-  if (once) process.exit(0);
-} else {
-  if (!invite || !from || !to) {
-    console.error(`usage: node server/forward.mjs --invite '<link>' --from <relay> --to <relay> [--both]
-       node server/forward.mjs --rooms <dir> [--default-from <relay>] [--default-to <relay>] [--both]`);
-    process.exit(2);
   }
-  const room = roomOfInvite(invite);
-  const both = Boolean(arg("both", false));
-  if (once) {
-    await runBridge(room, from, to, "/tmp", { both }).catch((e) => { error("once carry failed", e.message ?? e); process.exit(1); });
-    process.exit(0);
+
+  async function runBridge(room, fromRelay, toRelay, stateDir, { both = false } = {}) {
+    const r8 = room.slice(0, 8);
+    const mk = (from2, to2, tag) => {
+      const b = new Bridge({
+        from: from2, to: to2, room,
+        // The FULL room name, not r8. The carry ledger records lines by digest,
+        // so two rooms whose names share a prefix must not land in one file:
+        // room A's carried lines would then read as room B's and B would
+        // silently never bridge anything. r8 is fine for a log line, where a
+        // collision costs a moment of confusion; for a filename it costs
+        // correctness.
+        statePath: `${stateDir}/kant-forward-${room}-${tag}.json`,
+        interval,
+        invite,
+      });
+      return b;
+    };
+    // A backlog carry that throws has carried nothing. In `--once` mode the
+    // caller is a script or a test that reads the exit code as "did this
+    // work", so the error has to reach it rather than be logged and dropped.
+    // Exiting 0 having carried nothing is the exact failure mode this
+    // rewrite exists to remove.
+    const mustCarry = async (b, label) => {
+      try {
+        return await b.carry();
+      } catch (e) {
+        error(`${label} failed`, e.message ?? e);
+        throw e;
+      }
+    };
+    const fwd = mk(fromRelay, toRelay, both ? "ab" : "fwd");
+    info(`room ${r8}…`, both ? `${fromRelay} <-> ${toRelay}` : `${fromRelay} -> ${toRelay}`);
+    if (both) {
+      const back = mk(toRelay, fromRelay, "ba");
+      fwd.other = back; back.other = fwd;
+      // Seed both sides' carry records from the initial carry so backfill
+      // doesn't bounce: after carry, anything on a side is "known".
+      info(`carrying the backlog (both directions)`);
+      await mustCarry(fwd, "backlog carry fwd");
+      await mustCarry(back, "backlog carry back");
+      // Snapshot each side's current contents into the other's carry record, so
+      // polls don't re-bounce what is already there on both ends.
+      for (const [b, other] of [[fwd, back], [back, fwd]]) {
+        try {
+          other.markCarried((await b.src.poll(b.room, { wait: 0 })).lines ?? []);
+        } catch { /* best effort */ }
+      }
+      if (once) return;
+      await Promise.all([pump(fwd, `fwd ${r8}…`), pump(back, `back ${r8}…`)]);
+      return;
+    }
+    info(`carrying the backlog`);
+    await mustCarry(fwd, "backlog carry");
+    if (once) return;
+    await pump(fwd, `fwd ${r8}…`);
   }
-  runBridge(room, from, to, "/tmp", { both }).catch((e) => { error("fwd loop died", e.message ?? e); process.exit(1); });
-  setInterval(() => {}, 1 << 30);
+
+  if (roomsDir) {
+    // Self-maintaining mode: scan the rooms dir, keep one bridge per room.
+    // Each room config can add `"forward": [{ "from": "...", "to": "..." }, ...]`;
+    // absent, the default is local relay -> CF twin.
+    const { readdirSync, readFileSync, mkdirSync } = await import("node:fs");
+    const defaultFrom = arg("default-from", "https://solana.solfunmeme.com/relay");
+    const defaultTo = arg("default-to", "https://kant-zk-relay.jmikedupont2.workers.dev");
+    const stateDir = arg("state-dir", "/var/lib/kant-zk/forward");
+    mkdirSync(stateDir, { recursive: true });
+    const running = new Map(); // room8 -> true
+    const scan = () => {
+      for (const f of readdirSync(roomsDir).filter((f) => f.endsWith(".json"))) {
+        let cfg;
+        try { cfg = JSON.parse(readFileSync(`${roomsDir}/${f}`, "utf8")); } catch { continue; }
+        if (!cfg.invite) continue;
+        const room = roomOfInvite(cfg.invite);
+        const r8 = room.slice(0, 8);
+        if (running.has(r8)) continue;
+        running.set(r8, true);
+        const pairs = cfg.forward?.length ? cfg.forward : [{ from: defaultFrom, to: defaultTo }];
+        for (const p of pairs) {
+          runBridge(room, p.from, p.to, stateDir, { both: Boolean(p.both ?? cfg.both ?? arg("both", false)) }).catch((e) => {
+            error(`bridge ${r8}… died`, e.message ?? e);
+            running.delete(r8); // allow rescan to restart it
+          });
+        }
+        info(`watching room ${r8}… (${f})`, `${pairs.length} bridge(s)`);
+      }
+    };
+    scan();
+    if (!once) setInterval(scan, 15000);
+    setInterval(() => {}, 1 << 30);
+    if (once) process.exit(0);
+  } else {
+    if (!invite || !from || !to) {
+      console.error(`usage: node server/forward.mjs --invite '<link>' --from <relay> --to <relay> [--both] [--once] [--state <dir>]
+         node server/forward.mjs --rooms <dir> [--default-from <relay>] [--default-to <relay>] [--both]`);
+      process.exit(2);
+    }
+    const room = roomOfInvite(invite);
+    const both = Boolean(arg("both", false));
+    // Single-room mode honours --state (or --state-dir) instead of assuming
+    // /tmp. It used to hardcode "/tmp" and ignore whatever state path it was
+    // given, which made the carry ledger global: a stale ledger left by an
+    // earlier run made a fresh bridge read its whole backlog as already
+    // carried, and two rooms' ledgers shared a directory. Callers that need an
+    // isolated ledger — tests especially — now actually get one.
+    const { mkdirSync } = await import("node:fs");
+    const singleStateDir = arg("state", arg("state-dir", "/tmp"));
+    mkdirSync(singleStateDir, { recursive: true });
+    if (once) {
+      await runBridge(room, from, to, singleStateDir, { both })
+        .catch((e) => { error("once carry failed", e.message ?? e); process.exit(1); });
+      process.exit(0);
+    }
+    runBridge(room, from, to, singleStateDir, { both })
+      .catch((e) => { error("fwd loop died", e.message ?? e); process.exit(1); });
+    setInterval(() => {}, 1 << 30);
+  }
+
 }
