@@ -267,8 +267,17 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    fn make_storage() -> Arc<Storage> {
-        Arc::new(Storage::new(None))
+    /// A `Storage` in a directory of this test's own.
+    ///
+    /// `Storage::new(None)` falls back to `$HOME/.kant-pastebin`, so every test
+    /// using it shared one directory and the same `ident-1`/`avatar-1` ids:
+    /// `test_mesh_state_proxy_methods` passed alone and failed beside the
+    /// others, and wrote into the live service's data directory. Each caller
+    /// keeps its `TempDir` alive, since removing it early would defeat the
+    /// point. This is the pattern `test_two_mesh_state_instances_isolated_storage`
+    /// already used.
+    fn make_storage(dir: &TempDir) -> Arc<Storage> {
+        Arc::new(Storage::new(Some(dir.path().to_string_lossy().to_string())))
     }
 
     fn sample_identity() -> Identity {
@@ -307,7 +316,8 @@ mod tests {
     #[test]
     fn test_mesh_state_proxy_methods() {
         run_async(async {
-            let storage = make_storage();
+            let tmp = TempDir::new().expect("temp dir");
+            let storage = make_storage(&tmp);
             let state = MeshState::new(MeshConfig::default(), storage.clone());
 
             let identity = sample_identity();
@@ -338,7 +348,8 @@ mod tests {
     #[test]
     fn test_two_mesh_state_instances_shared_storage() {
         run_async(async {
-            let storage = make_storage();
+            let tmp = TempDir::new().expect("temp dir");
+            let storage = make_storage(&tmp);
             let state_a = MeshState::new(MeshConfig::default(), storage.clone());
             let state_b = MeshState::new(MeshConfig::default(), storage);
 
@@ -376,7 +387,8 @@ mod tests {
     #[test]
     fn test_mesh_state_list_avatars_filter() {
         run_async(async {
-            let storage = make_storage();
+            let tmp = TempDir::new().expect("temp dir");
+            let storage = make_storage(&tmp);
             let state = MeshState::new(MeshConfig::default(), storage);
 
             let owner1 = sample_avatar();
