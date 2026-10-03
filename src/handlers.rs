@@ -1,19 +1,23 @@
 // Handlers - Request handlers for kant-pastebin microservice
+use crate::mesh::MeshState;
 use crate::model::{
-    Paste, PasteIndex, Response, SplitMode, SplitProfile, SplitProfileRequest, SplitUnit,
-    ThreadPost,
+    Avatar, Identity, MeshMessage, MeshMessageKind, MeshPeer, Paste, PasteIndex, Response,
+    SplitMode, SplitProfile, SplitProfileRequest, SplitUnit, ThreadPost,
 };
 use crate::plugins;
 use crate::plugins::pipelight;
+use crate::storage::Storage;
 use crate::{ipfs, plugin, storage, tagging, view};
-use actix_web::{web, HttpRequest, HttpResponse, Result};
+use actix_web::{web, HttpRequest, HttpResponse, Result as ActixResult, Result};
 use chrono::Utc;
 use ciborium;
+use futures_util::StreamExt;
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::Arc;
 use std::{collections::HashMap, env, fs};
 
 // ─── Full error capture — saves replayable test case ───────────────
@@ -5740,6 +5744,25 @@ pub async fn api_git_index() -> Result<HttpResponse> {
     })))
 }
 
+/// POST /api/mesh/ping — Receive a ping from another relay
+pub async fn receive_mesh_ping(
+    state: web::Data<Arc<MeshState>>,
+    msg: web::Json<MeshMessage>,
+) -> ActixResult<HttpResponse> {
+    state.handle_message(msg.into_inner()).await.map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({"ok": true})))
+}
+
+/// POST /api/mesh/announce — Announce this relay's identity
+pub async fn announce_identity(
+    state: web::Data<Arc<MeshState>>,
+    identity: web::Json<Identity>,
+) -> ActixResult<HttpResponse> {
+    let identity = identity.into_inner();
+    state.save_identity(&identity).await.map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({"ok": true})))
+}
+
 /// POST /api/git-reindex — flush cache to disk
 pub async fn api_git_reindex() -> Result<HttpResponse> {
     let mut cache = crate::git_mount::get_cache();
@@ -5851,3 +5874,60 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 }
+
+/// POST /api/identities — Create a new identity
+pub async fn create_identity(
+    state: web::Data<Arc<Storage>>,
+    ident: web::Json<Identity>,
+) -> ActixResult<HttpResponse> {
+    let identity = ident.into_inner();
+    state.save_identity(&identity).await.map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Created().json(identity))
+}
+
+/// GET /api/avatars/{owner} — List avatars for a specific owner
+pub async fn list_avatars(
+    path: web::Path<String>,
+    state: web::Data<Arc<Storage>>,
+) -> ActixResult<HttpResponse> {
+    let owner = path.into_inner();
+    let avatars = state.list_avatars(&owner).await;
+    Ok(HttpResponse::Ok().json(avatars))
+}
+
+/// POST /api/avatars — Upload a new avatar
+pub async fn upload_avatar(
+    state: web::Data<Arc<Storage>>,
+    avatar: web::Json<Avatar>,
+) -> ActixResult<HttpResponse> {
+    let avatar = avatar.into_inner();
+    state.save_avatar(&avatar).await.map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Created().json(avatar))
+}
+
+/// GET /api/avatars/{id} — Get a specific avatar
+pub async fn get_avatar(
+    path: web::Path<String>,
+    state: web::Data<Arc<Storage>>,
+) -> ActixResult<HttpResponse> {
+    let id = path.into_inner();
+    let avatar = state.load_avatar(&id).await;
+    match avatar {
+        Some(avatar) => Ok(HttpResponse::Ok().json(avatar)),
+        None => Ok(HttpResponse::Ok().json(serde_json::json!({"error": "avatar not found"})))
+    }
+}
+
+// ========== Plugin handlers (already defined elsewhere) ==========
+
+/// POST /plugins — List plugins
+pub async fn list_plugins_handler() -> ActixResult<HttpResponse> {
+    Ok(HttpResponse::Ok().body("plugins endpoint"))
+}
+
+/// POST /plugin/{name}/{id} — Run a plugin
+pub async fn run_plugin_handler(path: web::Path<(String, String)>) -> ActixResult<HttpResponse> {
+    let (name, id) = path.into_inner();
+    Ok(HttpResponse::Ok().json(serde_json::json!({"name": name, "id": id, "result": "ok"})))
+}
+
