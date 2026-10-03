@@ -43,6 +43,18 @@ walkdir = "2"
 libloading = "0.8"
 regex-lite = "0.1"
 
+# libp2p gossipsub, for file chunks (src/libp2p_transport.rs). The wire format
+# lives in src/libp2p_frames.rs and matches web/kant-libp2p.mjs byte for byte.
+# Chat is unaffected: it stays on the HTTP relay.
+#
+# Versions are pinned to what was read from the crate source rather than
+# remembered -- gossipsub 0.50 has no AsyncSubscription (messages arrive as
+# swarm events), `Behaviour::new` returns Result<Self, &'static str>, and
+# `Strict` validation is incompatible with anonymous authenticity. Those three
+# are all silent-until-runtime, so the pin is load-bearing, not tidiness.
+libp2p = { version = "0.57", features = ["gossipsub", "tokio", "macros", "noise", "yamux", "tcp"] }
+libp2p-gossipsub = "0.50"
+
 lazy_static = "1.4"
 tar = "0.4"
 flate2 = "1.0"
