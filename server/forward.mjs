@@ -30,6 +30,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { RelayClient } from "../web/kant-net.mjs";
+import { RoomStore } from "./room-store.mjs";
 
 // ------------------------------------------------------------- arguments
 
@@ -54,14 +55,21 @@ const error = (m, e) => console.error(`${new Date().toISOString()} error forward
 // The room name comes from the invite's #fragment: the invite is
 // `origin#kzinvite:<relay-hex>:<secret-hex>:<peer>`, and the room is
 // the witness of the secret.  The bridge only needs the public room
-// name — it never needs the secret, because it re-posts raw lines
-// that already carry their own witness.  (Resolved in main, after the
+// name to ROUTE — it never needs the secret, because it re-posts raw
+// lines that already carry their own witness.
+//
+// It does still need to PRESENT the invite when it writes.  A POST with
+// no `x-kant-invite` is charged to an anonymous sender and held to the
+// per-sender rate limit (10 posts / 10 min on the default relay), which
+// a first carry of a real backlog trips at once — a 143-line room came
+// back 429 on the first attempt.  Presenting it makes the relay admit
+// the bridge as the room's owner instead.  (Resolved in main, after the
 // dynamic import of kantzk.mjs below.)
 
 // --------------------------------------------------------------- bridge
 
 class Bridge {
-  constructor({ from, to, room, statePath, interval = 10 }) {
+  constructor({ from, to, room, statePath, interval = 10, invite = null }) {
     this.src = new RelayClient(from);
     this.dst = new RelayClient(to);
     this.from = from;
@@ -69,12 +77,47 @@ class Bridge {
     this.room = room;
     this.interval = Math.max(1, Number(interval) || 10);
     this.statePath = statePath;
+    // Written on every post so the destination relay admits this bridge as
+    // the room's owner rather than as an anonymous peer under the
+    // per-sender rate limit. The fragment, not the whole link — see
+    // fragOfInvite above.
+    const frag = invite ? fragOfInvite(invite) : null;
+    this.writeHeaders = frag ? { "x-kant-invite": frag } : null;
     this.state = existsSync(statePath)
       ? JSON.parse(readFileSync(statePath, "utf8"))
       : { carried: 0 };
+    // What the bridge has already pushed to the destination.
+    //
+    // This used to be a bare Set of line strings in memory, which vanished
+    // with the process: a restarted bridge re-sent everything it had carried.
+    // It is now a sqlite replica — but a *file-backed* one, deliberately. An
+    // in-memory RoomStore would have kept the code shape and lost the
+    // property the change was for, because every carry in `pump`/`carry` is
+    // its own process invocation. `scripts/forward-test.mjs` runs the bridge
+    // in separate processes on purpose for exactly this reason.
+    this.sent = new RoomStore({ file: statePath.replace(/\.json$/, ".sent.sqlite") });
   }
 
   save() { writeFileSync(this.statePath, JSON.stringify(this.state, null, 2) + "\n"); }
+
+  /** Lines read off the source that this bridge has not already carried.
+   *
+   *  Dedup is on the printed line's digest, keyed per room, and it survives a
+   *  restart because it lives in `sent` rather than in this process. */
+  uncarried(lines) {
+    if (!lines.length) return [];
+    const digests = lines.map((l) => RoomStore.digest(l));
+    const have = new Set();
+    for (const row of this.sent.lines(this.room)) have.add(row.digest);
+    return lines.filter((_, i) => !have.has(digests[i]));
+  }
+
+  /** Record lines as carried, so they are never sent twice. */
+  markCarried(lines, { at = Date.now() } = {}) {
+    if (lines.length) {
+      this.sent.record(this.room, { lines, cursor: 0 }, { relay: this.to, at, adoptCursor: false });
+    }
+  }
 
   /** Carry every line the source has past our cursor to the destination.
    *  On the first carry (backlog) the destination is read first and any
@@ -82,18 +125,27 @@ class Bridge {
    *  idempotent — the destination never grows duplicate history. */
   async carry() {
     const out = await this.src.poll(this.room, { wait: 0 });
-    let lines = out.lines ?? [];
-    if (!lines.length) return 0;
+    let lines = this.uncarried(out.lines ?? []);
+    if (!lines.length) {
+      if (out.lines?.length) {
+        info(`backlog: everything the source has was already carried`,
+          `${out.lines.length} line(s) held in ${this.sent.file}`);
+      }
+      return 0;
+    }
     if (!this.state.synced) {
-      const have = new Set((await this.dst.poll(this.room, { wait: 0 })).lines ?? []);
-      const fresh = lines.filter((l) => !have.has(l));
+      const have = (await this.dst.poll(this.room, { wait: 0 })).lines ?? [];
+      const fresh = lines.filter((l) => !have.includes(l));
       const skipped = lines.length - fresh.length;
       if (skipped) info(`backlog: skipped ${skipped} line(s) already on the destination`);
       lines = fresh;
       this.state.synced = true;
       if (!lines.length) { this.save(); return 0; }
     }
-    await this.dst.post(this.room, lines);
+    await this.dst.post(this.room, lines, this.writeHeaders);
+    // Only now is a line known to be on the destination: a post that throws
+    // has carried nothing, so nothing is marked and the next attempt retries.
+    this.markCarried(lines);
     this.state.carried += lines.length;
     this.save();
     return lines.length;
@@ -111,9 +163,29 @@ const once = arg("once", false);
 
 const { witness, hexDecode } = await import("../web/kantzk.mjs");
 
-// The room name from an invite link fragment:
+// The invite fragment, from either shape an invite arrives in:
+//
+//   https://relay.example/#kzinvite:<relay-hex>:<secret-hex>:<peer>
+//   kzinvite:<relay-hex>:<secret-hex>:<peer>
+//
+// The relay's `x-kant-invite` header wants that fragment verbatim —
+// `envelopeDecode` reads colon-separated hex fields and nothing else, so
+// passing the whole link (origin included) parses as garbage and the relay
+// answers 401 rather than the 429 an anonymous post would get.
+//
+// An invite is not always a URL: `kant-cli join` takes a bare envelope out of
+// a UUCP spool file, and the rooms directory in `--rooms` mode is full of
+// them. Requiring a `#` meant such an invite produced a null fragment and the
+// bridge died on it rather than carrying anything.
+const fragOfInvite = (link) => {
+  const s = String(link ?? "").trim();
+  const m = s.match(/#(.+)$/);
+  if (m) return m[1];
+  return s.includes("#") ? null : s || null;
+};
+
 const roomOfInvite = (link) => {
-  const frag = String(link).match(/#(.+)$/)?.[1];
+  const frag = fragOfInvite(link);
   const fields = frag.slice(frag.indexOf(":") + 1).split(":");
   return witness(hexDecode(fields[1]));
 };
@@ -122,13 +194,18 @@ async function pump(fwd, label) {
   for (;;) {
     try {
       const out = await fwd.src.poll(fwd.room, { wait: 10 });
-      let lines = out.lines ?? [];
-      // Loop guard: never re-post a line this bridge put on the source.
-      if (fwd.pushed?.size) lines = lines.filter((l) => !fwd.pushed.has(l));
+      // Loop guard: never re-post a line this bridge already carried, and
+      // never carry back one the opposite bridge brought in.
+      const lines = fwd.other
+        ? fwd.uncarried(out.lines ?? []).filter((l) => !fwd.other.sent.known(fwd.room, [l]))
+        : fwd.uncarried(out.lines ?? []);
       if (lines.length) {
-        await fwd.dst.post(fwd.room, lines);
+        await fwd.dst.post(fwd.room, lines, fwd.writeHeaders);
+        fwd.markCarried(lines);
+        // The destination's own record of what it now holds, so a later poll
+        // of it does not read as new lines to carry back.
+        fwd.other?.markCarried(lines);
         fwd.state.carried += lines.length;
-        for (const l of lines) fwd.other?.pushed?.add(l);
         fwd.save();
         info(`${label}: carried ${lines.length} line(s)`, `total ${fwd.state.carried}`);
       }
@@ -146,8 +223,8 @@ async function runBridge(room, fromRelay, toRelay, stateDir, { both = false } = 
       from: from2, to: to2, room,
       statePath: `${stateDir}/kant-forward-${r8}-${tag}.json`,
       interval,
+      invite,
     });
-    b.pushed = new Set(); // lines this side has posted to its destination
     return b;
   };
   const fwd = mk(fromRelay, toRelay, both ? "ab" : "fwd");
@@ -155,15 +232,16 @@ async function runBridge(room, fromRelay, toRelay, stateDir, { both = false } = 
   if (both) {
     const back = mk(toRelay, fromRelay, "ba");
     fwd.other = back; back.other = fwd;
-    // Seed both sides' push-sets from the initial carry so backfill
+    // Seed both sides' carry records from the initial carry so backfill
     // doesn't bounce: after carry, anything on a side is "known".
     info(`carrying the backlog (both directions)`);
     await fwd.carry().catch((e) => error("backlog carry fwd failed", e.message ?? e));
     await back.carry().catch((e) => error("backlog carry back failed", e.message ?? e));
-    // Snapshot current contents into pushed sets so polls don't re-bounce.
+    // Snapshot each side's current contents into the other's carry record, so
+    // polls don't re-bounce what is already there on both ends.
     for (const [b, other] of [[fwd, back], [back, fwd]]) {
       try {
-        for (const l of (await b.src.poll(b.room, { wait: 0 })).lines ?? []) other.pushed.add(l);
+        other.markCarried((await b.src.poll(b.room, { wait: 0 })).lines ?? []);
       } catch { /* best effort */ }
     }
     if (once) return;

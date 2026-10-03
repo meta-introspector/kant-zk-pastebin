@@ -547,12 +547,17 @@ export class RelayClient {
     return r;
   }
 
-  /** Post one or more lines into a room. */
-  async post(room, lines) {
+  /** Post one or more lines into a room.
+   *
+   *  `extraHeaders` carries a `x-kant-invite` (or `x-kant-pass`) for a
+   *  client that writes on someone else's behalf. Without one the relay
+   *  charges the post to an anonymous sender and holds it to the per-sender
+   *  rate limit, which a bridge carrying a backlog will hit immediately. */
+  async post(room, lines, extraHeaders = null) {
     const body = (Array.isArray(lines) ? lines : [lines]).join("\n");
     const r = await this.request(this.url(room), {
       method: "POST",
-      headers: { "content-type": "text/plain" },
+      headers: { "content-type": "text/plain", ...(extraHeaders ?? {}) },
       body,
     }, `post ${body.split("\n").length} line(s)`);
     const out = await r.json();
