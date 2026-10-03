@@ -1,0 +1,31 @@
+name = "kant-build-feed"
+main = "build-feed.mjs"
+account_id = "2c5da35f915a13c131bead97f3f7bc75"
+compatibility_date = "2025-01-01"
+
+preview_urls = false
+
+# No Durable Object, no KV, no R2. The subscriber list lives in isolate memory:
+# it is small, and it is rebuilt by whoever cares. PB-19 showed what holding a
+# Durable Object open costs on the free tier, and there is nothing here worth a
+# billed replica — the rooms themselves belong to the relay twins.
+
+# Where rooms actually live. Publishing hands each line to the relay over the
+# same text/plain protocol the page client uses.
+[vars]
+RELAY_BASE = "https://kant-zk-relay-wasm.jmikedupont2.workers.dev"
+
+[observability]
+enabled = false
+
+# Secrets — set with `wrangler secret put`, never in this file and never in the
+# p2p layer:
+#
+#   SLACK_WEBHOOK   the Slack incoming-webhook URL. Read here, used here, never
+#                   returned and never written into a room line.
+#   PUBLISH_TOKEN   the bearer token CI presents. Also goes into the GitHub
+#                   Actions repository secrets as KANT_BUILD_FEED_TOKEN.
+#
+# The webhook in pipelight.yml was found committed in plaintext and has been
+# redacted from the pushed copy; if it is still live, rotate it before setting
+# SLACK_WEBHOOK here.

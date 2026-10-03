@@ -1,0 +1,54 @@
+# Report finished runs to the kant build feed.
+#
+# This is the only side of the feed that is privileged. It presents a bearer
+# token from the repository secrets; the Slack webhook is not here and never
+# leaves the Worker. Anyone may subscribe a room to watch — that endpoint needs
+# no credential.
+#
+# The feed decides what is worth announcing: a failure always, a success only
+# for a workflow that deploys or publishes. So this workflow sends everything
+# and the Worker stays quiet about the successes that do not ship.
+#
+# Needed in the repository secrets (not in this file, and not in the p2p layer):
+#   KANT_BUILD_FEED_URL     https://kant-build-feed.<subdomain>.workers.dev
+#   KANT_BUILD_FEED_TOKEN   the same value as the Worker's PUBLISH_TOKEN secret
+
+name: build-feed
+
+on:
+  workflow_run:
+    workflows: ["nix-build", "pages", "docker-build", "kant-cli", "CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    # The feed is a convenience; a broken reporter must not turn a green build
+    # red or mask the run it is describing.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report to the kant build feed
+        env:
+          FEED_URL: ${{ secrets.KANT_BUILD_FEED_URL }}
+          FEED_TOKEN: ${{ secrets.KANT_BUILD_FEED_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FEED_URL:-}" ] || [ -z "${FEED_TOKEN:-}" ]; then
+            echo "KANT_BUILD_FEED_URL / KANT_BUILD_FEED_TOKEN not set — skipping."
+            echo "The build result is unaffected; only the notification is skipped."
+            exit 0
+          fi
+          curl -sS -X POST "${FEED_URL}/publish" \
+            -H "authorization: Bearer ${FEED_TOKEN}" \
+            -H "content-type: application/json" \
+            --data "$(jq -nc --argjson wf "${{ toJSON(github.event.workflow_run) }}" '{
+              repo: $wf.repository.full_name,
+              workflow: $wf.name,
+              conclusion: $wf.conclusion,
+              branch: $wf.head_branch,
+              url: $wf.html_url
+            }')" \
+            | jq .
