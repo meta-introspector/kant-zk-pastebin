@@ -33,6 +33,7 @@ import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
 import { PassStore } from "./pass-store.mjs";
+import { DiskBlocks } from "./disk-blocks.mjs";
 import { pastePass, passOk, passRoom } from "../web/kant-pass.mjs";
 import { parseMsg } from "../web/kant-net.mjs";
 import { witness } from "../web/kantzk.mjs";
@@ -70,6 +71,7 @@ export const CONFIG = {
   gasServeBudget: Number(args.get("gas-serve") ?? 256 * 1024 * 1024),
   gasWindowMs: Number(args.get("gas-window") ?? 60 * 60 * 1000),
   archiveDir: args.get("archive-dir") ?? process.env.KANT_ARCHIVE ?? "",
+  blocksDir: args.get("blocks-dir") ?? process.env.KANT_BLOCKS ?? "",
   version: "1.0.0",
 };
 
@@ -192,6 +194,12 @@ export class Blocks {
     }
     g.served += bytes.length;
     return bytes;
+  }
+
+  /** The room's pin list (see DiskBlocks.list). */
+  list(name) {
+    const r = this.map.get(name);
+    return r ? [...r.blocks.keys()] : [];
   }
 }
 
@@ -377,7 +385,13 @@ function makePassStore(cfg) {
 
 export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLogger(cfg),
   passes = makePassStore(cfg)) {
-  const blocks = new Blocks(cfg);
+  // With --blocks-dir the block store is the durable DiskBlocks twin:
+  // same API and gas rules, but the pins survive a restart and replay
+  // on boot.  Without it, the in-memory store (a room's pins live only
+  // as long as the relay does).
+  const blocks = cfg.blocksDir
+    ? new DiskBlocks(cfg, cfg.blocksDir)
+    : new Blocks(cfg);
   // The archive: every room line and every block pin, appended to one
   // ndjson file per room handle, so a reader can replay a room that the
   // relay itself has long since forgotten.  The room name is only ever
@@ -467,6 +481,16 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
       }
       log.warn("relay", "method not allowed", `${roomRef(room)} ${req.method}`);
       sendJson(res, cfg, 405, { ok: false, error: "method not allowed" });
+      return;
+    }
+
+    // The room's pin list: /room/<addr>/blocks — what the pairer and the
+    // page emitter diff against the twin.  Listing is free (no bytes
+    // move, no gas charged); only the room's handle is shown.
+    const bl = url.pathname.match(/^\/room\/([^/]+)\/blocks$/);
+    if (bl && req.method === "GET") {
+      const room = decodeURIComponent(bl[1]);
+      sendJson(res, cfg, 200, { ok: true, roomRef: roomRef(room), blocks: blocks.list(room) });
       return;
     }
 
@@ -654,5 +678,6 @@ if (isMain) {
     console.log("  WS   /ws/{room}?cursor=N             stream");
     if (CONFIG.staticDir) console.log(`  serving ${path.resolve(CONFIG.staticDir)} at /`);
     if (CONFIG.logFile) console.log(`  writing the log to ${path.resolve(CONFIG.logFile)}`);
+    if (CONFIG.blocksDir) console.log(`  blocks pinned durably under ${path.resolve(CONFIG.blocksDir)}`);
   });
 }

@@ -18,6 +18,10 @@
 //   thread/<room8>.html — one page per kant-zk room: the folded
 //                         transcript (latest reply's body) + the chain
 //                         of replies with their witnesses and CIDs
+//   b/<cid>.html        — one page per pinned block: metadata, hex
+//                         preview, links to the bytes (the "new pages
+//                         in Cloudflare" half of the archive server)
+//   blocks.json         — every pinned block, by room handle and CID
 //   archive.json        — the whole fold as one JSON document
 //   manifest.json       — what this snapshot contains + when + sizes
 //
@@ -26,6 +30,7 @@
 //   node server/publisher.mjs \
 //       --spool /var/spool/uucp/pastebin \
 //       --out /var/lib/kant-zk/snapshot \
+//       [--blocks http://127.0.0.1:8787]   # relay to read pinned blocks
 //       [--interval 300] [--once] \
 //       [--pages-deploy]   # also `wrangler pages deploy` the snapshot
 //       [--worker-deploy]  # also `wrangler deploy` the relay worker (hash-gated)
@@ -181,6 +186,69 @@ ${chain.join("\n")}
 `;
 }
 
+// ------------------------------------------------------------ blocks
+
+/** A pinned block, as a page: what it is (CID, room handle, size),
+ *  a hex preview of its bytes, and links to fetch the real thing from
+ *  the relay (the page is a lens, not a copy — the bytes stay where
+ *  they are pinned). */
+function renderBlock(ref, cid, size, preview) {
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>block ${cid.slice(0, 12)}… — kant-zk archive</title>
+<style>
+body{font-family:monospace;max-width:900px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}
+a{color:#0ff;text-decoration:none} code{color:#ff0}
+pre{white-space:pre-wrap;background:#111;padding:10px;border:1px solid #030;overflow-wrap:anywhere}
+table{border-collapse:collapse} td,th{border:1px solid #030;padding:4px 8px;text-align:left}
+</style></head><body>
+<h1>block <code>${esc(cid.slice(0, 16))}…</code></h1>
+<p><a href="../index.html">← archive</a> · room <code>${esc(ref)}</code> · ${size} bytes</p>
+<table><tr><th>cid</th><td><code>${esc(cid)}</code></td></tr>
+<tr><th>bytes</th><td><a href="${esc(`https://solana.solfunmeme.com/relay/room/${ref}/block/${cid}`)}">relay</a></td></tr></table>
+<h2>preview (first 256 bytes, hex)</h2>
+<pre>${esc(preview)}</pre>
+</body></html>
+`;
+}
+
+/** Read every room's pinned blocks from the relay (or its CF twin) and
+ *  emit a page per block.  Rooms are only ever named by their handle.
+ *  Returns [{ ref, cid, size }] for the manifest. */
+async function writeBlocks({ relay, out }) {
+  // Every room the relay knows: the archive front page lists threads by
+  // room handle already, so the union of those handles is the room set.
+  const refs = new Set();
+  const blocks = [];
+  for (const t of threadsCache) if (t.room8) refs.add(t.room8);
+  for (const ref of refs) {
+    let cids;
+    try {
+      const res = await fetch(`${relay}/room/${ref}/blocks`);
+      if (!res.ok) continue;
+      cids = (await res.json()).blocks ?? [];
+    } catch { continue; }
+    for (const cid of cids) {
+      let size = 0, preview = "";
+      try {
+        const r = await fetch(`${relay}/room/${ref}/block/${cid}`);
+        if (r.ok) {
+          const bytes = new Uint8Array(await r.arrayBuffer());
+          size = bytes.length;
+          preview = Array.from(bytes.slice(0, 256))
+            .map((b) => b.toString(16).padStart(2, "0")).join(" ");
+        }
+      } catch { /* a block that will not read still gets a page */ }
+      mkdirSync(pathJoin(out, "b"), { recursive: true });
+      writeFileSync(pathJoin(out, "b", `${cid}.html`), renderBlock(ref, cid, size, preview));
+      blocks.push({ ref, cid, size });
+    }
+  }
+  writeFileSync(pathJoin(out, "blocks.json"), JSON.stringify(blocks, null, 2) + "\n");
+  return blocks;
+}
+
+let threadsCache = [];
+
 // -------------------------------------------------------------- snapshot
 
 function writeSnapshot({ spool, out, roomsOnly }) {
@@ -202,14 +270,16 @@ function writeSnapshot({ spool, out, roomsOnly }) {
     pastes: pastes.length,
     roomsOnly: Boolean(roomsOnly),
   };
+  threadsCache = rooms;
   mkdirSync(pathJoin(out, "thread"), { recursive: true });
+  rmSync(pathJoin(out, "b"), { recursive: true, force: true });
   writeFileSync(pathJoin(out, "archive.json"), JSON.stringify(archive, null, 2) + "\n");
   writeFileSync(pathJoin(out, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
   writeFileSync(pathJoin(out, "index.html"), renderIndex(rooms, manifest));
   for (const t of rooms) {
     writeFileSync(pathJoin(out, "thread", `${t.room8}.html`), renderThread(t, foldedBody(spool, t)));
   }
-  return { threads: rooms.length, pastes: pastes.length };
+  return { threads: rooms.length, pastes: pastes.length, manifest };
 }
 
 // ---------------------------------------------------------------- push
@@ -270,6 +340,7 @@ async function workerDeploy() {
 
 const spoolDir = arg("spool", "/var/spool/uucp/pastebin");
 const out = arg("out", "/var/lib/kant-zk/snapshot");
+const blocksRelay = arg("blocks", ""); // relay (or twin) serving /room/<ref>/blocks
 const interval = Math.max(10, Number(arg("interval", 300)) || 300);
 const once = arg("once", false);
 const deployPages = arg("pages-deploy", false);
@@ -277,13 +348,20 @@ const deployWorker = arg("worker-deploy", false);
 const roomsOnly = arg("rooms-only", true); // default: only kant-zk room threads
 
 const spool = pasteSpool(spoolDir);
-info(`spool=${spoolDir} out=${out} interval=${interval}s pages-deploy=${deployPages} rooms-only=${roomsOnly}`);
+info(`spool=${spoolDir} out=${out} interval=${interval}s pages-deploy=${deployPages} rooms-only=${roomsOnly} blocks=${blocksRelay || "off"}`);
 
 async function cycle() {
   try {
     const t0 = Date.now();
     const stats = writeSnapshot({ spool, out, roomsOnly });
-    info(`snapshot: ${stats.threads} thread(s) from ${stats.pastes} paste(s)`, `${Date.now() - t0}ms`);
+    let blockCount = 0;
+    if (blocksRelay) {
+      const blocks = await writeBlocks({ relay: blocksRelay, out });
+      blockCount = blocks.length;
+      stats.manifest.blocks = blockCount;
+      writeFileSync(pathJoin(out, "manifest.json"), JSON.stringify(stats.manifest, null, 2) + "\n");
+    }
+    info(`snapshot: ${stats.threads} thread(s) from ${stats.pastes} paste(s), ${blockCount} block page(s)`, `${Date.now() - t0}ms`);
     if (deployPages) {
       await pagesDeploy(out);
       info("pushed snapshot to Cloudflare Pages");

@@ -2,6 +2,12 @@ name = "kant-zk-relay"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
+# The durable block store: every pinned block, content-addressed by
+# the witness digest of its bytes, keyed <roomRef>/<cid>.
+[[r2_buckets]]
+binding = "BLOCKS"
+bucket_name = "kant-zk-blocks"
+
 # One Durable Object per room: the append-only log of
 # `RequestProject/Kant/Relay.lean`.
 [[durable_objects.bindings]]

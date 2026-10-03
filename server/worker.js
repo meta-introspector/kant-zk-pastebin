@@ -12,6 +12,9 @@
 //   relay's PassStore, so the twins agree on what a pass buys.
 //   GET  /room/{room}?cursor=N[&wait=S]   -> { ok, cursor, lines, truncated }
 //   WS   /ws/{room}?cursor=N              -> pushes { ok, cursor, lines }
+//   GET  /room/{room}/blocks              -> { ok, blocks: [cid…] }
+//   POST /room/{room}/block/{cid}         -> pin bytes in R2 (gas-metered)
+//   GET  /room/{room}/block/{cid}         -> the bytes (gas-metered)
 //
 // The relay never parses a line and never learns a room secret: a room
 // name is the digest of that secret, computed in the browser.  Clients
@@ -24,6 +27,10 @@ const VERSION = "1.0.0";
 const MAX_LINE = 262144;
 const MAX_LINES = 4096;
 const MAX_BODY = 1048576;
+const MAX_BLOCK = 1048576;
+const GAS_STORE_BUDGET = 64 * 1024 * 1024;
+const GAS_SERVE_BUDGET = 256 * 1024 * 1024;
+const GAS_WINDOW_MS = 60 * 60 * 1000;
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -132,6 +139,17 @@ function senderOfLine(line) {
 const PEER_LIMIT = 10;
 const PEER_WINDOW_MS = 10 * 60 * 1000;
 
+/** An eight-character one-way room handle (same as the Node relay's
+ *  roomRef — the digest of the room name, which is itself a digest). */
+const roomRef = (room) =>
+  digestBytes(Array.from(new TextEncoder().encode(String(room))))
+    .map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
+
+/** The 32-byte hex digest `witness()` produces — here, the CID of a
+ *  block is exactly this digest of its bytes. */
+const cidOf = (bytes) =>
+  digestBytes(Array.from(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -145,6 +163,58 @@ export default {
     if (url.pathname === "/health") {
       console.log("HEALTH", request.url);
       return json({ ok: true, name: "kant-zk-relay", version: VERSION, platform: "cloudflare" });
+    }
+
+    // Content-addressed blocks, room-scoped, R2-backed: the durable twin
+    // of the Node relay's block store.  The CID is the witness digest of
+    // the bytes, verified on write, so a writer can pin garbage under a
+    // name of its own but never under the name of honest bytes.  Gas is
+    // the same per-room ledger, persisted with the DO.
+    const b = url.pathname.match(/^\/room\/([^/]+)\/block\/([0-9a-f]{64})$/);
+    if (b) {
+      const room = decodeURIComponent(b[1]);
+      const cid = b[2];
+      const stub = env.ROOMS.get(env.ROOMS.idFromName(room));
+      if (request.method === "POST" || request.method === "PUT") {
+        const bytes = new Uint8Array(await request.arrayBuffer());
+        if (bytes.length > MAX_BLOCK) {
+          return json({ ok: false, error: "block too large" }, 413);
+        }
+        if (cidOf(bytes) !== cid) {
+          return json({ ok: false, error: "cid is not the digest of the bytes" }, 400);
+        }
+        // The DO owns the gas ledger; R2 owns the bytes.
+        const verdict = await stub.fetch(`https://do/blocks/gas?charge=store&bytes=${bytes.length}`);
+        const v = await verdict.json();
+        if (!v.ok) return json({ ok: false, error: v.error }, v.status ?? 429);
+        await env.BLOCKS.put(`${roomRef(room)}/${cid}`, bytes);
+        return json({ ok: true, cid, bytes: bytes.length,
+          gasStored: v.gas.stored, gasStoredLeft: GAS_STORE_BUDGET - v.gas.stored });
+      }
+      if (request.method === "GET") {
+        const out = await env.BLOCKS.get(`${roomRef(room)}/${cid}`);
+        if (!out) return json({ ok: false, error: "no such block" }, 404);
+        const bytes = new Uint8Array(await out.arrayBuffer());
+        if (cidOf(bytes) !== cid) return json({ ok: false, error: "no such block" }, 404);
+        // Serving is charged for the real size, after the bytes are in
+        // hand and verified — a 404 charges nothing.
+        const charge = await stub.fetch(`https://do/blocks/gas?charge=serve&bytes=${bytes.length}`);
+        const c = await charge.json();
+        if (!c.ok) return json({ ok: false, error: c.error }, c.status ?? 429);
+        return new Response(bytes, { headers: { "content-type": "application/octet-stream", ...CORS } });
+      }
+      return json({ ok: false, error: "method not allowed" }, 405);
+    }
+
+    // The room's pin list — what the pairer diffs.  Free (no bytes, no gas).
+    const bl = url.pathname.match(/^\/room\/([^/]+)\/blocks$/);
+    if (bl && request.method === "GET") {
+      const room = decodeURIComponent(bl[1]);
+      const prefix = `${roomRef(room)}/`;
+      const listed = await env.BLOCKS.list({ prefix, limit: 1000 });
+      const blocks = listed.objects.map((o) => o.key.slice(prefix.length))
+        .filter((k) => /^[0-9a-f]{64}$/.test(k));
+      return json({ ok: true, roomRef: roomRef(room), blocks });
     }
 
     const m = url.pathname.match(/^\/(room|ws)\/([^/]+)$/);
@@ -183,6 +253,17 @@ export class Room {
       if (kept) { this.base = kept.base; this.lines = kept.lines; }
     });
     console.log("ROOM_INIT", "loaded=", this.lines.length, "base=", this.base);
+  }
+
+  /** The room's block-gas ledger, rolled over if the window has passed.
+   *  Restored from DO storage so a restart does not reset a budget. */
+  async gas() {
+    let g = (await this.state.storage.get("blocks:gas"))
+      ?? { stored: 0, served: 0, window: Date.now() };
+    if (Date.now() - g.window > GAS_WINDOW_MS) {
+      g = { stored: 0, served: 0, window: Date.now() };
+    }
+    return g;
   }
 
   async persist() {
@@ -260,6 +341,30 @@ export class Room {
   async fetch(request) {
     await this.loaded;
     const url = new URL(request.url);
+
+    // The gas ledger for blocks: one per room, persisted with the log.
+    // Same rules as the Node relay's Blocks store — the twins agree on
+    // what a room's gas buys.  `?charge=store|serve&bytes=N` charges N
+    // bytes; `bytes=0` only reads the ledger (a probe).
+    if (url.pathname === "/blocks/gas") {
+      const charge = url.searchParams.get("charge");
+      const n = Number(url.searchParams.get("bytes") ?? 0) || 0;
+      const g = await this.gas();
+      if (charge === "store") {
+        if (g.stored + n > GAS_STORE_BUDGET) {
+          return json({ ok: false, status: 429, error: "the room is out of pinning gas until the window turns", gas: g });
+        }
+        g.stored += n;
+      } else if (charge === "serve") {
+        if (g.served + n > GAS_SERVE_BUDGET) {
+          return json({ ok: false, status: 429, error: "the room is out of serving gas until the window turns", gas: g });
+        }
+        g.served += n;
+      }
+      await this.state.storage.put("blocks:gas", g);
+      return json({ ok: true, gas: g });
+    }
+
     const m = url.pathname.match(/^\/(?:room|ws)\/([^/]+)$/);
     const roomName = m ? decodeURIComponent(m[1]) : "";
     const started = Date.now();
