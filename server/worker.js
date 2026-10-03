@@ -30,6 +30,11 @@ const COMMIT = "88c142a9";
 const MAX_LINE = 262144;
 const MAX_LINES = 4096;
 const MAX_BODY = 1048576;
+// Longest long poll, in seconds. This is not a billing cap (there is no
+// Durable Object) — it bounds how long one parked request can hold an
+// isolate's CPU. A client asking for wait=600 gets wait=10 and a normal
+// response, not a ten-minute reservation.
+const MAX_HOLD = 10;
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -492,7 +497,9 @@ export class Room {
 
     if (request.method === "GET") {
       const cursor = Number(url.searchParams.get("cursor") ?? 0) || 0;
-      const wait = Math.min(Number(url.searchParams.get("wait") ?? 0) || 0, 30);
+      // Capped so a client cannot reserve an isolate for an arbitrary time.
+      // See MAX_HOLD.
+      const wait = Math.min(Number(url.searchParams.get("wait") ?? 0) || 0, MAX_HOLD);
       let out = this.fetchFrom(cursor);
       if (wait > 0 && out.lines.length === 0) {
         console.log("ROOM_GET", "wait=", wait, "cursor=", cursor);

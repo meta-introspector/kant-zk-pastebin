@@ -1156,12 +1156,33 @@ export class KantNode {
     return out.lines.length;
   }
 
-  /** Keep polling until `stop()`.  Long polling when the relay supports
-   *  it, plain polling otherwise. */
-  async startPolling({ wait = 25, interval = 1000 } = {}) {
+  /**
+   * Keep polling until `stop()`, pacing by whether anyone is talking.
+   *
+   * The relay is a rendezvous, not a store: it holds a room in isolate memory
+   * and forgets it when the isolate is recycled, so nothing here is the system
+   * of record. The peers are. Every line carries its own witness, `ingest`
+   * refuses anything that does not check out against the client's own key, and
+   * `publish` hands the same line to the mesh and the bus before it reaches the
+   * relay — so a line usually travels peer-to-peer first and the relay is
+   * where a peer that missed one goes to catch up.
+   *
+   * That means the relay is worth polling exactly when something might have
+   * arrived, and not otherwise. A room nobody is talking in has nothing to
+   * deliver, so the hold grows to `maxIdleMs` and the request rate falls to
+   * roughly one per idle window; the first line to arrive drops it straight
+   * back to `interval`, because that is when latency is visible. A chat that
+   * is busy and a chat that is empty therefore cost very differently, which a
+   * fixed interval cannot do.
+   *
+   * `wait` is the long-poll hold the client asks for; the relay caps it
+   * (MAX_HOLD), so asking for more than that costs nothing and gains nothing.
+   */
+  async startPolling({ wait = 10, interval = 200, idleMs = 4000, maxIdleMs = 300000 } = {}) {
     if (this.polling) return;
     this.polling = true;
     let failures = 0;
+    let idleFor = 0;
     // Said once, not once per turn round the loop: with no relay there is
     // nothing to poll, and a client that says so a thousand times a second
     // is a busy loop that starves every timer on the page.
@@ -1177,19 +1198,32 @@ export class KantNode {
         continue;
       }
       saidIdle = false;
+      let arrived = 0;
       try {
-        await this.pollOnce({ wait });
+        arrived = await this.pollOnce({ wait });
         failures = 0;
       } catch (e) {
         failures += 1;
         if (failures <= 3 || failures % 5 === 0) {
           this.log.error("relay", `polling failed (${failures} in a row)`, e);
         }
-        await sleep(Math.min(interval * failures, 15000));
+        // A failure is not evidence of activity, but it is evidence we are not
+        // hearing anything either, so it counts towards the idle backoff.
+        arrived = 0;
       }
-      // Always yield, even when the relay answers at once: a long poll that
-      // returns immediately must not turn into a spin.
-      await sleep(wait ? 25 : interval);
+
+      if (arrived > 0) {
+        idleFor = 0;
+      } else {
+        idleFor = Math.min(Math.max(idleFor * 2, idleMs), maxIdleMs);
+      }
+      const gap = failures > 0 ? Math.min(interval * failures, 15000)
+        : idleFor > 0 ? idleFor
+        : interval;
+      // Jitter, so a room full of idle clients does not come back as one herd
+      // the moment `maxIdleMs` expires — which would put the load spike back
+      // exactly where the backoff was meant to remove it.
+      await sleep(gap * (0.5 + Math.random() * 0.5));
     }
   }
 

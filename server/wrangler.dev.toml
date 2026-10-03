@@ -18,20 +18,53 @@ main = "worker.js"
 account_id = "2c5da35f915a13c131bead97f3f7bc75"
 compatibility_date = "2025-01-01"
 
-# Same protocol as the Node relay, so a client cannot tell the twins apart.
+# There is deliberately no Durable Object here, and no KV, R2 or D1.
 #
-# There is no Durable Object here, and that is the point. The DO free tier
-# bills storage DURATION, and a 10s poll loop with a 10s long poll held
-# every room open permanently — which is what exhausted the budget (PB-19).
-# Rooms and IPFS blocks now live in isolate memory and the bytes travel over
-# the p2p relay, so a recycled isolate costs latency, not correctness.
-# Pass spend counters do reset with the isolate; the relay is a rendezvous
-# point, not an authority.
+# This worker is a rendezvous, not a store. It keeps a room in isolate memory
+# to hand the same line to whoever asks next, and forgets it when the isolate
+# recycles. The peers are the record: every line carries its own witness,
+# `ingest` refuses anything that does not verify against the client's own key,
+# and `publish` sends to the mesh and the bus before it reaches the relay. If
+# the p2p network fails to keep a line, that line is lost — accepted, because
+# the alternative is paying to keep state that nobody reads.
 #
-# Storage is deliberately in-memory only: no DO binding, no KV, no R2. An
-# R2 bucket would cost nothing at this volume but needs an API token with
-# R2 scope, and the token in ~/.cloudflare does not have it.
+# What this does NOT give you: two peers in different Cloudflare PoPs get
+# different isolate memory, so they will not find each other through this
+# worker alone. They reach each other directly, over the mesh and the bus. A
+# Durable Object does fix that, at a billed duration cost that PB-19 showed
+# the free tier cannot absorb; the choice here is to spend nothing instead.
+#
+# Load is kept off the worker rather than moved onto it: the bridge polls every
+# 60s (6604d52), and each client grows its own gap to 5 minutes when the room
+# is quiet, snapping back to 200ms the moment a line arrives
+# (web/kant-net.mjs `startPolling`). An idle room costs roughly one request
+# every few minutes per client, rather than the ~40/s a fixed 25ms interval
+# produced.
 
 [assets]
 directory = "../web"
 binding = "ASSETS"
+
+# Room and BlobStore were deployed here briefly under tags v1/v2 and are being
+# withdrawn. Cloudflare refuses to drop a class from a script without a
+# `deleted_classes` migration — code 10064, rather than orphaning the storage.
+# This deletes what those objects held: test rooms on the dev worker only.
+# kant-relay-v1 is a separate script with its own migration list, still on its
+# own Room class, and is not touched by this.
+#
+# The migration list is history, not intent: wrangler works out which classes
+# exist from the tags declared here, not from what is deployed. So v1 and v2
+# must stay even though they add nothing — drop them and wrangler rejects v3
+# with "Cannot apply deleted_classes migration to non-existent class Room".
+# A tag, once applied, is immutable.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["BlobStore"]
+
+[[migrations]]
+tag = "v3"
+deleted_classes = ["Room", "BlobStore"]

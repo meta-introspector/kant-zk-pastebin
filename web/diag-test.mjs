@@ -310,7 +310,7 @@ if (relay) {
   const lonely = new N.KantNode({ me: "lonely", log: new D.DiagLog({ cap: 200 }) });
   lonely.createRoom();
   lonely.client = null;
-  lonely.startPolling({ wait: 25, interval: 40 });
+  lonely.startPolling({ interval: 40, maxIdleMs: 400 });
 
   let ticks = 0;
   const tick = () => { ticks += 1; };

@@ -54,13 +54,16 @@ if (process.env.SKIP_WORKER) {
     assert.equal((await r.json()).ok, true);
   });
 
-  await t("no Durable Object is bound (it would cost duration)", async () => {
-    // A DO binding shows up as a migration in the deployed script's
-    // bindings; its absence is what keeps PB-19 from recurring.
-    const r = await fetch(`${WORKER}/ipfs-rpc/api/v0/version`, {
-      method: "POST", headers: { origin: WORKER },
-    });
-    assert.equal(r.status, 200, "the store must answer without any DO");
+  await t("a long poll returns, and does not park a request past MAX_HOLD", async () => {
+    // Without a Durable Object there is no billed duration, but a parked
+    // request still holds an isolate's CPU. Asking for wait=600 must not be
+    // honoured as 600.
+    const t0 = Date.now();
+    const r = await fetch(`${WORKER}/room/hold-probe-${Date.now()}?cursor=0&wait=600`,
+      { headers: { origin: WORKER }, signal: AbortSignal.timeout(45_000) });
+    const ms = Date.now() - t0;
+    assert.equal(r.status, 200);
+    assert.ok(ms < 20_000, `wait=600 was honoured: the call took ${ms}ms`);
   });
 
   await t("version is reachable — the capture's reachability probe", async () => {
@@ -145,6 +148,36 @@ if (process.env.SKIP_WORKER) {
     const back = await fetch(`${WORKER}/room/${room}?cursor=0&wait=0`, { headers: { origin: WORKER } });
     const j = await back.json();
     assert.ok(j.lines.includes("hello"), "the line must come back");
+  });
+}
+
+// ── bindings: the only place a Durable Object is actually visible ────────
+//
+// An HTTP call cannot tell you whether the relay holds state in a Durable
+// Object or in isolate memory — both answer identically, from any single PoP.
+// An earlier version of this file asserted "no Durable Object is bound" with a
+// plain POST /version, which passed against a worker that had two of them.
+// So the claim is checked where it is observable: the deployed bindings.
+if (process.env.SKIP_BINDINGS) {
+  console.log("(binding checks skipped)");
+} else {
+  const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
+  const ACCOUNT = process.env.CLOUDFLARE_ACCOUNT_ID ?? "2c5da35f915a13c131bead97f3f7bc75";
+  const NAME = new URL(WORKER).hostname.replace(/\..*$/, "");
+
+  await t("the deployed worker binds no Durable Object, KV or R2", async () => {
+    if (!TOKEN) throw new Error("set CLOUDFLARE_API_TOKEN, or SKIP_BINDINGS=1");
+    const r = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/workers/services/${NAME}/environments/production/bindings`,
+      { headers: { authorization: `Bearer ${TOKEN}` } });
+    const j = await r.json();
+    if (!r.ok) throw new Error(`bindings API: ${r.status}`);
+    const list = j.result ?? [];
+    const stateful = list.filter((b) =>
+      ["durable_object_namespace", "kv_namespace", "r2_bucket", "d1"].includes(b.type));
+    assert.deepEqual(stateful.map((b) => `${b.name}:${b.type}`), [],
+      "the relay is a rendezvous: it must not hold state in any backing service");
+    console.log(`  (bindings: ${list.map((b) => b.name).join(", ") || "none"})`);
   });
 }
 

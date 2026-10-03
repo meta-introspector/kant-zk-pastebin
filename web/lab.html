@@ -1103,7 +1103,7 @@ function start(existing) {
   node.connect();
   node.onChange = render;
   node.announceSelf().then(() => node.dialKnownPeers()).catch(() => {});
-  node.startPolling({ wait: 25 }).catch(() => {});
+  node.startPolling().catch(() => {});
   render();
 }
 

@@ -351,7 +351,7 @@ function attach(fresh) {
   node.announceSelf()
     .then(() => node.dialKnownPeers())
     .catch((e) => LOG.error("app", "could not announce into the room", e));
-  node.startPolling({ wait: 25 })
+  node.startPolling()
     .catch((e) => LOG.error("relay", "polling stopped", e));
   renderDiag();
 }
