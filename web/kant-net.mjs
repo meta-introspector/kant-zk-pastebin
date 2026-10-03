@@ -17,7 +17,7 @@ import {
   envelopeEncode, envelopeDecode, natToBytesBE, bytesBEToNat,
   shareUrl, parseShareUrl, CHANNEL_CAPACITY,
 } from "./kantzk.mjs";
-import { DiagLog, ref as diagRef, diagnose, effectiveRelay, clientOf } from "./kant-diag.mjs";
+import { DiagLog, ref as diagRef, diagnose, effectiveRelay, clientOf, probeRelay } from "./kant-diag.mjs";
 import { parseManifest, printManifest, manifestWitness } from "./kant-file.mjs";
 
 /** The witness a manifest is named by — re-exported so a caller quoting a
@@ -837,6 +837,50 @@ export class KantNode {
   inviteText() {
     if (!this.secret) return "";
     return copyInvite(invite(this.relayBase, this.secret, this.self, this.addrs));
+  }
+
+  /** Check that the relay we would actually talk to answers, and fall back
+   *  to `fallback` when it does not.
+   *
+   *  `joinInvite` takes the relay from the invite without probing it, which
+   *  is right — the invite is the only thing that knows where the room is —
+   *  and is also how a room gets stranded. An invite minted while the
+   *  deployment named a dead relay sends every joiner to that dead relay,
+   *  even when the page is being served by a working one that has the same
+   *  room: the banner is about the serving relay, the client is on the
+   *  invite's, and nothing warns.
+   *
+   *  So probe, and if it does not answer, use `fallback` — but say so loudly.
+   *  A room on the wrong relay is not the same room, so falling back is a
+   *  visible event, never a quiet one.
+   *
+   *  Separate from `joinInvite` because that is synchronous and has callers
+   *  that must stay so; this is the async half, run before the node attaches.
+   */
+  async settleRelay({ fallback = "", timeoutMs = 4000 } = {}) {
+    const named = this.relayBase;
+    if (!named || named === fallback) {
+      return { used: named, fellBack: false, reason: named ? "same as the fallback" : "no relay named" };
+    }
+    const probe = await probeRelay(named, { fetchImpl: this.fetchImpl, log: this.log, timeoutMs });
+    if (probe.ok) return { used: named, fellBack: false, probe };
+
+    if (!fallback) {
+      this.log.error("app",
+        `the invitation names ${named} and it did not answer (${probe.reason}); ` +
+        "there is no other relay to use", named);
+      return { used: named, fellBack: false, probe, reason: probe.reason };
+    }
+
+    this.relayBase = fallback;
+    this.client = new RelayClient(fallback, { fetchImpl: this.fetchImpl, log: this.log });
+    this.relayWarned = named;
+    this.log.error("app",
+      `the invitation names ${named} and it did not answer (${probe.reason}); ` +
+      `using ${fallback} instead — ask whoever sent it to send a fresh invite, ` +
+      "or you may be in a different room than they are", named);
+    this.onChange();
+    return { used: fallback, fellBack: true, from: named, probe };
   }
 
   /** Join the room named by a scanned invitation. */

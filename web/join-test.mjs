@@ -73,6 +73,62 @@ try {
   ok("...and knows about the guest",
     host.peers().some((p) => p && p.peer === "peer-guest"));
 
+  // ---- an invitation that names a relay which does not answer ----
+  //
+  // The failure this covers is silent and was live: an invite minted while
+  // the deployment named a dead relay kept sending joiners to it, even though
+  // the page was served by a working relay holding the same room. The banner
+  // read healthy (it describes the serving relay), the join reported success
+  // (the room id is derived locally), and every actual exchange 504'd.
+  const stale = new N.KantNode({ peer: "peer-stale" });
+  stale.joinInvite(N.copyInvite(N.invite("http://127.0.0.1:1", host.secret, "peer-host", [])));
+
+  // Before settling, it is pointed at the dead relay — the bug.
+  eq("an unprobed invite points at the dead relay", stale.relayBase, "http://127.0.0.1:1");
+
+  const dropped = await stale.settleRelay({ fallback: "", timeoutMs: 700 });
+  ok("with no fallback there is nowhere to go", dropped.fellBack === false);
+  eq("…so the dead relay is kept", stale.relayBase, "http://127.0.0.1:1");
+
+  const settled = await stale.settleRelay({ fallback: base, timeoutMs: 700 });
+  ok("a dead invite relay falls back to the serving one", settled.fellBack === true);
+  eq("…which is now the relay in use", stale.relayBase, base);
+  eq("…and the client was rebuilt for it", stale.client?.base, base);
+  ok("…and the log says so loudly",
+    stale.log.events.some((e) => e.level === "error" && /did not answer/.test(e.text)));
+  ok("…naming the relay it gave up on",
+    stale.log.events.some((e) => e.level === "error" && e.detail === "http://127.0.0.1:1"));
+
+  // Same room, working relay: the fallback must actually carry a line, or the
+  // fallback is worse than useless — it silently puts people in a dead room.
+  await stale.say("hello from the stale invite");
+  await host.pollOnce();
+  // `body` is a byte array, so this needs `msgText` — as the checks above do.
+  ok("the line crosses after falling back",
+    host.view().some((l) => l && N.msgText(l) === "hello from the stale invite"));
+
+  // A relay that DOES answer must be kept: this is the case the relay field
+  // exists for — two peers on different relays, where only the invite knows.
+  const live = new N.KantNode({ peer: "peer-live" });
+  live.joinInvite(N.copyInvite(N.invite(base, host.secret, "peer-host", [])));
+  const kept = await live.settleRelay({ fallback: "http://127.0.0.1:1", timeoutMs: 700 });
+  ok("a working invite relay is not overridden", kept.fellBack === false);
+  eq("…it is still the one in the invite", live.relayBase, base);
+
+  // The same relay twice is not a fallback at all; nothing is probed.
+  const same = new N.KantNode({ peer: "peer-same", relay: base });
+  same.joinInvite(N.copyInvite(N.invite(base, host.secret, "peer-host", [])));
+  const noop = await same.settleRelay({ fallback: base });
+  eq("naming the fallback as the fallback is a no-op", noop.fellBack, false);
+  eq("…and the relay is untouched", same.relayBase, base);
+
+  // No relay in the invite, and none to fall back to: same-browser only.
+  const none = new N.KantNode({ peer: "peer-none" });
+  none.joinInvite(N.copyInvite(N.invite("", host.secret, "peer-host", [])));
+  const noneRes = await none.settleRelay({});
+  ok("an invite with no relay and no fallback goes nowhere", noneRes.fellBack === false);
+  eq("…and has no client", none.client, null);
+
   // A relay that is not there must fail visibly rather than silently: the
   // client keeps working, but nothing crosses.
   const lonely = new N.KantNode({ peer: "peer-lonely", relay: "http://127.0.0.1:1" });
