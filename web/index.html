@@ -600,9 +600,7 @@ function renderFiles() {
       ev.preventDefault();
       const f = files[Number(a.dataset.f)];
       try {
-        const bytes = await FL.decryptFile(node.secret, f, async (cid) =>
-          new Uint8Array(await (await fetch(
-            `${node.relayBase}/room/${encodeURIComponent(f.room)}/block/${cid}`)).arrayBuffer()));
+        const bytes = await FL.decryptFile(node.secret, f, (cid) => fetchChunkFor(f, cid));
         const url = URL.createObjectURL(new Blob([bytes], { type: f.mime }));
         const link = document.createElement("a");
         link.href = url; link.download = f.name; link.click();
@@ -612,6 +610,81 @@ function renderFiles() {
       }
     };
   }
+}
+
+/**
+ * Where one chunk of one file comes from.
+ *
+ * Three places, tried in order of how much they trust the network: the
+ * swarm first (a peer-to-peer pubsub answer), then IPFS, then the relay's
+ * own block store. All three hand back CIPHERTEXT, which `decryptFile`
+ * checks against the chunk's Kant witness before it decrypts anything —
+ * so a peer that lies about a chunk costs a failed download, never a
+ * corrupted file.
+ *
+ * The swarm is optional in every direction. If libp2p did not start, or the
+ * file was announced before this peer joined its topic, the fallbacks carry
+ * the download on their own; nothing here is load-bearing for correctness,
+ * only for speed and for peers who are not reachable through the relay.
+ */
+async function fetchChunkFor(f, cid) {
+  const viaRelay = async () => new Uint8Array(await (await fetch(
+    `${node.relayBase}/room/${encodeURIComponent(f.room)}/block/${cid}`)).arrayBuffer());
+
+  const swarm = await libp2p();
+  if (swarm) {
+    try {
+      const { libp2pFetcher, topicOf } = await import("./kant-libp2p.mjs");
+      const topic = topicOf(f.room, FL.manifestWitness(f));
+      const fetchChunk = libp2pFetcher(swarm.transport, {
+        topic, cidOf: FL.cidOf, timeoutMs: 2500,
+      });
+      try {
+        return await fetchChunk(cid);
+      } finally {
+        fetchChunk.close();
+      }
+    } catch (e) {
+      // No peer answered. That is the normal case on a small room, so it is
+      // not worth a console error — the fallbacks below are the point.
+      LOG.warn("app", "no swarm answer for a chunk, falling back", e.message);
+    }
+  }
+
+  // IPFS, when the manifest named locations for this file.
+  if (f.ipfs?.length) {
+    try {
+      const { getChunk } = await import("./kant-file-ipfs.mjs");
+      const at = f.cids.indexOf(cid);
+      const ipfsCid = f.ipfs[at]?.ipfs ?? f.ipfs[at];
+      if (ipfsCid) {
+        const got = await getChunk(ipfsCid);
+        if (got) return new Uint8Array(got);
+      }
+    } catch (e) {
+      LOG.warn("app", "no ipfs copy of a chunk, falling back", e.message);
+    }
+  }
+
+  return viaRelay();
+}
+
+/** The swarm, started once, or null if libp2p is unavailable here. */
+let _swarm = null;
+let _swarmTried = false;
+async function libp2p() {
+  if (_swarmTried) return _swarm;
+  _swarmTried = true;
+  try {
+    const { libp2pNode } = await import("./kant-libp2p.mjs");
+    _swarm = await libp2pNode({
+      onError: (e) => LOG.warn("app", "libp2p", e?.message ?? String(e)),
+    });
+    if (!_swarm) LOG.warn("app", "no swarm: files will come from ipfs and the relay");
+  } catch (e) {
+    LOG.warn("app", "libp2p did not load", e.message);
+  }
+  return _swarm;
 }
 
 // -------------------------------------------------------------- the taps
@@ -798,9 +871,34 @@ $("btn-drop").onclick = async () => {
     const m = FL.manifest(node.room, node.self, node.seq,
       enc.name, enc.mime, enc.size, enc.nonce, enc.cids, ipfs);
     await node.publish(FL.printManifest(m));
+
+    // Offer the chunks on the swarm too. A topic is scoped to this one
+    // file, so a peer subscribed to it gets exactly these chunks and no
+    // other file's. The chunks are already ciphertext; the room secret
+    // never enters this, so a peer in the topic learns the file's size and
+    // chunk count and nothing more.
+    let swarmServed = 0;
+    try {
+      const swarm = await libp2p();
+      if (swarm) {
+        const { serveChunks, topicOf } = await import("./kant-libp2p.mjs");
+        const topic = topicOf(node.room, FL.manifestWitness(m));
+        serveChunks(swarm.transport, {
+          topic,
+          chunks: new Map(enc.chunks.map((c, i) => [enc.cids[i], c])),
+          cidOf: FL.cidOf,
+        });
+        swarmServed = enc.chunks.length;
+      }
+    } catch (e) {
+      // Not being on the swarm is fine: the relay and IPFS copies stand.
+      LOG.warn("app", "chunks not offered on the swarm", e.message);
+    }
+
     LOG.info("app", `dropped ${picked.name}`,
       `${enc.cids.length} chunk(s) on the relay` +
-      `${ipfs.length ? `, ${ipfs.length} pinned on ipfs` : ""}`);
+      `${ipfs.length ? `, ${ipfs.length} pinned on ipfs` : ""}` +
+      `${swarmServed ? `, ${swarmServed} offered on the swarm` : ""}`);
   } catch (e) {
     LOG.error("app", "the file could not be dropped", e.message);
   }
