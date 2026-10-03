@@ -46,6 +46,19 @@ BIN=$(ls -t target/debug/deps/kant_pastebin-* | grep -v '\.d$' | head -1)
 LD_LIBRARY_PATH=/nix/store/<…>-glibc-2.42-61/lib "$BIN" --test-threads=1
 ```
 
+Do **not** wrap that last line in `timeout` (or any other system binary).
+`LD_LIBRARY_PATH` applies to the whole process, so the wrapper resolves against
+the Nix glibc too and dies before it can exec anything:
+
+```
+timeout: symbol lookup error: …/glibc-2.42-61/lib/libc.so.6:
+  undefined symbol: __tunable_is_initialized, version GLIBC_PRIVATE
+```
+
+That error names `timeout`, not the test binary, so it reads like a broken
+environment rather than a mistake in the invocation. Build with a timeout,
+run without one.
+
 `--test-threads=1` is not required by the code; it just keeps the output
 readable when a failure does happen.
 
@@ -54,15 +67,22 @@ quickest way to tell this apart from a genuine failure in a test.
 
 ## What is green
 
-29 tests, `29 passed; 0 failed`:
+75 tests, `75 passed; 0 failed` (as of `f360e985`):
 
 | module | tests |
 |---|---|
+| `libp2p_frames` | 27 — wire format, byte-identical to `web/kant-libp2p.mjs` |
+| `libp2p_transport` | 15 — gossipsub topics, nonce, serve, reassembly |
 | `mesh` | 4 — the `MeshState` storage proxies, shared vs isolated storage, avatar filtering |
 | `ipfs` | 3 — a failed block write yields no CID |
 | `handlers` | 5 |
 | `plugins::git2nora`, `plugins::pipelight` | 13 |
 | `git_mount`, `rename`, `share` | 5 |
+
+The 42 `libp2p_*` tests run in this crate. An earlier revision of this file said
+the harness made that impossible; it is not. `scripts/frames-crosscheck.sh` also
+decodes real JS frames with the Rust code and re-encodes them, so the two
+implementations are checked against each other and not only against themselves.
 
 The four `mesh` tests and three `ipfs` tests came from PRs #5 and #1; the
 branch had no coverage of either before.
