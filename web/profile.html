@@ -101,8 +101,46 @@
 </head>
 <body>
   <div class="container">
+    <!-- ============================ SUPERSEDED ============================
+         This page is NOT how a Kant profile works. It is left in place
+         because deleting it is not this file's decision to make.
+
+         The real mechanism is the `kzprof` line in `web/kant-net.mjs`: a peer
+         publishes a self-certifying line carrying its name, bio, and the
+         witness of an encrypted `kzfile` manifest holding its picture. Set a
+         name and a picture from the chat screen in `index.html`.
+
+         Why this page cannot be the real one, concretely:
+
+           * `IPFS_API` below is `https://ipfs.io/api/v0/add`. ipfs.io is a
+             read-only gateway; it exposes no write API. Every publish here
+             therefore fails and falls into the catch block, which used to mint
+             `ipfsCid = 'local-' + Date.now()` and report it as an IPFS CID. It
+             resolves to nothing, and it went straight into the FOAF output as
+             `foaf:homepage`, so a consumer of that FOAF would chase a CID
+             that was never a CID.
+           * The avatar is a hand-typed URL, injected into the page as HTML. The
+             real one is a witness inside the profile's own signature: nobody
+             can put someone else's picture on a name.
+           * Nothing here is in a room. A profile published here is visible to
+             anyone who has the CID and carries no relationship to the
+             conversations that peer is in.
+
+         Kept only as a FOAF/Turtle sketch. Do not wire it to anything.
+         =================================================================== -->
+    <div class="card" style="border-color:#f85149">
+      <h2 style="color:#f85149;margin-top:0">Superseded — not the profile mechanism</h2>
+      <p style="font-size:.9rem;line-height:1.5">
+        Names and pictures in Kant are published as <code>kzprof</code> lines inside a
+        room, covered by the peer's own witness. Use the chat screen in
+        <a href="./index.html">index.html</a>. This page's publish path cannot work
+        (it posts to a read-only gateway), and its avatar field is a hand-typed URL
+        with no verification behind it.
+      </p>
+    </div>
+
     <h1>👤 Kant Profile — FOAF over IPFS/IPLD</h1>
-    <p class="subtitle">User profiles stored on IPFS, shared via P2P</p>
+    <p class="subtitle">Superseded draft — see the note above</p>
 
     <!-- Profile Editor -->
     <div class="card" id="editor-card">
@@ -188,6 +226,15 @@
       el.className = isError ? 'error' : 'status';
     }
 
+    // Escape before putting anything in innerHTML. The avatar and public-key
+    // fields are free text typed by whoever is editing, and both used to be
+    // interpolated straight into markup.
+    function escText(s) {
+      return String(s ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     // Generate FOAF RDF Turtle from profile
     function generateFOAF(profile) {
       const lid = `_${Math.random().toString(36).substr(2, 9)}`;
@@ -250,12 +297,17 @@ _${lid}
         displayFOAF(profile);
         setStatus(`Published to IPFS: ${profile.ipfsCid}`);
       } catch (e) {
-        // Fallback: store locally, generate CID placeholder
-        profile.ipfsCid = 'local-' + Date.now();
+        // Stored locally and NOWHERE else. There is no CID to report: the
+        // previous version minted `local-<timestamp>` and presented it as an
+        // IPFS CID, which resolved to nothing and then went into the FOAF
+        // output as foaf:homepage. A made-up address in a document other
+        // tools consume is worse than an honest blank.
         saveProfile(profile);
         displayProfile(profile);
         displayFOAF(profile);
-        setStatus('Stored locally (IPFS unavailable). CID: ' + profile.ipfsCid);
+        setStatus(
+          'Stored in this browser only — nothing was published, and there is no CID. ' +
+          'This page cannot publish; use the chat screen in index.html.', true);
       }
     };
 
@@ -270,15 +322,15 @@ _${lid}
       document.getElementById('profile-details').innerHTML = `
         <div class="field" style="margin-top:1rem">
           <label>Avatar</label>
-          <div class="cid">${profile.avatar || '—'}</div>
+          <div class="cid">${escText(profile.avatar || '—')}</div>
         </div>
         <div class="field">
           <label>Public Key</label>
-          <div class="cid">${profile.publicKey || '—'}</div>
+          <div class="cid">${escText(profile.publicKey || '—')}</div>
         </div>
       `;
       document.getElementById('profile-cid').textContent = 
-        profile.ipfsCid ? `IPFS CID: ${profile.ipfsCid}` : '';
+        profile.ipfsCid ? `IPFS CID: ${profile.ipfsCid}` : 'not published — no CID';
       
       // Fill form
       document.getElementById('username').value = profile.username || '';

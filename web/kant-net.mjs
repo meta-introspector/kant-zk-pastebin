@@ -454,6 +454,116 @@ export function quoteWitness(m) {
 export const sayQuote = (room, sender, seq, f, text, at = now()) =>
   sayTextAt(room, sender, seq, `${quotePrefix(manifestWitnessOf(f))}${text}`, at);
 
+// --------------------------------------------------------- the profile
+//
+// A peer in Kant is a 64-hex witness and nothing else. That is a fine
+// identity and a miserable thing to read in a chat log, so a peer may
+// publish a `kzprof` line carrying a name, a line of bio, and a content
+// address for an avatar. The witness is still the identity; the name is
+// just something the peer chose and anyone can see it.
+//
+// Same reasoning as `kzat` above, and for the same reason: this is a NEW tag
+// rather than extra fields on `kzchat`. A peer that predates this file parses
+// `kzchat` strictly (five fields, exact tag) and would silently drop the line;
+// it ignores `kzprof` outright. Extending `kzchat` would have broken the chat
+// of every old peer in a room, to buy avatars.
+//
+// Nothing here is trusted because it says so. The name is a claim by the
+// sender, visible as such, and the avatar is an IPFS CID inside the witness —
+// so nobody can put someone else's avatar on a peer without also producing
+// that peer's key.
+
+export const TAG_PROF = asciiBytes("kzprof");
+
+/** Limits, enforced on both ends. A peer is one 64-hex string; nothing it
+ *  publishes about itself should be able to fill a room. */
+export const PROF_LIMITS = {
+  name: 64,     // bytes
+  bio: 512,     // bytes
+  avatar: 64,   // bytes: the witness of a kzfile manifest, 64 hex
+};
+
+/** A content address inside the room — 64 lowercase hex, the shape every
+ *  witness in Kant already has.
+ *
+ *  The avatar field holds the *witness of a `kzfile` manifest*, not a URL and
+ *  not an IPFS CID. That is deliberate on both counts:
+ *
+ *  * Not a URL. `profile.html` takes a hand-typed avatar URL, which means any
+ *    reader who loads it hands the uploader an IP address, and a peer can
+ *    put someone else's face on a name. A witness names bytes that are
+ *    already in the room and are covered by the profile's own witness.
+ *
+ *  * Not an IPFS CID. The manifest already carries both names — the witness
+ *    digest of each ciphertext chunk and the IPFS CID it was pinned under —
+ *    plus the per-file nonce, none of which fit in one field. So the profile
+ *    points at the manifest, which is already a proven self-certifying line,
+ *    and the reader resolves it from `files` the same way a file quote does. */
+export function isWitness(s) {
+  return typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
+}
+
+export const profile = (room, sender, seq, name, { bio = "", avatar = "", at = now() } = {}) =>
+  ({ room, sender, seq, name, bio, avatar, at });
+
+/** The bytes a profile commits to. The tag is in here, as in `kzat` and as
+ *  NOT in `msgCore`, so a chat line cannot be re-tagged as a profile and a
+ *  profile cannot be re-tagged as chat after the fact. */
+export const profCore = (p) => [
+  ...TAG_PROF, 0,
+  ...asciiBytes(p.room), 0, ...asciiBytes(p.sender), 0, ...natToBytesBE(p.seq), 0,
+  ...asciiBytes(p.name), 0, ...asciiBytes(p.bio), 0, ...asciiBytes(p.avatar), 0,
+  ...natToBytesBE(p.at),
+];
+
+export const profWitness = (p) => witness(profCore(p));
+
+export const ofProf = (p) => ({
+  tag: TAG_PROF,
+  fields: [
+    asciiBytes(p.room), asciiBytes(p.sender), natToBytesBE(p.seq),
+    asciiBytes(p.name), asciiBytes(p.bio), asciiBytes(p.avatar),
+    natToBytesBE(p.at), asciiBytes(profWitness(p)),
+  ],
+});
+
+/** Read a profile back, refusing anything whose witness does not match or
+ *  whose fields are out of bounds. Refusing on size matters: the limit is the
+ *  only thing between a peer and a 256KB "name". */
+export function toProf(e) {
+  if (!e || !eqBytes(e.tag, TAG_PROF) || e.fields.length !== 8) return null;
+  const [r, s, q, n, b, a, t, w] = e.fields;
+  const p = {
+    room: asciiChars(r), sender: asciiChars(s), seq: Number(bytesBEToNat(q)),
+    name: asciiChars(n), bio: asciiChars(b), avatar: asciiChars(a),
+    at: Number(bytesBEToNat(t)),
+  };
+  if (profWitness(p) !== asciiChars(w)) return null;
+  if (!p.name.length) return null;                       // a peer with no name said nothing
+  if (p.name.length > PROF_LIMITS.name) return null;
+  if (p.bio.length > PROF_LIMITS.bio) return null;
+  if (p.avatar.length && !isWitness(p.avatar)) return null;  // not a witness: refuse it
+  return p;
+}
+
+export const printProf = (p) => envelopeEncode(ofProf(p));
+export const parseProf = (s) => toProf(envelopeDecode(s));
+
+const sameProf = (a, b) =>
+  a.room === b.room && a.sender === b.sender && a.seq === b.seq &&
+  a.name === b.name && a.bio === b.bio && a.avatar === b.avatar && a.at === b.at;
+
+/** Take a profile line, keeping the freshest one per sender (`Roster.best`,
+ *  applied to profiles). */
+export function acceptProf(ps, line) {
+  const p = parseProf(line);
+  if (!p) return ps;
+  const old = ps.find((x) => x.sender === p.sender);
+  if (!old) return [...ps, p];
+  if (old.seq > p.seq) return ps;
+  return ps.some((x) => sameProf(x, p)) ? ps : [...ps.filter((x) => x.sender !== p.sender), p];
+}
+
 // ------------------------------------------------- signalling for WebRTC
 
 // Direct browser-to-browser links need one round of introductions.  The
@@ -813,6 +923,9 @@ export class KantNode {
     // Chat that carries a sender-declared time (`kzat`), kept apart from
     // `messages` so an old peer still shows the room.
     this.timed = [];
+    // Profiles (`kzprof`), freshest per sender. Self-declared: this is what a
+    // peer chose to be called, not something the room vouches for.
+    this.profiles = [];
     this.onChange = onChange;
     this.fetchImpl = fetchImpl;
     this.reach = reach;
@@ -936,10 +1049,10 @@ export class KantNode {
   /** Take a line from any transport. */
   ingest(line) {
     const before = this.messages.length + this.timed.length +
-      this.roster.length + (this.files?.length ?? 0);
+      this.roster.length + this.profiles.length + (this.files?.length ?? 0);
     if (typeof line !== "string" || line === "") {
       this.log.warn("ingest", "an empty line arrived", "");
-      return { message: null, timed: null, announce: null, signal: null, file: null };
+      return { message: null, timed: null, announce: null, signal: null, file: null, profile: null };
     }
     const m = parseMsg(line);
     if (m && m.room === this.room) this.messages = accept(this.messages, line);
@@ -951,6 +1064,8 @@ export class KantNode {
     if (t && t.room === this.room) this.timed = acceptTimed(this.timed, line);
     const a = parseAnnounce(line);
     if (a) this.roster = rosterInsert(this.roster, a);
+    const p = parseProf(line);
+    if (p && p.room === this.room) this.profiles = acceptProf(this.profiles, line);
     const sig = parseSignal(line);
     if (sig && this.mesh && sig.room === this.room) this.mesh.onSignal(sig);
     // A dropped file arrives as an ordinary room line: a kzfile manifest
@@ -965,21 +1080,42 @@ export class KantNode {
     if (m && m.room !== this.room) {
       this.log.warn("ingest", "a line for another room was ignored", diagRef(m.room));
     }
-    if (!m && !t && !a && !sig && !file) {
+    if (!m && !t && !a && !sig && !file && !p) {
       this.log.warn("ingest", "a line was refused: it does not certify itself",
         `${line.slice(0, 24)}…`);
     }
     if (this.messages.length + this.timed.length + this.roster.length +
-        (this.files?.length ?? 0) !== before) {
+        this.profiles.length + (this.files?.length ?? 0) !== before) {
       this.log.info("ingest", "a line was accepted",
-        m ? "chat" : t ? "chat (timed)" : a ? `peer ${a.peer}` : sig ? "signal" : "file");
+        m ? "chat" : t ? "chat (timed)" : a ? `peer ${a.peer}` :
+        p ? `profile ${p.name}` : sig ? "signal" : "file");
       this.onChange();
     }
-    return { message: m, timed: t, announce: a, signal: sig, file };
+    return { message: m, timed: t, announce: a, signal: sig, file, profile: p };
   }
 
   /** The chat as displayed. */
   view() { return transcript(this.messages); }
+
+  /** What a peer's profile says it is called, or null. */
+  profileOf(peer) {
+    return this.profiles.find((p) => p.sender === peer) ?? null;
+  }
+
+  /** What to print beside a message from `peer`.
+   *
+   *  The name is the peer's own claim, so it is shown with the identity it
+   *  came from: a profile can change its name at any time, and nothing binds
+   *  one name to one peer for other readers. A reader who needs the binding
+   *  wants the witness, which is what `Kant.Diagnostics.ref` shows.
+   *
+   *  Falls back to the short ref, because a peer that has never published a
+   *  profile is not an error — it is the normal state of most peers, and
+   *  printing 64 hex characters instead would be the real bug. */
+  displayName(peer) {
+    const p = this.profileOf(peer);
+    return p?.name || diagRef(peer);
+  }
 
   /** Everything said, timed and untimed together, in declared time order.
    *
@@ -1070,6 +1206,94 @@ export class KantNode {
       this.log.error("app", "that line went nowhere: nobody can have received it", "");
     }
     return direct;
+  }
+
+  /** Publish a profile: the name to show, an optional line of bio, and an
+   *  optional avatar CID. All three are inside the witness.
+   *
+   *  A name is a claim, so it is republished rather than amended: every
+   *  profile line stays in the room history and a reader can see the name
+   *  change. `profileOf` keeps the freshest by seq, which is a per-sender
+   *  counter — the same total order `Roster.best` uses. */
+  async setProfile(name, { bio = "", avatar = "" } = {}) {
+    this.seq += 1;
+    const line = printProf(profile(this.room, this.self, this.seq, String(name),
+      { bio: String(bio), avatar: String(avatar), at: now() }));
+    await this.publish(line);
+    return line;
+  }
+
+  /** Set an avatar image, then publish it on our profile.
+   *
+   *  Encrypted with the room secret and pinned exactly like a dropped file, so
+   *  the relay and IPFS see ciphertext and nothing else: an avatar is a
+   *  picture of a face, which is the last thing that should be public by
+   *  default in a room reached by a shared link.
+   *
+   *  The bytes go out as an ordinary `kzfile` manifest — that is where the
+   *  nonce and the per-chunk names already live — and the profile carries
+   *  that manifest's witness. So this is two lines, not a new format, and a
+   *  reader resolves it from the room's file list like any other drop.
+   *
+   *  A partial pin is reported rather than published: naming a manifest whose
+   *  chunks are not all present would leave every reader chasing a missing
+   *  CID, and an avatar is not worth that. */
+  async setAvatar(bytes, mime = "image/png", { name = "" } = {}) {
+    if (!this.secret) throw new Error("an avatar needs the room secret");
+    const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const { encryptFile, manifest, printManifest, manifestWitness } =
+      await import("./kant-file.mjs");
+    const { putChunks } = await import("./kant-file-ipfs.mjs");
+    const enc = await encryptFile(this.secret, name || "avatar", mime, data);
+    const res = await putChunks(enc.chunks);
+    if (!res.complete) {
+      this.log.warn("avatar", `IPFS kept only ${res.cids.length}/${enc.chunks.length} chunk(s)` +
+        "; leaving the profile without an avatar rather than naming bytes that are not all there",
+        `failed at chunk ${res.failedAt}`);
+      return null;
+    }
+    this.seq += 1;
+    const f = manifest(this.room, this.self, this.seq, name || "avatar", mime,
+      enc.size, enc.nonce, enc.cids, res.cids);
+    await this.publish(printManifest(f));
+    await this.setProfile(this.displayName(this.self), { avatar: manifestWitness(f) });
+    return f;
+  }
+
+  /** A peer's avatar as a data URI, or null.
+   *
+   *  Resolved through the manifest the profile names, so the nonce and the
+   *  per-chunk names come from a line that is itself witness-checked. Cached
+   *  by avatar witness, which is precisely so that a peer who republishes a
+   *  different avatar is fetched again instead of being served the old one. */
+  async avatarDataUri(peer) {
+    const p = this.profileOf(peer);
+    if (!p?.avatar) return null;
+    const f = (this.files ?? []).find((x) => manifestWitnessOf(x) === p.avatar);
+    if (!f) {
+      this.log.warn("avatar", "a profile names an avatar this room has not seen",
+        `manifest ${p.avatar.slice(0, 12)}… is not in the room yet`);
+      return null;
+    }
+    if (f.mime && !f.mime.startsWith("image/")) {
+      this.log.warn("avatar", "a profile names something that is not an image", f.mime);
+      return null;
+    }
+    this.avatarCache ??= new Map();
+    if (this.avatarCache.has(p.avatar)) return this.avatarCache.get(p.avatar);
+    const pending = (async () => {
+      try {
+        const { decryptFile } = await import("./kant-file.mjs");
+        const { getChunk } = await import("./kant-file-ipfs.mjs");
+        const plain = await decryptFile(this.secret, f, (cid) => getChunk(cid));
+        return `data:${f.mime || "image/png"};base64,${bytesToBase64(plain)}`;
+      } catch (e) {
+        this.log.warn("avatar", "an avatar could not be fetched or decrypted", e.message ?? e);
+        return null;
+      }
+    })();
+    this.avatarCache.set(p.avatar, pending);
+    return pending;
   }
 
   /** Announce ourselves into the room. */
@@ -1236,3 +1460,9 @@ export class KantNode {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const bytesToBase64 = (bytes) => {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+};
