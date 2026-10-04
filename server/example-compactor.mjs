@@ -10,10 +10,20 @@
 // Transducer source is captured as text inside `source` so `Thunk.load` can
 // re-create the lambda on another server.
 
+// A thunk is loaded as a vm.Script, which runs as a script (not a module),
+// so the dialect is CommonJS: module.exports, not ESM export. The Thunk.load
+// compiles the source INSIDE the sandbox context, so `module` exists there.
+// This is why we cannot ship ESM thunks — `export function reduce` raises
+// Unexpected token 'export' at compile time and there is no loader to fix it.
+//
+// The example compactor is a single self-contained function that reduces
+// state on the `compact` and `tick` input types. It demonstrates the whole
+// pipeline: definition -> store -> run -> share -> restore.
+
 const source = `
 const MAX_LINES = 4096;
 
-export function reduce(state, input) {
+function reduce(state, input) {
   if (input.type === "compact") {
     const room = input.room;
     const cursor = state.cursors[room] ?? 0;
@@ -30,7 +40,7 @@ export function reduce(state, input) {
   return state;
 }
 
-export const initialState = { cursors: {}, compacted: 0, lastTick: 0, lastRun: 0 };
+module.exports = { reduce, initialState: { cursors: {}, compacted: 0, lastTick: 0, lastRun: 0 } };
 `;
 
 export { source };
