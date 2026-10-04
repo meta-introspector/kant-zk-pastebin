@@ -6,7 +6,7 @@ depends_on: thunk-server
 
 # Verification: the claim ledger
 
-**Date:** 2026-10-04 · **Status:** green (52/52 claims, 53/53 checks, 44/44 suites)
+**Date:** 2026-10-04 · **Status:** green (53/53 claims, 59/59 checks, 44/44 suites)
 · **Companion to**
 [SYSTEM.md](SYSTEM.md), [WASM.md](WASM.md), [IPFS-IPDL.md](IPFS-IPDL.md),
 [TOOLCHAIN-THUNKS.md](TOOLCHAIN-THUNKS.md), [THUNK-CYCLE.md](THUNK-CYCLE.md),
@@ -78,6 +78,48 @@ re-derive it from the tree** — not from the sentence someone wrote about it.
 Where a cause is cheap to re-derive, make the re-derivation the claim itself,
 which is what `scripts/thunk-claims.mjs` is for. Where it is not, say plainly
 that the recorded cause is unverified.
+
+### And then: the other four documents are full of numbers nobody re-derived
+
+The rule above was applied to this file's own table. It had not been applied to
+the four documents sitting next to it, which state counts in prose — `SYSTEM.md`
+and `SANDBOX.md` say `server/thunk-test.mjs` is **20/20 green**, both say
+`server/sandbox-test.mjs` enumerates **13** escapes, `WASM.md` says **16** tests,
+**91** checks, **59** vectors, a **13**-module closure, **21** exports, **799**
+bytes, **5%** of a 16 KiB frame, and `server/pass-store.mjs:75`.
+
+**Two were already wrong.** `server/thunk-test.mjs` prints 21, in both files. A
+count in prose is the same recorded cause as a cause in prose and it rots the
+same way; it took the rule being written down to find the first two.
+
+`stated-counts-match-the-tree` parses twelve of those numbers out of the four
+documents and re-derives each one. Ten of the twelve are re-derived by *running
+something* — a suite's check count is what it prints, not what a grep for
+`check(` says — and the other two by parsing an artefact (`kernel-vectors.json`,
+`git ls-files lean-gate`) or reading a declaration (`KERNEL_EXPORTS`).
+
+Three details are the claim rather than the arithmetic:
+
+* **An enumerated case list is counted from the array, not from the tests.**
+  `server/sandbox-test.mjs` has 13 escapes and **17** tests: the loop adds a pure
+  thunk and two transducer cases. A derivation that counted `t(` calls, or read
+  the suite's own summary line, would have agreed with the stale 13 forever.
+* **A proportion is checked as a proportion.** "799 bytes is 5% of one 16 KiB
+  frame" is checked as `round(bytes / FRAME_BYTES * 100)`, so a kernel that grows
+  does not make the sentence wrong while the sentence is still true.
+* **A count that cannot be read is not a count that agrees.** Every number here
+  is found by a regex over prose, and prose is edited. A regex that stops
+  matching yields `stated: null`, and the probe refuses that rather than reading
+  it as agreement — the same vacuity trap as an emptied ledger.
+
+`MIN_STATED_COUNTS = 12` covers the other direction: a row deleted from the input
+leaves a shorter array that agrees with itself. Like `MIN_RECORDED_CAUSES` it is
+a stated number, so lowering it is a visible edit rather than a quiet one.
+
+Five mutations make it go red — a stale count put back, a fourteenth escape added
+to the array without a doc edit, a comment inserted above `admit()` so the line
+number moves, a byte count changed, and a row whose number cannot be found at
+all. The escape one is the one a grep cannot do.
 
 ### And then the guard's own trigger rotted
 

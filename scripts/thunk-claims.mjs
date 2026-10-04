@@ -1126,6 +1126,115 @@ export const CLAIMS = [
     probe: (rows) => rows.length > 0 && rows.every((r) => !r.bareRejection),
   },
   {
+    id: "stated-counts-match-the-tree",
+    claim: "every count the sibling docs state about a suite, a case list or a file is still that count",
+    doc: "SYSTEM.md, SANDBOX.md, WASM.md, IPFS-IPDL.md",
+    kind: "health",
+    input: D("each stated count beside the answer the tree gives", () => {
+      // The rule `recorded-causes-are-re-derived` applies to VERIFICATION.md's
+      // table, applied to the sibling documents. VERIFICATION.md got a third
+      // column and a claim; SYSTEM.md, SANDBOX.md, WASM.md and IPFS-IPDL.md state
+      // counts in prose — "20/20 green", "enumerates 13 escapes", "the 16 tests",
+      // "91 checks", "replays the 59 vectors", "the 13-module closure" — and
+      // nobody re-derived any of them. Two were already wrong when this claim
+      // was written, which is the point: a count in prose is the same recorded
+      // cause as a cause in prose, and it rots the same way.
+      //
+      // Each row states where the number is written and how to re-derive it. The
+      // derivation is a *run* wherever the number is a test count, because a test
+      // file's check count is what it prints, not what it has at the time of
+      // writing; the two rotted rows are both of that kind, and a grep for
+      // `check(` would have agreed with the stale number.
+      const docs = (name) => read(ROOT, `tasks/thunk-server/${name}`, "utf8");
+      /** The count a suite prints on its last summary line, e.g. `17 passed`. */
+      const suiteCount = (suite) => {
+        const r = spawnSync(process.execPath, [resolve(ROOT, suite)],
+          { cwd: ROOT, encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+        const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+        const m = /(\d+)\s+(?:checks\s+)?passed/.exec(out.split("\n").reverse().find((l) => /passed/.test(l)) ?? "");
+        return m ? Number(m[1]) : null;
+      };
+      const rows = [];
+      const row = (docs_, stated, actual, where) => rows.push({ docs: docs_, stated, actual, where });
+
+      // — suite check counts, re-derived by running the suite —
+      for (const [d, re, suite] of [
+        ["SYSTEM.md", /`server\/thunk-test\.mjs` is (\d+)\/\d+ green/, "server/thunk-test.mjs"],
+        ["SANDBOX.md", /`server\/thunk-test\.mjs` is (\d+)\/\d+ green/, "server/thunk-test.mjs"],
+        ["WASM.md", /The (\d+) tests in\s*\n?\s*`scripts\/relay-telemetry\.mjs`/, "scripts/relay-telemetry-test.mjs"],
+        ["IPFS-IPDL.md", /pinned by (\d+) checks in/, "scripts/codec-test.mjs"],
+      ]) {
+        const m = re.exec(docs(d));
+        row(d, m ? Number(m[1]) : null, suiteCount(suite), `${suite} prints`);
+      }
+
+      // — enumerated case lists, re-derived from the array itself —
+      // The count a doc gives for an ESCAPES list is the length of the array in
+      // server/sandbox-test.mjs, so the probe reads the array rather than the
+      // `t(...)` calls that iterate it: those are one per escape *plus* the pure
+      // thunk and transducer checks, and conflating the two is how "13" survived
+      // a fourteenth entry.
+      const escapeCount = escapeEntries(read(ROOT, "server/sandbox-test.mjs", "utf8"));
+      for (const d of ["SYSTEM.md", "SANDBOX.md"]) {
+        const m = /enumerates (\d+) escapes/.exec(docs(d));
+        row(d, m ? Number(m[1]) : null, escapeCount, "server/sandbox-test.mjs ESCAPES");
+      }
+
+      // — data counts, re-derived by parsing the artefact —
+      const vectors = JSON.parse(read(ROOT, "web/kernel-vectors.json", "utf8")).vectors;
+      const vm = /replays the (\d+) vectors/.exec(docs("WASM.md"));
+      row("WASM.md", vm ? Number(vm[1]) : null, vectors.length, "web/kernel-vectors.json");
+
+      const trackedLean = execFileSync("git", ["ls-files", "lean-gate"], { cwd: ROOT, encoding: "utf8" })
+        .split("\n").filter((p) => p.endsWith(".lean")).length;
+      const lm = /the (\d+)-module closure/.exec(docs("WASM.md"));
+      row("WASM.md", lm ? Number(lm[1]) : null, trackedLean, "git ls-files lean-gate");
+
+      const wasmSrc = read(ROOT, "web/kant-wasm.mjs", "utf8");
+      const exports = ((/export const KERNEL_EXPORTS = \[([\s\S]*?)\];/.exec(wasmSrc)?.[1] ?? "")
+        .match(/"/g) ?? []).length / 2;
+      const em = /\| exports \| \*\*(\d+)\*\*/.exec(docs("WASM.md"));
+      row("WASM.md", em ? Number(em[1]) : null, exports, "web/kant-wasm.mjs KERNEL_EXPORTS");
+
+      // — a byte count and the line it is 5% of —
+      // "799 bytes is 5% of one 16 KiB frame" is two numbers and a proportion.
+      // The 5% is checked as a proportion rather than as a literal, so a kernel
+      // that grows does not make the sentence wrong when the sentence is still
+      // true.
+      const kb = read(ROOT, "web/kant_kernel.wasm").length;
+      const frameSrc = read(ROOT, "web/kant-libp2p.mjs", "utf8");
+      const frame = Number(/FRAME_BYTES = (\d+) \* (\d+)/.exec(frameSrc)?.slice(1).reduce((a, b) => a * b, 1));
+      const bm = /(\d+) bytes is (\d+)% of one (\d+) KiB frame/.exec(docs("WASM.md"));
+      row("WASM.md", bm ? Number(bm[1]) : null, kb, "web/kant_kernel.wasm");
+      rows.push({
+        docs: "WASM.md",
+        stated: bm ? Number(bm[2]) : null,
+        actual: Math.round((kb / frame) * 100),
+        where: "kernel bytes as a percent of FRAME_BYTES",
+      });
+
+      // — a line number, which is the most rot-prone of all: it moves on every
+      // unrelated edit above it —
+      const passStore = read(ROOT, "server/pass-store.mjs", "utf8").split("\n");
+      const admitLine = passStore.findIndex((l) => /^  admit\(/.test(l)) + 1;
+      const am = /`admit\(\)` in\s*\n?\s*`server\/pass-store\.mjs:(\d+)`/.exec(docs("WASM.md"));
+      row("WASM.md", am ? Number(am[1]) : null, admitLine, "server/pass-store.mjs admit()");
+
+      return rows;
+    }),
+    expect: true,
+    probe: (rows) => {
+      // Every row must have been *found*. A regex that stopped matching returns
+      // null, and a null `stated` is not a row that agrees — it is a row the
+      // checker quietly stopped reading, which is the failure this whole exercise
+      // is about. So the equality is asked only after both sides are numbers.
+      // MIN_STATED_COUNTS covers the other direction: a row removed from the
+      // input, which would otherwise leave a shorter set that agrees with itself.
+      return rows.length >= MIN_STATED_COUNTS
+        && rows.every((r) => typeof r.stated === "number" && r.stated === r.actual);
+    },
+  },
+  {
     id: "lean-proof-gate-builds",
     claim: "the Lean proof builds with no holes and only core-Lean axioms",
     doc: "WASM.md",
@@ -1184,6 +1293,31 @@ const RELAY_READ_ONLY = new Set(["staticDir"]);
 /** How many recorded causes VERIFICATION.md's table is expected to carry.
  *  Stated rather than derived — see `recorded-causes-are-re-derived`. */
 const MIN_RECORDED_CAUSES = 6;
+
+/** How many stated counts `stated-counts-match-the-tree` expects to derive.
+ *  Stated for the same reason, and it catches a different failure from the
+ *  `stated === actual` test: a regex that stops matching leaves `stated` null
+ *  and is already refused, but a *row* deleted from the loop above would leave
+ *  a shorter array that agrees with itself. Twelve today. */
+const MIN_STATED_COUNTS = 12;
+
+/**
+ * How many entries `server/sandbox-test.mjs`'s ESCAPES array holds.
+ *
+ * Counting the `t(...)` calls that iterate it gives the *test* count, which is
+ * the escapes plus the pure-thunk and transducer checks — 17, not 14 — so the
+ * array itself is what has to be counted. The array is delimited by its
+ * declaration and the loop that consumes it, so a second array added later does
+ * not merge into this one and a comment mentioning `ESCAPES` does not open it.
+ *
+ * Exported for the test file, which asserts this cannot tell a truncated array
+ * from a whole one.
+ */
+export function escapeEntries(src) {
+  const block = /const ESCAPES = \[([\s\S]*?)\n\];/.exec(src);
+  if (!block) return 0;
+  return block[1].split("\n").filter((l) => /^\s*\[\s*"/.test(l)).length;
+}
 
 /**
  * Every key in server/relay.mjs's CONFIG that names a place on disk, with the

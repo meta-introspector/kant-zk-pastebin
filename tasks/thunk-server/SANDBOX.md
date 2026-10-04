@@ -113,7 +113,7 @@ conversion is a decision about the example rather than about the sandbox.
 `apply()` already accepts both shapes, so the conversion is mechanical when
 someone makes it.
 
-`server/thunk-test.mjs` is 20/20 green. The two red gates it had when this file
+`server/thunk-test.mjs` is 21/21 green. The two red gates it had when this file
 was written — the 16-char id — were phase 1, which landed 2026-10-03.
 
 The default-deny rule here turned out to apply to identity as well as

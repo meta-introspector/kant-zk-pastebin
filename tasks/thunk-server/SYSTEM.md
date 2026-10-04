@@ -159,7 +159,7 @@ asserts a pure thunk still works — a sandbox that refuses everything is an
 outage, not a sandbox. It has teeth: reintroducing the host-object bridge makes
 two of its cases fail.
 
-`server/thunk-test.mjs` is 20/20 green.
+`server/thunk-test.mjs` is 21/21 green.
 
 ## Phase 1: content addressing
 

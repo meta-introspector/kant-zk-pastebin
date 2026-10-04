@@ -529,6 +529,96 @@ t("recorded-causes-are-re-derived goes red when a row is deleted", async () => {
   }
 });
 
+// ── the stated counts can fail ─────────────────────────────────
+//
+// `recorded-causes-are-re-derived` makes the *ledger's* table re-derive itself.
+// The sibling documents state counts in prose — "21/21 green", "enumerates 13
+// escapes" — and had rotted twice by the time `stated-counts-match-the-tree`
+// was written. These are the mutations that prove the new claim is a claim.
+
+t("stated-counts-match-the-tree goes red when a doc's count stops being true", async () => {
+  // The doc rotting, which is the whole failure mode: the tree gains a check and
+  // the sentence in SYSTEM.md does not. Put the old number back and the row must
+  // disagree with what the suite prints.
+  await mutateFile("tasks/thunk-server/SYSTEM.md",
+    (s) => s.replace("`server/thunk-test.mjs` is 21/21 green",
+      "`server/thunk-test.mjs` is 20/20 green"),
+    () => requireRed("stated-counts-match-the-tree", "a stale check count"));
+});
+
+t("stated-counts-match-the-tree goes red on an enumerated case list that grew", async () => {
+  // A fourteenth escape added to the array without touching either document.
+  // This is the one that cannot be caught by grepping the suite for `t(`: the
+  // test count goes to 18 and the escape count goes to 14, and only the second
+  // is what the prose claims.
+  await mutateFile("server/sandbox-test.mjs",
+    (s) => s.replace('  ["Function-ctor", \'Function("return typeof process")()\'],',
+      '  ["Function-ctor", \'Function("return typeof process")()\'],\n  ["added-later", \'globalThis.process?.env\'],'),
+    () => requireRed("stated-counts-match-the-tree", "an escape added without a doc edit"));
+});
+
+t("stated-counts-match-the-tree goes red on a line number that moved", async () => {
+  // The most rot-prone count of all: `server/pass-store.mjs:75`. Inserting a
+  // comment above admit() moves it by one and breaks the sentence without
+  // changing anything the sentence is about.
+  await mutateFile("server/pass-store.mjs",
+    (s) => s.replace(/^(\s*admit\()/m, "// a new line above admit()\n$1"),
+    () => requireRed("stated-counts-match-the-tree", "a line number that moved"));
+});
+
+t("stated-counts-match-the-tree goes red when a byte count stops being true", async () => {
+  await mutateFile("tasks/thunk-server/WASM.md",
+    (s) => s.replace("799 bytes is 5% of one 16 KiB frame", "800 bytes is 5% of one 16 KiB frame"),
+    () => requireRed("stated-counts-match-the-tree", "a kernel byte count"));
+});
+
+t("stated-counts-match-the-tree refuses a count it cannot find at all", () => {
+  // The vacuity trap, and the one this claim is most exposed to: every regex
+  // here reads prose, and prose is edited. A regex that stops matching gives
+  // `stated: null`, which must not read as agreement — the claim has to notice
+  // that it is no longer reading a number.
+  const c = claim("stated-counts-match-the-tree");
+  const rows = [
+    { docs: "WASM.md", stated: null, actual: 59, where: "web/kernel-vectors.json" },
+    { docs: "WASM.md", stated: 59, actual: 59, where: "web/kernel-vectors.json" },
+  ];
+  if (c.probe(rows) === c.expect) {
+    throw new Error("a row whose count could not be read passed as agreement");
+  }
+  // And a row deleted outright, which agrees with itself and is caught only by
+  // the floor.
+  if (c.probe([rows[1]]) === c.expect) {
+    throw new Error("a single row satisfied a claim that expects twelve");
+  }
+  if (c.probe([]) === c.expect) throw new Error("no rows at all was reported as agreement");
+});
+
+t("escapeEntries counts the array, not the tests that iterate it", async () => {
+  // server/sandbox-test.mjs has 13 escapes and 17 tests: the loop adds a pure
+  // thunk and two transducer cases on top. A derivation that counted `t(` calls,
+  // or the suite's own summary line, would agree with a stale 13 forever — which
+  // is exactly how "13" survived a change it should not have.
+  const { escapeEntries } = await import("./thunk-claims.mjs");
+  const src = read("server/sandbox-test.mjs");
+  const entries = escapeEntries(src);
+  const printed = Number(/(\d+)\s+passed/.exec(
+    (await import("node:child_process")).spawnSync(process.execPath,
+      [resolve(ROOT, "server/sandbox-test.mjs")], { cwd: ROOT, encoding: "utf8" }).stdout ?? "",
+  )?.[1]);
+  if (!(entries > 0)) throw new Error("no escapes were counted");
+  if (entries === printed) {
+    throw new Error(`escape counting and the suite agree at ${entries}, so this cannot tell them apart`);
+  }
+  // A truncated array, a source with no array, and one whose entries are all
+  // comments — the three ways this could stop matching.
+  if (escapeEntries(src.replace(/\n\s*\["Function-ctor".*\n/, "\n")) !== entries - 1) {
+    throw new Error("removing an entry did not shorten the count");
+  }
+  if (escapeEntries("const nothing = [];") !== 0) {
+    throw new Error("invented escapes out of a source with no ESCAPES array");
+  }
+});
+
 t("scripts-suites-delegate-to-their-web-twin goes red on a twin that is not there", async () => {
   // Delete the twin from the map the claim resolves against: what the runner
   // would see on a branch where web/carddebug-test.mjs was never merged.
