@@ -157,6 +157,64 @@ To apply this to `~/projects/twitterstorm/`, you'd:
 
 The mesh + store + server code is reused verbatim.
 
+## Project-to-Thunk Adapter (`server/thunkify-project.mjs`)
+
+For projects where every module is a source file (Twitterstorm, kant-pastebin),
+a simpler adapter walks the directory tree, wraps each module as a stateless
+thunk, and stores/announces it. The module's source is preserved as a string so
+it can be served/executed elsewhere by any peer that has the thunk.
+
+### Environment variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PROJECT_ROOT` | `/home/mdupont/projects/twitterstorm/tracker` | Project directory to scan |
+| `THUNK_STORE_DIR` | `/tmp/thunks-twitterstorm` | Where thunk definitions are stored |
+| `RELAY_URL` | `http://localhost:8787` | Relay for announcements |
+| `TARGET_DIRS` | `src,scripts` | Comma-separated list of directories to scan |
+| `MAX_FILES` | `500` | Cap on files processed |
+| `SKIP_RELAY` | `0` | `1` to skip relay announcement |
+
+Run (pastebin project):
+
+```bash
+PROJECT_ROOT=/mnt/data1/kant/pastebin THUNK_STORE_DIR=/tmp/thunks-pastebin \
+  TARGET_DIRS=server,scripts,web node server/thunkify-project.mjs
+```
+
+### ESM source sanitization
+
+The thunk sandbox (`Thunk.load` in `server/thunk.mjs`) refuses any source
+containing `import()` or `import.meta` because a thunk is executed without
+module loading. The adapter therefore pre-processes each module **before**
+wrapping it:
+
+- `import.meta` / `import.meta.url` → `__IMPORT_META__` / `__IMPORT_META_URL__`
+- `import(...)` → `__DYNAMIC_IMPORT__(...)`
+
+The placeholders never execute — the original bytes are preserved in the
+`source` field, so a peer can rebuild or inspect the real module. The comment
+in the generated source is also sanitized (`Sanitized: ESM patterns replaced with
+placeholders for sandbox compatibility`) so it doesn't trip the same regex
+inside comments.
+
+### Findings from the pastebin run
+
+- Scanned `server/`, `scripts/`, `web/` of the pastebin tree: 138 candidate
+  `.js`/`.mjs` modules found, **141 thunk definitions stored** (the store grows
+  across runs).
+- All 141 load into the sandbox; `build-cli.mjs`, `check-all.mjs`,
+  `kant-cli.mjs` etc. were previously rejected for `import.meta` and now pass.
+- Root-level files (e.g. `a11y_navigation_fix.js`) are correctly excluded when
+  `TARGET_DIRS` is set; a bug that included them is fixed by checking the target
+  dir for files, not just directories.
+
+Note: files that use `export`/`import` as *top-level statements* (real ESM) are
+still only wrapped as inert state containers — the thunk captures the bytes, it
+does not execute the module. To make a module *executable as a thunk* the
+module itself must expose `reduce`/`initialState` or be rewritten into that
+shape.
+
 ## Verification
 
 Health is maintained by the claim ledger:

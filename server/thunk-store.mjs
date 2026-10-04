@@ -34,7 +34,19 @@ export class ThunkStore {
 
   /** Restore a thunk from disk. */
   async get(id) {
-    if (this.#cache.has(id)) return this.#cache.get(id);
+    const cached = this.#cache.get(id);
+    if (cached === null) {
+      const data = this.#read(id);
+      if (!data) {
+        this.#cache.delete(id);
+        return null;
+      }
+      const t = await Thunk.load(data.definition.source, data.definition.name, data.definition.version);
+      t.resume(data.state);
+      this.#cache.set(id, t);
+      return t;
+    }
+    if (cached) return cached;
     const data = this.#read(id);
     if (!data) return null;
     const t = await Thunk.load(data.definition.source, data.definition.name, data.definition.version);
