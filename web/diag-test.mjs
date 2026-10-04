@@ -5,7 +5,6 @@
 
 import * as D from "./kant-diag.mjs";
 import * as N from "./kant-net.mjs";
-import { spawn } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -180,19 +179,10 @@ const logFile = path.join(here, ".diag-relay.log");
 // instead of silently falling back to a shared tmpdir copy if it is unusable,
 // so a broken path here fails loudly rather than quietly sharing a ledger.
 const passDb = path.join(tmpdir(), `kant-diag-test-${process.pid}.sqlite`);
-function startRelay(port) {
-  const proc = spawn(process.execPath,
-    [relayPath, "--port", String(port), "--static", here, "--log", logFile,
-      "--pass-db", passDb, "--quiet"],
-    { stdio: ["ignore", "pipe", "pipe"] });
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
-    proc.stdout.on("data", (d) => {
-      if (String(d).includes("listening")) { clearTimeout(timer); resolve(proc); }
-    });
-    proc.on("error", reject);
-  });
-}
+import { startRelay as startRelayProcess } from "../scripts/relay-start.mjs";
+const startRelay = (port) =>
+  startRelayProcess(relayPath, port,
+    ["--static", here, "--log", logFile, "--pass-db", passDb, "--quiet"]);
 
 const port = 8801 + Math.floor(Math.random() * 90);
 let relay = null;

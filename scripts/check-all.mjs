@@ -43,6 +43,13 @@ export const CORE = [
   "scripts/thunk-claims-test.mjs",
   "scripts/lean-codec-types.mjs",
   "scripts/lean-codec-vectors.mjs",
+  // The Lean proof itself. `lean-gate/` is the 13-module closure of
+  // `Wasm/KernelSpec.lean` with Mathlib removed, so `gokujo check` finishes in
+  // ~10.5s cold / ~2.7s warm instead of the 560s-and-no-olean that `import
+  // Mathlib` cost. It is in the core run for the same reason as the wasm
+  // conformance suite above: it is the other end of the chain that makes the
+  // binary mean something, and a gate nobody runs is not a gate.
+  "scripts/lean-proofs.mjs",
   "scripts/relay-telemetry-test.mjs",
   "scripts/sharelog-test.mjs",
   "web/sharelog-test.mjs",

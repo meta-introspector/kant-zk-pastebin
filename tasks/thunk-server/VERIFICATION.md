@@ -30,6 +30,45 @@ The fix that worked was `scripts/base-check.sh`. This file is the same idea
 applied to prose: **the five documents are only as good as the numbers in them,
 and a number that was true when it was written is not evidence later.**
 
+## The recorded cause was wrong every single time
+
+**Flagged because it is the rule that would have saved all of this.** Every
+defect recorded in this ledger named a cause, and not one of those causes was
+accurate enough to act on. In each case, fixing exactly what was written would
+have left the suite red:
+
+| recorded cause | what was true |
+|---|---|
+| `web/wasm-test.mjs` "reads `dist/kant_kernel.wasm`" | it read **two** gitignored files; the second, `kernel-vectors.json`, was never named |
+| five suites "look for `scripts/index.html`" | wrong for `scripts/site-test.mjs`, which was failing on `scripts/kant.config` |
+| "`scripts/kant-debug.mjs` does not exist" | true of this branch, **false of the repository** — it is on `origin/feature/lean` and `origin/feat/build-feed`; the big merge dropped it |
+| carddebug "**imports** `scripts/kant-debug.mjs`" | it *spawns* it as a child process, which is why it went unnoticed next to four suites that really do import it |
+| `scripts/net-test.mjs` "not hermetic, binds a real port" | the port was irrelevant. It left `passDb` at `/var/lib/kant-zk/passes.sqlite` and was writing to the live relay's rate-limit ledger |
+
+The pattern is not bad luck. A cause is recorded as the first plausible
+explanation, and a plausible explanation is exactly what survives being written
+down. Two of these five were *incomplete* (a real cause, missing a file), two
+were *wrong in a way that pointed the fix backwards* (delete the test instead of
+restoring the tool; audit the port instead of the database), and one was right
+about the symptom and wrong about everything behind it.
+
+So: **a recorded cause is a hypothesis, and the first thing to do with one is
+re-derive it from the tree** — not from the sentence someone wrote about it.
+Where a cause is cheap to re-derive, make the re-derivation the claim itself,
+which is what `scripts/thunk-claims.mjs` is for. Where it is not, say plainly
+that the recorded cause is unverified.
+
+Two corollaries that cost real time here:
+
+* **Watch the artefact, not the exit code.** Every one of these was found by
+  looking at something outside the test — a database's row count, a temp
+  directory, `git cat-file` on another branch. A suite that exits 0 tells you
+  only that it did not crash.
+* **A guard is not a guard until it has been made to fail.** Two drafts of
+  `suites-never-use-the-production-pass-db` passed green under mutation; both
+  defects were found only by breaking a suite and watching the claim stay
+  happy. An audit that has never been seen to fail is not known to work.
+
 ## How to run it
 
 ```bash
@@ -408,6 +447,72 @@ counter-example really has exactly one import before trusting it. That is the
 same class of error as the collector that reported "100 POSTs" when the limiter
 had accepted 10, and the reason the assertion is there rather than a comment.
 
+## The Lean proof finally has a gate
+
+`web/wasm-test.mjs` checked that the emitted binary computes the 59 golden
+vectors. Nothing checked that the *proof* was a proof — the Lean tree is not on
+this branch, and where it did live it could not be built.
+
+**The blocker was Mathlib, and the measurement is the argument.** With Mathlib
+on `LEAN_PATH`, a two-line file containing only `import Mathlib` did not finish
+elaborating in 401 s, and the 26-module closure around `Wasm/KernelSpec.lean`
+produced **zero** `.olean` files in 560 s. Eighteen of those 26 modules imported
+it. There was no version of "just build the proof" that ran in reasonable time.
+
+`lean-gate/` is that tree with Mathlib removed — thirteen modules, ~3,000
+lines, importing nothing outside core Lean 4. `scripts/lean-proof-gate.sh` runs
+`gokujo check` with `LEAN_PATH` deliberately unset, and
+`scripts/lean-proofs.mjs` wraps it in the core run.
+
+| | cold | warm |
+|---|---|---|
+| `gokujo check`, 13 modules, no Mathlib | **10.4 / 10.7 / 10.8 s** | **2.65 s** |
+| the same closure with Mathlib | **> 560 s, 0 oleans** | — |
+
+Three consecutive cold runs, then a warm one; that is where the numbers above
+come from. The gate audits 181 declarations and reports them resting on
+`propext`, `Classical.choice` and `Quot.sound` — nothing beyond core Lean 4.
+
+### Removing Mathlib meant two false theorems fell out
+
+Neither could ever have compiled, which is the strongest evidence available
+that this part of the tree was never built:
+
+* **`eval_cantorPairE` claimed the kernel computes `Nat.pair`.** Mathlib's is
+  `if a ≤ b then 2 * b * (b + 1) + a else …`; `cantorPairE` computes
+  `[a < b]·(b² + a) + [a ≥ b]·(a² + a + b)`. At `a = 0`, `b = 1` those are 4 and
+  1. The theorem now states what the kernel does, and its docstring records
+  that the old claim was wrong.
+* **`reassemble_perm` is false as stated.** `fs₁ = [⟨5,5,[1]⟩, ⟨9,9,[3]⟩]`,
+  `fs₂ = [⟨5,5,[2]⟩, ⟨9,9,[3]⟩]`: `fs₁.Perm fs₂` and
+  `(fs₁.map Frame.seq).Nodup` both hold, but `mergeSort` is stable and nothing
+  orders the two 5s, so the reassemblies are `[1,3]` and `[2,3]`. It needed a
+  strict hypothesis — distinct frames carry distinct sequence numbers.
+
+Both, and the theorem depending on `reassemble_perm`, are omitted from the gate
+tree with the counterexample written out in `Kant/Sneakernet.lean`. They are
+not in `KernelSpec`'s closure. `lean-gate/README.md` has the full table of what
+each Mathlib tactic was replaced with and why.
+
+### And an 8-second guess, which was the recorded-cause pattern again
+
+The first `npm run verify` after wiring the gate in went red on
+`web/cli-page-test.mjs` and its delegating copy: `relay did not start`.
+
+The obvious reading is "the new gate load slowed the box down". That is wrong,
+and the way it is wrong is the section above this one. The four-word message
+was the defect: four suites each carried their own
+`reject(new Error("relay did not start")), 8000`, so a failure carried no
+evidence at all — not the relay's stderr, not its exit status. Spawned directly
+and timed, the relay takes **10.5 s, 13.6 s, 15.4 s** to say `listening` on
+this box with a load average of 15 on 24 cores, because its first SQLite
+connection migrates the pass-db schema. The recorded "2.9 s" was an idle-box
+measurement; the 8 s budget was never derived from one.
+
+`scripts/relay-start.mjs` now holds one budget, measured, and rejects with
+what the relay said. Claim `relay-suites-share-one-start-budget` stops the
+copies coming back.
+
 ## What the ledger covers
 
 | group | claims |
@@ -421,6 +526,8 @@ had accepted 10, and the reason the assertion is there rather than a comment.
 | cadence | 11s sustainable · 0.5 headroom |
 | secrets | the sops entry point, config and registry all exist |
 | latent failure | the wasm test reads a gitignored directory |
+| the Lean gate | the proof tree imports nothing outside itself · `KernelSpec` proves all 21 exports · the gate builds and audits clean |
+| test plumbing | no suite gives up waiting for the relay with a bare "relay did not start" |
 
 The IPDL round-trip claim uses the **real nixpkgs pin from `flake.nix`**, not a
 fixture, so it is a claim about this tree's actual reference rather than about a

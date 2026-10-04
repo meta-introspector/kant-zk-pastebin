@@ -17,7 +17,7 @@
 //      runs) joining the very same link and displaying the very same
 //      conversation.
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,19 +96,10 @@ const relayPath = join(root, "server", "relay.mjs");
 // relay's rate-limit ledger: six peer_posts rows a run, left behind to be pruned
 // only once the 10-minute window turned.
 const passDb = join(tmpdir(), `kant-cli-test-${process.pid}.sqlite`);
-function startRelay(port) {
-  const proc = spawn(process.execPath,
-    [relayPath, "--port", String(port), "--static", join(root, "web"),
-      "--pass-db", passDb],
-    { stdio: ["ignore", "pipe", "pipe"] });
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
-    proc.stdout.on("data", (d) => {
-      if (String(d).includes("listening")) { clearTimeout(timer); resolve(proc); }
-    });
-    proc.on("error", reject);
-  });
-}
+import { startRelay as startRelayProcess } from "../scripts/relay-start.mjs";
+const startRelay = (port) =>
+  startRelayProcess(relayPath, port,
+    ["--static", join(root, "web"), "--pass-db", passDb]);
 
 const port = 8901 + Math.floor(Math.random() * 90);
 const relay = await startRelay(port);

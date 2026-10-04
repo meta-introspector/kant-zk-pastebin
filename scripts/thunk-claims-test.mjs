@@ -388,6 +388,71 @@ t("suites-never-use-the-production-pass-db sees a suite that parses no config", 
     "a relay whose config could not be found",
     async () => [{ suite: "web/join-test.mjs", mode: "NO CONFIG FOUND", calls: 0 }]));
 
+// ── the Lean proof gate can fail ──────────────────────────────────
+//
+// These are mutation tests on the *real tree*, not on a fabricated input: the
+// claim that matters here is "the proof builds", and a claim about a build can
+// only be made to fail by breaking the build.
+t("relay-suites-share-one-start-budget goes red when a suite guesses again", async () => {
+  // The real defect: four suites each had `reject(new Error("relay did not
+  // start")), 8000`, and the rejection carried nothing about the relay. Put
+  // that copy back into one suite and the claim has to notice.
+  const path = resolve(ROOT, "web/diag-test.mjs");
+  const before = readFileSync(path, "utf8");
+  try {
+    const guessed = before.replace(
+      /const startRelay = \(port\) =>[\s\S]*?--pass-db", passDb, "--quiet"\]\);/,
+      `function startRelay(port) {
+  const proc = spawn(process.execPath,
+    [relayPath, "--port", String(port), "--static", here, "--log", logFile,
+      "--pass-db", passDb, "--quiet"],
+    { stdio: ["ignore", "pipe", "pipe"] });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
+    proc.stdout.on("data", (d) => {
+      if (String(d).includes("listening")) { clearTimeout(timer); resolve(proc); }
+    });
+    proc.on("error", reject);
+  });
+}`);
+    if (guessed === before) throw new Error("could not find the shared startRelay to replace");
+    writeFileSync(path, guessed);
+    const c = claim("relay-suites-share-one-start-budget");
+    const after = await evaluate(c, await resolveInput(c.input));
+    if (after.ok) throw new Error("still passed on a suite that gives up saying only 'relay did not start'");
+  } finally {
+    writeFileSync(path, before);
+  }
+});
+
+t("lean-gate-imports-nothing-external goes red on an outside import", () =>
+  mustFlipProbe("lean-gate-imports-nothing-external",
+    "a file importing Mathlib",
+    async () => [{ file: "lean-gate/RequestProject/Kant/Bytes.lean", module: "Mathlib", internal: false }]));
+
+t("lean-spec-proves-every-wasm-export goes red on an unproved export", () =>
+  mustFlipProbe("lean-spec-proves-every-wasm-export",
+    "an export with no theorem evaluating it",
+    async () => [{ export: "rotate71", body: "rotate71E", proved: false }]));
+
+t("lean-proof-gate-builds goes red when the spec is given a hole", () => {
+  const path = resolve(ROOT, "lean-gate/RequestProject/Wasm/KernelSpec.lean");
+  const before = readFileSync(path, "utf8");
+  const probe = claim("lean-proof-gate-builds").probe;
+  try {
+    // Replace one real proof with `sorry`. This is the whole point of the
+    // claim: the gate is not a grep, so a hole has to break it.
+    const marked = before.replace(
+      /(theorem eval_rotate71E[\s\S]*?:= by\r?\n)(  norm_num|  simp only)/,
+      "$1  sorry\n--");
+    if (marked === before) throw new Error("could not find a proof body to hole out");
+    writeFileSync(path, marked);
+    if (probe(undefined)) throw new Error("the gate still passed with a sorry in the spec");
+  } finally {
+    writeFileSync(path, before);
+  }
+});
+
 /**
  * A minimal valid wasm module with exactly one import (`env.abort`) and one
  * export. Assembled by hand because there is no wat2wasm here and adding a

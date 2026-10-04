@@ -12,7 +12,7 @@
 // This is the "the same on the command line as in the browser" claim, checked
 // against the page the site actually serves.
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync, mkdtempSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -28,6 +28,7 @@ const eq = (name, got, want) =>
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const CLI = join(root, "scripts", "kant-cli.mjs");
+import { startRelay as startRelayProcess } from "../scripts/relay-start.mjs";
 const html = readFileSync(join(here, "index.html"), "utf8");
 
 // ------------------------------------------------------------- the relay
@@ -38,19 +39,11 @@ const html = readFileSync(join(here, "index.html"), "utf8");
 // Passing it explicitly also stops the relay falling back to a shared tmpdir
 // copy if the path is unusable.
 const passDb = join(tmpdir(), `kant-cli-page-test-${process.pid}.sqlite`);
-function startRelay(port) {
-  const proc = spawn(process.execPath,
-    [join(root, "server", "relay.mjs"), "--port", String(port), "--static", here,
-      "--pass-db", passDb],
-    { stdio: ["ignore", "pipe", "pipe"] });
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
-    proc.stdout.on("data", (d) => {
-      if (String(d).includes("listening")) { clearTimeout(timer); resolve(proc); }
-    });
-    proc.on("error", reject);
-  });
-}
+// The budget and the failure message live in scripts/relay-start.mjs; this
+// suite used to carry its own copy of an 8s one, which is what failed here.
+const startRelay = (port) =>
+  startRelayProcess(join(root, "server", "relay.mjs"), port,
+    ["--static", here, "--pass-db", passDb]);
 
 const port = 9101 + Math.floor(Math.random() * 90);
 const relay = await startRelay(port);

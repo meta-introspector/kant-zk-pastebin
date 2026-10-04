@@ -300,6 +300,19 @@ constrained by measured budgets.
   whether every file the test opens is tracked, and `kernel-vectors-satisfy-wasm`
   replays the 59 vectors against the binary. Both were mutation-tested — they go
   red when the `dist/` read is reintroduced and when a vector is corrupted.
+- ~~There is no gate on the Lean side: `Wasm/KernelSpec.lean` proves one theorem
+  per exported function, but nothing here ever compiled it.~~ **Fixed.**
+  `lean-gate/` is the 13-module closure of `KernelSpec` with Mathlib removed —
+  the Mathlib closure did not build (a bare `import Mathlib` took >401 s and
+  the tree produced 0 oleans in 560 s) — and `scripts/lean-proof-gate.sh` runs
+  `gokujo check` on it in **10.5 s cold / 2.7 s warm**, with `LEAN_PATH` unset so
+  the Mathlib-freedom is enforced rather than assumed. `scripts/lean-proofs.mjs`
+  runs it in the core suite. Two of the theorems it carries turned out to be
+  false on the way (`eval_cantorPairE` claimed the kernel computes `Nat.pair`,
+  which it does not; `reassemble_perm` is refuted by
+  `[⟨5,5,[1]⟩,⟨9,9,[3]⟩]` vs `[⟨5,5,[2]⟩,⟨9,9,[3]⟩]`); both are restated or
+  omitted, with the counterexamples, in `lean-gate/README.md` and in
+  `Kant/Sneakernet.lean`. Three claims back it.
 - `server/thunk-store.mjs` and `server/snapshot.mjs` are untracked and unreviewed.
   Phase 2 depends on the store.
 - Nothing here is tested against a live swarm. Every wasm claim in this document

@@ -41,3 +41,9 @@ e2e-out-file/
 # proof itself lives in the Aristotle service, not here.
 data/gui2lean4-fileshare/
 node_modules
+
+# gokujo's build directory for the Lean proof gate. It holds the .olean files
+# and the generated GokujoAxiomAudit.lean; the proof itself is lean-gate/,
+# which is tracked. Without this the audit driver -- a generated file -- would
+# be swept up by the tree scan in scripts/lean-proofs.mjs.
+lean-gate/.gokujo/

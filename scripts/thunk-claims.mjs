@@ -19,7 +19,7 @@
 // is still there, so this file going red is the signal that phase 0 landed.
 
 import { readFileSync, readdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, relative, resolve } from "node:path";
 
@@ -797,6 +797,126 @@ export const CLAIMS = [
     }),
     expect: true,
     probe: (r) => r.vectors === 59 && r.unsatisfied.length === 0,
+  },
+
+  // ── the Lean proof gate ──────────────────────────────────────
+  //
+  // The 13-module closure of `Wasm/KernelSpec.lean` used to carry
+  // `import Mathlib`, which is why there was no gate at all: on this machine a
+  // single `import Mathlib` did not finish elaborating in 401s, and the closure
+  // produced zero oleans in 560s. These three claims are the properties that
+  // made a gate affordable, plus the build itself.
+  {
+    id: "lean-gate-imports-nothing-external",
+    claim: "the Lean proof tree imports nothing outside itself, so it needs no Mathlib to build",
+    doc: "WASM.md",
+    kind: "health",
+    input: D("every import in the gate tree, resolved against git", () => {
+      const tracked = execFileSync("git", ["ls-files", "lean-gate"], {
+        cwd: ROOT, encoding: "utf8",
+      }).split("\n").filter((p) => p.endsWith(".lean"));
+      const rows = [];
+      for (const rel of tracked) {
+        const src = read(ROOT, rel, "utf8");
+        for (const m of src.matchAll(/^import\s+([A-Za-z_][\w'.]*)/gm)) {
+          rows.push({ file: rel, module: m[1], internal: m[1].startsWith("RequestProject.") });
+        }
+      }
+      return rows;
+    }),
+    // Non-empty so a scan that stopped matching cannot pass vacuously, and every
+    // import resolves inside the tree.
+    expect: true,
+    probe: (rows) => rows.length > 0 && rows.every((r) => r.internal),
+  },
+  {
+    id: "lean-spec-proves-every-wasm-export",
+    claim: "KernelSpec proves one theorem per exported wasm function, so the extraction links the binary to the Lean definitions",
+    doc: "WASM.md",
+    kind: "health",
+    input: D("each kernel export against the theorems that evaluate its body", () => {
+      const kernel = read(ROOT, "lean-gate/RequestProject/Wasm/Kernel.lean", "utf8");
+      const spec = read(ROOT, "lean-gate/RequestProject/Wasm/KernelSpec.lean", "utf8");
+      const exports = [...kernel.matchAll(
+        /name\s*:?=\s*"([a-z0-9_]+)"\s*,\s*arity\s*:?=\s*\d+\s*,\s*body\s*:?=\s*(\w+)/g,
+      )].map((m) => ({ export: m[1], body: m[2] }));
+      // The theorems are matched to the export's *body*, not its wasm name:
+      // `fnv1a_step` is exported with the body `fnvStepE`, and that is the
+      // expression `eval_fnvStepE` is about.
+      return exports.map((e) => ({
+        ...e,
+        proved: new RegExp(`Expr\\.eval[^\\n]*\\b${e.body}\\b`).test(spec),
+      }));
+    }),
+    // Non-empty (21 exports) and every one of them evaluated somewhere.
+    expect: true,
+    probe: (rows) => rows.length > 0 && rows.every((r) => r.proved),
+  },
+  {
+    id: "relay-suites-share-one-start-budget",
+    claim: "no suite gives up waiting for the relay with a bare \"relay did not start\" and nothing the relay said",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    input: D("every tracked suite that waits on the relay's stdout, against the shared helper", () => {
+      // The defect this guards: four suites each carried their own
+      // `reject(new Error("relay did not start")), 8000`. Eight seconds was a
+      // guess; the relay's first SQLite connection migrates the pass-db schema
+      // and measured 10.5s / 13.6s / 15.4s to say "listening" on a loaded box,
+      // so the guess failed and cli-page-test went red with no evidence in the
+      // message. One budget, measured, lives in scripts/relay-start.mjs.
+      //
+      // The trigger is the *shape*: a suite that waits for the relay's own
+      // `listening` line. Suites that start a relay and then poll its HTTP
+      // health are a different thing and are not caught by this --
+      // `scripts/vacuum-bug-test.mjs` does that, and already prints the relay's
+      // stderr when the wait fails. `scripts/p2p-wasm-filetest.mjs` waited on
+      // stdout before this helper existed, with its own 20s budget; it keeps
+      // its own because it already interpolates the relay's stderr into the
+      // failure, which is the half of the fix the other four were missing.
+      //
+      // So the property is the weaker one that is actually true of the tree: a suite
+      // may wait on `listening` with its own budget, as p2p-wasm-filetest does,
+      // but it may not give up saying nothing but those four words.
+      const tracked = execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" })
+        .split("\n").filter((p) => /\.(mjs|js|ts)$/.test(p) && exists(resolve(ROOT, p)));
+      const rows = [];
+      for (const suite of tracked) {
+        if (suite === "scripts/relay-start.mjs" || SELF.includes(suite)) continue;
+        const src = read(ROOT, suite, "utf8");
+        if (!/relay\.mjs/.test(src)) continue;
+        if (!/includes\(["'`]listening["'`]\)/.test(src)) continue;
+        rows.push({
+          suite,
+          usesSharedHelper: /relay-start\.mjs/.test(src),
+          // Exactly those four words, with nothing from the relay: the defect.
+          bareRejection: /new Error\(\s*["'`]relay did not start["'`]\s*\)/.test(src),
+        });
+      }
+      return rows;
+    }),
+    // Non-empty (so a scan that stopped matching cannot pass vacuously) and no
+    // suite gives up without saying something.
+    expect: true,
+    probe: (rows) => rows.length > 0 && rows.every((r) => !r.bareRejection),
+  },
+  {
+    id: "lean-proof-gate-builds",
+    claim: "the Lean proof builds with no holes and only core-Lean axioms",
+    doc: "WASM.md",
+    kind: "health",
+    input: RUN(),
+    expect: true,
+    // Runs scripts/lean-proof-gate.sh, which is what a developer runs. It is a
+    // build, not a grep: a wrong hypothesis (`x.toNat < 257` where the export is
+    // only meant for `< 256`) makes this fail, and so does a `sorry`.
+    probe: () => {
+      const r = spawnSync("bash", [resolve(ROOT, "scripts/lean-proof-gate.sh")], {
+        cwd: ROOT, encoding: "utf8", timeout: 600_000, maxBuffer: 32 * 1024 * 1024,
+      });
+      const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+      return r.status === 0 && /no sorry, no admit, no native_decide/.test(out)
+        && /no theorem depends on anything else/.test(out);
+    },
   },
 ];
 
