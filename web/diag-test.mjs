@@ -173,7 +173,11 @@ const client = (o) => D.clientOf({ room: "r1", reach: reach(o.reach ?? {}), ...o
 const here = path.dirname(fileURLToPath(import.meta.url));
 const relayPath = path.join(here, "..", "server", "relay.mjs");
 
-const logFile = path.join(here, ".diag-relay.log");
+// The relay's log used to be `web/.diag-relay.log` — inside the checkout, where
+// a run of the suite leaves a file behind. It is read back below (to assert the
+// relay logs rooms as handles) and removed at the end, so moving it to tmpdir()
+// costs nothing.
+const logFile = path.join(tmpdir(), `kant-diag-relay-${process.pid}.log`);
 // The relay's pass database, which defaults to /var/lib/kant-zk/passes.sqlite —
 // production state. Passing `--pass-db` explicitly also makes the relay rethrow
 // instead of silently falling back to a shared tmpdir copy if it is unusable,
@@ -223,9 +227,17 @@ if (relay) {
   // that is the spec: a configured relay wins, and it is `relayUsable` that
   // says whether it answered. The banner used to read `used` for its wording
   // and so announced this dead host as up; it must read `relayUsable`.
+  //
+  // `fetchImpl` is stubbed, and that is the point: `resolveReachability`
+  // probes whatever it is configured with, so without this the suite really
+  // did fetch `https://kant-relay.cicada71.net/health` — from the core run, on
+  // every `npm run verify`, against the deployment this repo is for. The
+  // assertions below are about what the module concludes from a relay that does
+  // not answer, and a refused connection answers that just as well as a 404.
+  const noNetwork = () => { throw new Error("network disabled in this suite"); };
   const deadCfg = await D.resolveReachability({
     configured: "https://kant-relay.cicada71.net", origin: base,
-    log: new D.DiagLog({ cap: 100 }),
+    log: new D.DiagLog({ cap: 100 }), fetchImpl: noNetwork,
   });
   ok("a configured-but-dead relay is not usable", D.relayUsable(deadCfg) === false);
   ok("…even though effectiveRelay still names it",

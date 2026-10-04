@@ -41,6 +41,9 @@ const RUN = () => ({ kind: "run" });
 // because a claim written as "this line contains X" describes a spelling and
 // stops holding the moment the code is rewritten correctly.
 export const { Thunk } = await import(`${ROOT}/server/thunk.mjs`);
+/** The project's own comment stripper, so a scan does not have to reinvent
+ *  one — and cannot disagree with the hash about what is code. */
+export const { stripComments } = await import(`${ROOT}/server/js-scan.mjs`);
 
 /** The smallest source `Thunk.load` accepts, in the dialect it accepts. */
 export const THUNK_SRC = `module.exports.initialState = {};
@@ -646,101 +649,324 @@ export const CLAIMS = [
     probe: (found) => found,
   },
 
-  // ── a suite must not write production state ──────────────────────────
+  // ── a suite must not write outside its own temp directory ──────────────
   //
-  // `passDb` in server/relay.mjs defaults to /var/lib/kant-zk/passes.sqlite,
-  // and `createServer` opens that store eagerly. Two tracked suites were
-  // starting a real relay without overriding it, so every run appended
-  // peer_posts rows to a live relay's rate-limit ledger. One of them was in
-  // the core run.
+  // The first version of this guard checked one field of one config: `passDb`,
+  // whose default in server/relay.mjs is /var/lib/kant-zk/passes.sqlite. Two
+  // tracked suites were starting a relay without overriding it, so every run
+  // appended peer_posts rows to a live relay's rate-limit ledger.
+  //
+  // Checking one field was the mistake the section above this block records,
+  // one level down. The relay takes four paths -- `staticDir`, which it only
+  // reads, and `logFile`, `passDb` and `archiveDir`, which it writes -- so
+  // "passDb is overridden" said nothing at all about the other two writes. And
+  // both of those were wrong in the tree: web/diag-test.mjs pointed `--log` at
+  // `web/.diag-relay.log`, inside the checkout, and web/file-test.mjs handed the
+  // relay a *fixed* `/tmp/kant-file-test/passes.sqlite` and
+  // `/tmp/kant-file-test/archive`, shared by every concurrent run of that
+  // suite. Neither is visible to a check for one field.
+  //
+  // So the set of paths is no longer written down here. relayPathKeys() reads
+  // the CONFIG block out of server/relay.mjs, keeps every key that names a
+  // place on disk, and reports the flag and the env var that override each --
+  // so a new `cacheDir` is covered the day it is written, and a path whose
+  // relay default is non-empty and which a suite then fails to override is
+  // caught by the same rule that caught `passDb`.
   {
-    id: "suites-never-use-the-production-pass-db",
-    claim: "every tracked suite that starts a relay gives it its own pass database, never the production default",
+    id: "suites-write-only-into-their-own-temp-dir",
+    claim: "every path a tracked suite hands a relay is under the OS temp directory, never the checkout and never a shared fixed path",
     doc: "VERIFICATION.md",
     kind: "health",
-    input: D("relay-creating suites and their passDb", async () => {
+    input: D("every relay path a tracked suite supplies, against relay.mjs's own CONFIG", async () => {
       const { trackedSuites } = await import(`${ROOT}/scripts/check-all.mjs`);
-      // The config actually handed to createServer/createRelay — not merely the
-      // presence of the word. A suite can declare `passDb` and still forget to
-      // pass it, and a claim that only greps for the name reports that as safe;
-      // that is exactly the gap this claim was written after, when mutating
-      // web/wasm-test.mjs to drop `passDb` from the call left it "own db".
-      const configsFor = (src) => {
-        const out = [];
-        for (const m of src.matchAll(/create(?:Server|Relay)\s*\(/g)) {
-          let i = m.index + m[0].length, depth = 1;
-          const start = i;
-          while (i < src.length && depth > 0) {
-            if (src[i] === "(") depth += 1;
-            else if (src[i] === ")") depth -= 1;
-            i += 1;
-          }
-          const args = src.slice(start, i - 1).trim();
-          // Resolve the argument to the config object first — most suites pass a
-          // variable (`createServer(cfg, new Rooms(cfg))`), so the config is not
-          // in the call text at all.
-          let config = args;
-          if (!args.startsWith("{")) {
-            const name = args.split(",")[0].trim();
-            // A relay config is an object literal or a plain identifier. Anything
-            // else as the first argument is a request handler — node:http's own
-            // createServer, which these suites also use for the 404 and SPA
-            // stubs — and is not a relay at all, so it is skipped rather than
-            // counted as an unconfigured relay.
-            if (!/^[A-Za-z_$][\w$]*$/.test(name)) continue;
-            const decl = new RegExp(`\\b${name}\\s*=\\s*\\{[^}]*\\}`).exec(src);
-            config = decl ? decl[0] : args;
-          }
-          // `createServer` is also node:http's, and these suites use both: the
-          // first draft of this scanner matched a 404 stub
-          // (`createServer((_req, res) => {...})`). Every relay config here
-          // spreads CONFIG, so that is the discriminator — checked on the
-          // resolved config, not on the call.
-          if (!/CONFIG/.test(config)) continue;
-          out.push(config);
+      const keys = relayPathKeys(read(ROOT, "server/relay.mjs", "utf8"))
+        .filter((k) => !RELAY_READ_ONLY.has(k.key));
+      return trackedSuites().flatMap((suite) => {
+        const src = read(ROOT, suite, "utf8");
+        // The candidate set is deliberately wider than the scanned set: every
+        // tracked suite that mentions the relay *at all*. A guard cannot
+        // notice a suite that has left it — that is the failure this row is for,
+        // and it happened: web/diag-test.mjs moved its inline spawn into
+        // scripts/relay-start.mjs, stopped matching a trigger that looked for
+        // `spawn(`, and dropped out of the scan on the commit that made it
+        // start passing. A suite that mentions the relay and is then not
+        // scanned is a hole, and it is reported as one rather than as a
+        // shorter list.
+        const code = withoutComments(src);
+        const use = relayUse(src);
+        if (!use.mentions) return [];
+        // This ledger and its own test are excluded, and the probe below allows
+        // no other suite to be. thunk-claims-test.mjs writes a whole suite's
+        // source as a *string* — a broken copy of web/diag-test.mjs, to prove a
+        // claim can go red — and that string contains `spawn(… relayPath …)` and
+        // `--log", logFile`. Distinguishing a spawn call from a spawn call
+        // quoted inside a string needs a parser, not a scanner. What the file
+        // actually does is write two tracked files and restore both in a
+        // `finally`, which is not production state. The rows say so rather than
+        // passing quietly.
+        if (SELF.includes(suite)) {
+          return [{ suite, mode: "excluded", key: null, paths: 1, outside: 0,
+            why: "holds a suite's source as a string, and restores what it writes" }];
         }
-        return out;
-      };
-      return trackedSuites().flatMap((f) => {
-        const src = read(ROOT, f, "utf8");
-        // A suite reaches production state by running a relay, either in-process
-        // or as a child process. The second form was missed entirely by the first
-        // draft of this claim: web/diag-test.mjs and web/cli-page-test.mjs spawn
-        // `server/relay.mjs` rather than calling createServer, and both were
-        // writing peer_posts rows that a createServer-only scan reported as safe.
-        const inProcess = /createServer\s*\(|createRelay\s*\(/.test(src);
-        const spawns = /(spawn|execFile|execSync|spawnSync)\s*\(/s.test(src)
-          && /relay\.mjs/.test(src);
-        if (!/relay\.mjs/.test(src) || (!inProcess && !spawns)) return [];
-        // A delegating suite inherits its twin's config, so `passDb` correctly
-        // does not appear in its own source.
-        if (/^import\s+["']\.\.\/web\//m.test(src.trim())) {
-          return [{ suite: f, mode: "delegates", calls: 0 }];
+        // A delegating suite opens no path of its own: it inherits its twin's,
+        // and the twin is scanned in its own right.
+        if (use.delegates) {
+          return [{ suite, mode: "delegates", key: null, paths: 1, outside: 0 }];
         }
-        // A spawned relay reads the same default off its argv, so `--pass-db`
-        // (or KANT_PASS_DB in the child's env) is what it needs.
-        if (spawns) {
-          return [{
-            suite: f,
-            mode: /pass-db|passDb|KANT_PASS_DB/.test(src) ? "own db" : "PRODUCTION",
-            calls: 1,
-            unsafe: /pass-db|passDb|KANT_PASS_DB/.test(src) ? 0 : 1,
-          }];
+        // A suite reaches relay state by running one. Two routes, and both
+        // have to be here: an in-process createServer/createRelay, or a child
+        // process — which now includes the suites that call the shared
+        // scripts/relay-start.mjs rather than spawning inline.
+        const { configs, onArgv } = use;
+        if (!use.creating) {
+          return [{ suite, mode: "NOT SCANNED", key: null, paths: 1, outside: 0,
+            why: "mentions the relay but neither builds one nor spawns one" }];
         }
-        const configs = configsFor(src);
-        if (!configs.length) return [{ suite: f, mode: "NO CONFIG FOUND", calls: 0 }];
-        const unsafe = configs.filter((c) => !/passDb/.test(c));
+        const roots = tempRoots(code);
+        return keys.map((key) => {
+          // Every place this suite could hand that path to a relay: each
+          // config object, and — when it runs a relay as a child — the argv.
+          const sites = [
+            ...configs.map((text) => ({ via: "config", expr: fieldValue(text, key.key) })),
+            ...(onArgv ? [{ via: "argv", expr: suppliedOnArgv(code, key) }] : []),
+          ];
+          const judged = sites.map(({ via, expr }) => {
+            // Not supplying it is safe only when the relay's own default is
+            // empty, i.e. no write happens at all. `passDb`'s default is a real
+            // path; `logFile`'s and `archiveDir`'s are "", and those two are why
+            // "is passDb set" was never the question to ask.
+            if (expr === null) return { via, expr: null, safe: key.default === "" };
+            const full = resolveBindings(code, expr);
+            return { via, expr, safe: insideTemp(full, roots) };
+          });
+          const outside = judged.filter((j) => !j.safe);
+          return {
+            suite,
+            key: key.key,
+            mode: outside.length ? "OUTSIDE TMP" : "own tmp",
+            expr: judged.find((j) => j.expr)?.expr ?? null,
+            paths: judged.length,
+            outside: outside.length,
+          };
+        });
+      });
+    }),
+    // Non-empty (so a scan that stopped matching cannot pass vacuously),
+    // nothing outside a temp directory, and every row actually looked at
+    // something -- a suite whose configs the scanner could not find must not
+    // pass by finding nothing.
+    expect: true,
+    probe: (rows) => rows.length > 0
+      && rows.every((r) => r.outside === 0 && r.paths > 0)
+      && rows.every((r) => r.mode !== "OUTSIDE TMP")
+      // A suite that mentions the relay and is then not judged. Written into
+      // the probe only after the mutation test below showed that a NOT SCANNED
+      // row is shaped exactly like a passing one — outside: 0, paths: 1 — and
+      // sailed through. That is the shape of every guard that rots silently.
+      && rows.every((r) => r.mode !== "NOT SCANNED")
+      // An `excluded` row is only allowed for this ledger's own files, so the
+      // exemption cannot quietly grow.
+      && rows.every((r) => r.mode !== "excluded" || SELF.includes(r.suite)),
+  },
+  {
+    id: "suites-never-reach-a-remote-host",
+    claim: "no tracked suite lets a request reach a host outside loopback, so a suite called hermetic cannot touch a deployment",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    input: D("every URL a tracked suite hands to something that makes a request", async () => {
+      const { trackedSuites } = await import(`${ROOT}/scripts/check-all.mjs`);
+      return trackedSuites().flatMap((suite) =>
+        requestTargets(read(ROOT, suite, "utf8")).map((r) => ({ ...r, suite })));
+    }),
+    // Non-empty (a scan that stopped matching cannot pass vacuously), and every
+    // target either on this machine / on a name that cannot resolve, or handed
+    // to a call that was given a fetch of its own.
+    expect: true,
+    probe: (rows) => rows.length > 0 && rows.every((r) => r.loopback || r.stubbed),
+  },
+
+  // ── the recorded causes, re-derived ──────────────────────────────
+  //
+  // Every defect below was recorded with a cause, and not one of those causes
+  // was accurate enough to act on. The table in VERIFICATION.md therefore grew a
+  // third column: the claim that re-derives the real cause from the tree. The
+  // four claims here are the ones the five rows point at, and they exist for
+  // that table -- without them the column would name nothing.
+  {
+    id: "scripts-suites-delegate-to-their-web-twin",
+    claim: "every suite in scripts/ that delegates to web/ names a twin that exists, is tracked, and is in the core run",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    input: D("each scripts/ delegation, resolved against the tree and the runner's manifest", async () => {
+      const { CORE, trackedSuites } = await import(`${ROOT}/scripts/check-all.mjs`);
+      const tracked = new Set(execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" })
+        .split("\n").filter(Boolean));
+      return trackedSuites().flatMap((suite) => {
+        const src = read(ROOT, suite, "utf8");
+        const m = /^import\s+["'](\.\.\/web\/[^"']+)["']/m.exec(src.trim());
+        if (!m) return [];
+        const twin = relative(ROOT, resolve(dirname(resolve(ROOT, suite)), m[1]));
         return [{
-          suite: f,
-          mode: unsafe.length ? "PRODUCTION" : "own db",
-          calls: configs.length,
-          unsafe: unsafe.length,
+          suite,
+          twin,
+          // A delegation to a file that is not there, or to one git does not
+          // know, is a suite that dies with ERR_MODULE_NOT_FOUND on a clean
+          // checkout -- and a twin outside CORE is a twin nobody runs.
+          exists: exists(resolve(ROOT, twin)),
+          tracked: tracked.has(twin),
+          inCore: CORE.includes(twin),
         }];
       });
     }),
-    // Non-empty, so a scan that stopped matching cannot pass vacuously.
+    // Non-empty (nine of them today), and each resolves to something real.
     expect: true,
-    probe: (rows) => rows.length > 0 && rows.every((r) => r.mode !== "PRODUCTION" && r.mode !== "NO CONFIG FOUND"),
+    probe: (rows) => rows.length > 0
+      && rows.every((r) => r.exists && r.tracked && r.inCore),
+  },
+  {
+    id: "kant-debug-is-tracked",
+    claim: "scripts/kant-debug.mjs exists and git knows it, so the carddebug suites have something to run",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    // This is the row in the table that reads "`scripts/kant-debug.mjs` does
+    // not exist". That was true of this branch and false of the repository —
+    // the file is on origin/feature/lean and origin/feat/build-feed, and the
+    // big merge dropped it. Two suites were BROKEN for a tool that existed.
+    input: D("scripts/kant-debug.mjs against the file and against git", () => ({
+      onDisk: exists(resolve(ROOT, "scripts/kant-debug.mjs")),
+      tracked: execFileSync("git", ["ls-files", "--error-unmatch", "scripts/kant-debug.mjs"],
+        { cwd: ROOT, encoding: "utf8" }).trim() === "scripts/kant-debug.mjs",
+    })),
+    expect: true,
+    probe: (r) => r.onDisk === true && r.tracked === true,
+  },
+  {
+    id: "kant-debug-is-spawned-not-imported",
+    claim: "the carddebug suites run kant-debug as a child process, which is why the recorded cause said they imported it",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    // The recorded cause here was not incomplete but *misfiled*: carddebug was
+    // listed next to four suites that do `import` kant-debug, and it does not.
+    // It execs it. The difference matters — an import is checked by a bundler
+    // and by the file existing, a spawn is checked by neither, which is exactly
+    // why the missing tool survived a "the import is fine" reading.
+    input: D("every suite that mentions kant-debug, and how it uses it", async () => {
+      const { trackedSuites } = await import(`${ROOT}/scripts/check-all.mjs`);
+      return trackedSuites().flatMap((suite) => {
+        // Comments out: scripts/carddebug-test.mjs now explains in prose why it
+        // delegates, and that prose names the tool. A reference in a comment is
+        // not a dependency.
+        const src = withoutComments(read(ROOT, suite, "utf8"));
+        if (!/kant-debug/.test(src)) return [];
+        return [{
+          suite,
+          imports: /(?:^|\n)\s*import[^;\n]*kant-debug/.test(src),
+          spawns: /\b(?:spawn|spawnSync|exec|execSync|execFile|execFileSync)\s*\(/.test(src)
+            && /kant-debug/.test(src),
+        }];
+      });
+    }),
+    // Non-empty, and every suite that touches kant-debug runs it as a child.
+    // A suite that *imports* it would be a different kind of dependency, and
+    // one that does neither is a reference to nothing.
+    expect: true,
+    probe: (rows) => rows.length > 0
+      && rows.every((r) => r.spawns && !r.imports),
+  },
+
+  // ── the recorded causes are re-derived, not remembered ─────────────
+  //
+  // The section above is the one that says a recorded cause is a hypothesis.
+  // This claim is that sentence made executable: it reads the table out of
+  // VERIFICATION.md, insists every row names a claim, insists those claims
+  // exist, and then runs them against the tree.
+  //
+  // Without it the table is prose, and prose about the tree is exactly what
+  // this ledger exists to stop believing. With it, deleting a claim to make the
+  // ledger green takes the table red with it.
+  {
+    id: "recorded-causes-are-re-derived",
+    claim: "every recorded cause in VERIFICATION.md names a claim that exists and still holds, so the table cannot outlive the tree",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    input: D("the table of recorded causes, and each claim it names", async () => {
+      const doc = read(ROOT, "tasks/thunk-server/VERIFICATION.md", "utf8");
+      const section = /## The recorded cause was wrong every single time([\s\S]*?)\n##\s/.exec(doc);
+      if (!section) return { error: "the section is gone", rows: [] };
+      const rows = [];
+      for (const line of section[1].split("\n")) {
+        if (!line.startsWith("|")) continue;
+        const cells = line.split("|").slice(1, -1).map((c) => c.trim());
+        // The last cell is the one that must name a claim. Keying on that and
+        // not on a leading backtick matters: two of the five rows start with
+        // prose ("five suites …", "carddebug …") and a scan keyed on the first
+        // cell silently found two rows out of five and called it a pass.
+        const named = /^`([a-z0-9-]+)`$/.exec(cells[cells.length - 1] ?? "");
+        if (!named) continue;
+        rows.push({
+          recorded: cells[0],
+          truth: cells[1],
+          claims: named[1],
+        });
+      }
+      // Each named claim is evaluated against the live tree, so a row whose
+      // real cause has stopped being true goes red here too.
+      const judged = await Promise.all(rows.map(async (r) => {
+        const c = CLAIMS.find((x) => x.id === r.claims);
+        if (!c) return { ...r, known: false, holds: false };
+        const result = await evaluate(c, await resolveInput(c.input));
+        return { ...r, known: true, holds: result.ok };
+      }));
+      return { rows: judged };
+    }),
+    expect: true,
+    probe: (r) => {
+      if (r.error) return false;
+      const rows = r.rows;
+      // One row per recorded cause, and each row naming a different claim: a
+      // table that grows a row pointing at a claim already listed is padding,
+      // and a table that loses one has lost the reason a fix was made.
+      //
+      // MIN is a stated number, not a derived one, and that is a real limit of
+      // this claim — nothing in the tree knows how many defects there were. It
+      // is written down so that lowering it is a visible edit rather than a
+      // quiet one.
+      if (rows.length < MIN_RECORDED_CAUSES) return false;
+      if (new Set(rows.map((x) => x.claims)).size !== rows.length) return false;
+      return rows.every((x) => x.known && x.holds && x.claims);
+    },
+  },
+
+  {
+    id: "excluded-reasons-match-the-tree",
+    claim: "every suite check-all.mjs excludes says why, and the reason is still true of the suite it names",
+    doc: "VERIFICATION.md",
+    kind: "health",
+    input: D("each EXCLUDED entry against the suite it names", async () => {
+      const { EXCLUDED } = await import(`${ROOT}/scripts/check-all.mjs`);
+      return Object.entries(EXCLUDED).map(([suite, why]) => {
+        const src = read(ROOT, suite, "utf8");
+        const use = relayUse(src);
+        // Two claims a reason can make that are checkable from the source: that
+        // the suite needs the network, and that it is hermetic. A claim about
+        // seconds is not — it is true or false on the day it was measured, and
+        // nothing in the tree settles it.
+        return {
+          suite,
+          why,
+          claimsNetwork: /\b(?:starts|binds|needs|posts to|against)\s+(?:a\s+)?(?:live|real|production)?\s*relay\b/i.test(why)
+            || /\bnot hermetic\b/i.test(why),
+          usesNetwork: use.creating || use.delegates,
+          claimsHermetic: /\bhermetic\b/i.test(why),
+          remoteTargets: requestTargets(src).filter((r) => !r.loopback && !r.stubbed).length,
+        };
+      });
+    }),
+    // Non-empty (seven today), and every stated reason that can be checked is.
+    expect: true,
+    probe: (rows) => rows.length > 0
+      && rows.every((r) => !r.claimsNetwork || r.usesNetwork)
+      && rows.every((r) => !r.claimsHermetic || r.remoteTargets === 0),
   },
 
   // ── the kernel conformance test ─────────────────────────────────
@@ -940,6 +1166,278 @@ function walk(dir, out = []) {
     else if (/\.(mjs|js|ts)$/.test(e.name)) out.push(p);
   }
   return out;
+}
+
+// ── what a suite hands a relay, and where a suite may send a request ────
+//
+// Everything below reads its subject out of server/relay.mjs or out of the
+// suite's own source rather than out of a list written here. That is the whole
+// point: the previous version of `suites-never-use-the-production-pass-db` named
+// `passDb`, and a check that names one field of a four-field interface reports
+// nothing about the other three. A derivation that stopped matching the tree
+// shows up as a shorter list, and the probes below require the list to still
+// contain the fields that matter.
+
+/** The one CONFIG key the relay only reads from; the rest are writes. */
+const RELAY_READ_ONLY = new Set(["staticDir"]);
+
+/** How many recorded causes VERIFICATION.md's table is expected to carry.
+ *  Stated rather than derived — see `recorded-causes-are-re-derived`. */
+const MIN_RECORDED_CAUSES = 6;
+
+/**
+ * Every key in server/relay.mjs's CONFIG that names a place on disk, with the
+ * argv flag and the env var that override it and the default it falls back to.
+ * Derived from the CONFIG block, so a new `cacheDir` is covered on the day it
+ * is written and this file needs no edit.
+ */
+export function relayPathKeys(relaySrc) {
+  const block = /export const CONFIG = \{([\s\S]*?)\n\};/.exec(relaySrc);
+  if (!block) return [];
+  const keys = [];
+  for (const line of block[1].split("\n")) {
+    const m = /^\s*(\w+):\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const [, key, value] = m;
+    // A key that names a directory, file, database, log or path. The numbers
+    // (`maxLine`, `roomTtlMs`) and the strings that are not places (`origin`)
+    // do not match, which is the discrimination we want.
+    if (!/(Dir|File|Db|Log|Path)$/.test(key)) continue;
+    keys.push({
+      key,
+      flag: /args\.get\(\s*"([^"]+)"/.exec(value)?.[1] ?? null,
+      env: /process\.env\.([A-Z_]+)/.exec(value)?.[1] ?? null,
+      // The *default* is the last fallback in the chain, not the first string
+      // in it — the first is the flag name: `args.get("log") ?? … ?? ""`.
+      default: /["']([^"']*)["']/.exec(value.split("??").pop().trim())?.[1] ?? "",
+    });
+  }
+  return keys;
+}
+
+/**
+ * The relay config objects a suite actually hands to createServer/createRelay,
+ * as source text.
+ *
+ * Resolving the *argument* to the config first is the load-bearing part: most
+ * suites pass a variable (`createServer(cfg, new Rooms(cfg))`), so the config
+ * is not in the call text at all. And `createServer` is also node:http's, which
+ * these suites use for their 404 and SPA stubs — a first draft of this scanner
+ * matched `createServer((_req, res) => {...})` and called it an unconfigured
+ * relay. Every relay config here spreads CONFIG, so that is the discriminator,
+ * and it is checked on the resolved config rather than on the call.
+ */
+export function relayConfigs(src) {
+  const out = [];
+  for (const m of src.matchAll(/create(?:Server|Relay)\s*\(/g)) {
+    let i = m.index + m[0].length, depth = 1;
+    const start = i;
+    while (i < src.length && depth > 0) {
+      if (src[i] === "(") depth += 1;
+      else if (src[i] === ")") depth -= 1;
+      i += 1;
+    }
+    const args = src.slice(start, i - 1).trim();
+    let config = args;
+    if (!config.startsWith("{")) {
+      const name = config.split(",")[0].trim();
+      // An object literal, or a plain identifier. Anything else as the first
+      // argument is a request handler, and is not a relay.
+      if (!/^[A-Za-z_$][\w$]*$/.test(name)) continue;
+      const decl = new RegExp(`\\b${name}\\s*=\\s*\\{[^}]*\\}`).exec(src);
+      config = decl ? decl[0] : args;
+    }
+    if (!/CONFIG/.test(config)) continue;
+    out.push(config);
+  }
+  return out;
+}
+
+/** Read a value out of source text, up to the `,` `]` `}` or newline that ends
+ *  it at nesting depth zero. A regex cannot do this: `join(tmpdir(), name)`
+ *  stops a `[^,]+` in the middle of its own argument list, and the truncated
+ *  text is then not the expression that was written. */
+export function balancedValue(src, start) {
+  let i = start, depth = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+    else if (ch === ")" || ch === "]" || ch === "}") {
+      if (depth === 0) break;
+      depth -= 1;
+    } else if (depth === 0 && (ch === "," || ch === "\n")) break;
+    i += 1;
+  }
+  return src.slice(start, i).trim();
+}
+
+/** The whole argument list of a call, from just after its `(`. balancedValue
+ *  cannot do this job: it stops at the first comma at depth zero, which for
+ *  `spawn(execPath, [relayPath, …])` is the one before the relay. */
+export function callArguments(src, start) {
+  let i = start, depth = 1;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+    else if (ch === ")" || ch === "]" || ch === "}") {
+      depth -= 1;
+      if (depth === 0) break;
+    }
+    i += 1;
+  }
+  return src.slice(start, i);
+}
+
+/** The first argument of a call, as source text. */
+export function firstArgument(src, start) {
+  return balancedValue(callArguments(src, start), 0);
+}
+
+/** The expression a config literal gives `key`, or null if it does not give it.
+ *  Shorthand (`{ ...CONFIG, passDb }`) is a supply: the value is that name. */
+export function fieldValue(config, key) {
+  // `[{\s]` and not `[{[:space:]]`: a POSIX class nested inside a character
+  // class is not portable, and the version written first silently matched
+  // nothing -- every `passDb` in every config then read as "not supplied",
+  // which is the one answer that must never come out of a broken matcher.
+  for (const m of config.matchAll(new RegExp(`(?:^|[{\\s])${key}\\b`, "g"))) {
+    let i = m.index + m[0].length;
+    while (i < config.length && /\s/.test(config[i])) i += 1;
+    if (config[i] === ":") return balancedValue(config, i + 1);
+    if (config[i] === "," || config[i] === "}" || i >= config.length) return key;
+  }
+  return null;
+}
+
+/** The expression a suite gives a spawned relay, by flag or by env var. */
+export function suppliedOnArgv(src, key) {
+  if (key.flag) {
+    const flag = new RegExp(`["']--${key.flag}["']\\s*,`, "g").exec(src);
+    if (flag) return balancedValue(src, flag.index + flag[0].length);
+  }
+  if (key.env) {
+    const env = new RegExp(`process\\.env\\.${key.env}\\s*=\\s*`, "g").exec(src);
+    if (env) return balancedValue(src, env.index + env[0].length);
+  }
+  return null;
+}
+
+/** How a suite uses the relay, in one place, so every claim that asks agrees.
+ *  `creating` is the load-bearing answer: does this suite actually put a relay
+ *  (and therefore a pass database, a log and an archive) into existence. */
+export function relayUse(src) {
+  const code = withoutComments(src);
+  const configs = relayConfigs(code);
+  const onArgv = /relay-start\.mjs/.test(code) || spawnsRelayProcess(code);
+  return {
+    code,
+    configs,
+    onArgv,
+    creating: configs.length > 0 || onArgv,
+    delegates: /^import\s+["']\.\.\/(web|scripts)\//m.test(code.trim()),
+    mentions: /relay\.mjs|relay-start\.mjs/.test(src),
+  };
+}
+
+/** Does this suite run a relay as a child process?
+ *
+ *  The argument list is what is searched, not the file. An earlier version of
+ *  this guard asked merely whether the source contained a spawn-family call and
+ *  mentioned `relay.mjs` anywhere, and `scripts/thunk-claims-test.mjs` satisfied
+ *  both — it spawns the vector checker and it talks about relays in a comment.
+ *  Worse, the opposite failure is the one that bit: `web/diag-test.mjs` stopped
+ *  matching entirely once it moved its inline `spawn` into
+ *  `scripts/relay-start.mjs`, so it dropped out of the guard on the very commit
+ *  that made it start passing. A guard whose trigger is a spelling rots the
+ *  moment the spelling is fixed. */
+export function spawnsRelayProcess(src) {
+  return [...src.matchAll(/\b(?:spawn|spawnSync|execFile|execFileSync|execSync)\s*\(/g)]
+    .some((m) => /\brelay\w*/i.test(callArguments(src, m.index + m[0].length)));
+}
+
+/** The names a suite binds to a directory it created for this run. */
+export function tempRoots(src) {
+  const names = new Set();
+  for (const m of src.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?(?:fs\.)?mkdtemp(?:Sync)?\s*\(/g))
+    names.add(m[1]);
+  return names;
+}
+
+/** Follow `const x = …` chains so `passDb` is judged by where it points. */
+export function resolveBindings(src, expr, depth = 0) {
+  if (depth > 4) return expr;
+  const name = /^[A-Za-z_$][\w$]*$/.exec(expr.trim());
+  if (!name) return expr;
+  const decl = new RegExp(`(?:const|let|var)\\s+${name}\\s*=\\s*([^;\n]+)`).exec(src);
+  return decl ? resolveBindings(src, decl[1].trim(), depth + 1) : expr;
+}
+
+/** Is this path inside the temp area the suite made for itself?
+ *  A literal `/tmp/…` is NOT: it is shared by every concurrent run, which is
+ *  how a rate-limit ledger outlives the suite that wrote it. */
+export function insideTemp(expr, roots) {
+  if (/\btmpdir\s*\(\s*\)/.test(expr)) return true;
+  return [...roots].some((r) => new RegExp(`\\b${r}\\b`).test(expr));
+}
+
+/** The calls in a suite that put something on the wire, with their first
+ *  argument's text. Comments go first — a suite that *discusses* reaching a
+ *  host has not reached it — and data that merely mentions a URL is not a
+ *  request either: only a URL inside a request-making call's own argument
+ *  counts, which is why `invite("https://relay.example.org", …)` is fine and
+ *  `resolveReachability({ configured: "https://…" })` is not. */
+const REQUEST_MAKERS = /\b(?:fetch|probeRelay|resolveReachability|RelayClient|request|connect|dial)\s*\(/g;
+
+/** Comments out, using the project's own scanner, and falling back to no
+ *  stripping at all if it refuses the file. The fallback errs towards *more*
+ *  rows, not fewer: server/js-scan.mjs is a real scanner and it throws on a
+ *  source with a newline inside a regex literal, which a suite may contain. */
+function withoutComments(src) {
+  try {
+    return stripComments(src);
+  } catch {
+    return src;
+  }
+}
+
+export function requestTargets(src) {
+  const code = withoutComments(src);
+  const out = [];
+  for (const m of code.matchAll(REQUEST_MAKERS)) {
+    const arg = firstArgument(code, m.index + m[0].length);
+    const full = resolveBindings(code, arg);
+    // A call can name a real host and still never reach it, if it was handed a
+    // fetch of its own — which is how web/diag-test.mjs keeps its
+    // "a configured relay that is down" case while asserting against
+    // kant-relay.cicada71.net. Passing `globalThis.fetch` is not a stub.
+    //
+    // The value is captured and compared rather than excluded with a negative
+    // lookahead, because `\s*` before it backtracks: `fetchImpl: globalThis.fetch`
+    // matched `(?!\s*globalThis)` by testing the lookahead against the space.
+    const injected = /\bfetchImpl\s*[:,=]\s*([A-Za-z_$][\w$.]*)/.exec(arg)?.[1];
+    const stubbed = Boolean(injected) && injected !== "globalThis.fetch";
+    for (const url of full.match(/https?:\/\/[^\s"'`]+/g) ?? []) {
+      out.push({
+        suite: null, call: m[0].replace(/\s*\($/, ""), url,
+        loopback: isLoopback(url), stubbed,
+      });
+    }
+  }
+  return out;
+}
+
+/** Loopback, or a name in a reserved TLD that cannot resolve to a deployment. */
+export function isLoopback(url) {
+  // The authority is read out with a pattern rather than `new URL`, because the
+  // interesting case is a template literal — `http://127.0.0.1:${port}` — which
+  // is not a URL until it has run, and which must still be recognised as
+  // loopback. The substitution keeps `${…}` from being read as a hostname.
+  const host = /^[a-z][a-z0-9+.-]*:\/\/([^/?#\s"'`)]+)/i.exec(url)?.[1] ?? "";
+  if (!host) return false;
+  const bare = host.replace(/^\[|\]$/g, "").split("@").pop().split(":")[0];
+  if (/^(127\.|localhost$|::1$|0\.0\.0\.0$)/.test(bare)) return true;
+  return /\.(example|invalid|test|localhost)$/.test(bare)
+    || /^(example\.(com|net|org))$/.test(bare);
 }
 
 /**

@@ -358,35 +358,407 @@ t("kernel-vectors-satisfy-wasm goes red on a short vector file", () =>
   mustFlipProbe("kernel-vectors-satisfy-wasm", "fewer than 59 vectors",
     async () => ({ vectors: 58, unsatisfied: [] })));
 
-t("suites-never-use-the-production-pass-db goes red on a relay left at the default", () =>
-  mustFlipProbe("suites-never-use-the-production-pass-db",
-    "a suite whose relay config has no passDb",
-    async () => [{ suite: "web/join-test.mjs", mode: "PRODUCTION", calls: 1, unsafe: 1 }]));
+// ── the write guard can fail ──────────────────────────────────────
+//
+// The claim used to be `suites-never-use-the-production-pass-db` and it checked
+// one field of one config. It now asks about every path the relay writes, which
+// are derived from server/relay.mjs's own CONFIG. Each of these mutates the
+// tree rather than feeding the probe a fabricated row, because a fabricated row
+// only proves the probe's boolean and these regressions *are* tree changes.
 
-t("suites-never-use-the-production-pass-db goes red when a suite drops its passDb", async () => {
-  // A real mutation, not a fabricated input. The claim reads the config that
-  // actually reaches createServer, and the first draft only grepped the file for
-  // the word "passDb" — so a suite could declare it and forget to pass it, and
-  // the claim called that safe. Only mutating the call proves otherwise.
-  const path = resolve(ROOT, "web/wasm-test.mjs");
+/** Apply `mutate` to a tracked file, run a claim against the result, restore. */
+const mutateFile = async (rel, mutate, run) => {
+  const path = resolve(ROOT, rel);
   const before = readFileSync(path, "utf8");
-  const mutated = before.replace(
-    "{ ...CONFIG, staticDir, passDb }", "{ ...CONFIG, staticDir }");
-  if (mutated === before) throw new Error("mutation anchor not found in web/wasm-test.mjs");
+  const mutated = mutate(before);
+  // If the anchor moved the mutation is a no-op, and the claim would pass for
+  // the wrong reason — which is how a checker rots without going red.
+  if (mutated === before) throw new Error(`mutation anchor not found in ${rel}`);
   try {
-    writeFileSync(path, mutated);
-    const c = claim("suites-never-use-the-production-pass-db");
-    const after = await evaluate(c, await resolveInput(c.input));
-    if (after.ok) throw new Error("still passed on a relay using the production passDb");
+    writeFileSync(path, mutated, "utf8");
+    await run();
   } finally {
-    writeFileSync(path, before);
+    writeFileSync(path, before, "utf8");
+  }
+};
+
+const requireRed = async (id, why) => {
+  const c = claim(id);
+  const after = await evaluate(c, await resolveInput(c.input));
+  if (after.ok) throw new Error(`${id} still passed on ${why}`);
+};
+
+t("suites-write-only-into-their-own-temp-dir goes red when a suite drops its passDb",
+  () => mutateFile("web/wasm-test.mjs",
+    (s) => s.replace("{ ...CONFIG, staticDir, passDb }", "{ ...CONFIG, staticDir }"),
+    () => requireRed("suites-write-only-into-their-own-temp-dir",
+      "a relay left at /var/lib/kant-zk/passes.sqlite")));
+
+t("suites-write-only-into-their-own-temp-dir goes red on the *second* path, archiveDir",
+  // The whole point of the generalisation. passDb is overridden and correct in
+  // every one of these suites; archiveDir is the write the old guard could not
+  // see, and it is what web/file-test.mjs actually got wrong.
+  () => mutateFile("web/file-test.mjs",
+    (s) => s.replace('archiveDir: join(stateDir, "archive")',
+      'archiveDir: "/tmp/kant-file-test/archive"'),
+    () => requireRed("suites-write-only-into-their-own-temp-dir",
+      "a fixed archive directory shared by concurrent runs")));
+
+t("suites-write-only-into-their-own-temp-dir goes red on the *third* path, logFile",
+  () => mutateFile("web/diag-test.mjs",
+    (s) => s.replace("const logFile = path.join(tmpdir(), `kant-diag-relay-${process.pid}.log`);",
+      'const logFile = path.join(here, ".diag-relay.log");'),
+    () => requireRed("suites-write-only-into-their-own-temp-dir",
+      "a relay log written inside the checkout")));
+
+t("suites-write-only-into-their-own-temp-dir goes red on a path left at a non-empty default",
+  // Dropping `--pass-db` from the argv entirely. The relay then reads its own
+  // default off disk, which is /var/lib/kant-zk/passes.sqlite.
+  () => mutateFile("web/diag-test.mjs",
+    (s) => s.replace('"--pass-db", passDb, ', ""),
+    () => requireRed("suites-write-only-into-their-own-temp-dir",
+      "a spawned relay given no --pass-db at all")));
+
+t("suites-write-only-into-their-own-temp-dir is not fooled by a suite that stops starting a relay", async () => {
+  // The trigger rotted once already: web/diag-test.mjs moved its inline spawn
+  // into scripts/relay-start.mjs, stopped matching a trigger that looked for
+  // `spawn(`, and dropped out of the scan on the commit that made it start
+  // passing. The claim's answer is the `NOT SCANNED` row — a suite that mentions
+  // the relay and is then not judged is a hole — so this is a real mutation of
+  // the tree rather than a fabricated row.
+  await mutateFile("web/join-test.mjs",
+    // Renamed away from createServer( so the suite still imports relay.mjs and
+    // still builds a relay — it just stops spelling the call the scan keys on.
+    // That is the shape of the rot: not a suite that stopped starting a relay,
+    // but one that started it by a name the trigger does not know.
+    (s) => s.replace("const server = createServer(relayCfg, new Rooms(relayCfg));",
+      "const makeServer = createServer;\nconst server = makeServer(relayCfg, new Rooms(relayCfg));"),
+    () => requireRed("suites-write-only-into-their-own-temp-dir",
+      "a suite that mentions the relay and is no longer judged"));
+});
+
+t("suites-write-only-into-their-own-temp-dir goes red on a suite whose config cannot be parsed",
+  // The vacuity trap: a scanner that finds no configs must not report "safe".
+  () => mustFlipProbe("suites-write-only-into-their-own-temp-dir",
+    "a row with no path to judge",
+    async () => [{ suite: "web/join-test.mjs", mode: "own tmp", key: "passDb", paths: 0, outside: 0 }]));
+
+t("suites-never-reach-a-remote-host goes red on a suite that probes a deployment",
+  // A real mutation of the tree, and the regression this claim was written
+  // after: the fetchImpl stub is removed, so `resolveReachability` really does
+  // fetch https://kant-relay.cicada71.net/health from the core run.
+  () => mutateFile("web/diag-test.mjs",
+    (s) => s.replace(", fetchImpl: noNetwork,", ","),
+    () => requireRed("suites-never-reach-a-remote-host",
+      "a suite that fetches the production relay")));
+
+t("suites-never-reach-a-remote-host counts passing globalThis.fetch as no stub",
+  () => mutateFile("web/diag-test.mjs",
+    (s) => s.replace(", fetchImpl: noNetwork,", ", fetchImpl: globalThis.fetch,"),
+    () => requireRed("suites-never-reach-a-remote-host",
+      "a stub that is the real fetch")));
+
+t("suites-never-reach-a-remote-host goes red on a second remote host",
+  () => mustFlipProbe("suites-never-reach-a-remote-host",
+    "a request aimed at a deployment",
+    async () => [{ suite: "web/join-test.mjs", call: "fetch", url: "https://kant.example/",
+      loopback: false, stubbed: false }]));
+
+// ── the recorded causes can fail ─────────────────────────────────
+
+t("recorded-causes-are-re-derived goes red when a row names a claim that does not exist", async () => {
+  // The doc rotting. Point a row at a claim id nothing answers to and the table
+  // has become prose again, which is the one thing this claim exists to stop.
+  await mutateFile("tasks/thunk-server/VERIFICATION.md",
+    (s) => s.replace("| `kant-debug-is-tracked` |", "| `kant-debug-is-tracked-and-fine` |"),
+    () => requireRed("recorded-causes-are-re-derived", "a row pointing at no claim"));
+});
+
+t("recorded-causes-are-re-derived goes red when a recorded cause stops being true", async () => {
+  // The end-to-end one, and the reason the column exists: break the tree in the
+  // way the first row's real cause describes — the wasm test reading the
+  // gitignored dist/ again — and the row whose re-derivation is
+  // `wasm-test-inputs-tracked` must go red with it.
+  //
+  // The input is read directly rather than through evaluate(), because the
+  // claim's probe returns a boolean: `observed` holds that boolean, and the
+  // per-row detail has to come from the input.
+  const c = claim("recorded-causes-are-re-derived");
+  const input = () => resolveInput(c.input);
+  const before = await input();
+  if (!before.rows.every((r) => r.holds)) {
+    throw new Error("precondition: a row is already red to begin with");
+  }
+  await mutateFile("web/wasm-test.mjs",
+    (s) => s.replace('new URL("./kant_kernel.wasm", import.meta.url)',
+      'new URL("../dist/kant_kernel.wasm", import.meta.url)'),
+    async () => {
+      const after = await input();
+      const broke = after.rows.filter((r) => !r.holds);
+      if (!broke.length) {
+        throw new Error("the table still holds while its first row's cause is false again");
+      }
+      // And it must say which row, not just that something went red.
+      if (!broke.some((r) => r.claims === "wasm-test-inputs-tracked")) {
+        throw new Error(`went red without naming the row: ${broke.map((r) => r.claims).join(", ")}`);
+      }
+      if (await evaluate(c, after).ok) {
+        throw new Error("evaluate() reported the broken table as ok");
+      }
+    });
+});
+
+t("recorded-causes-are-re-derived goes red when a row is deleted", async () => {
+  const c = claim("recorded-causes-are-re-derived");
+  const rows = await resolveInput(c.input);
+  // Six rows today. Dropping one has to go red, which is what the probe's floor
+  // is for; and a floor of five passed when there were five rows and failed to
+  // notice the sixth being added, so the test asserts against the real count
+  // rather than against a number typed twice.
+  if (rows.rows.length < 6) throw new Error(`precondition: only ${rows.rows.length} rows already`);
+  if (c.probe({ ...rows, rows: rows.rows.slice(1) }) === c.expect) {
+    throw new Error("the claim cannot tell a shortened table from a whole one");
+  }
+  if (c.probe({ ...rows, rows: [...rows.rows, rows.rows[0]] }) === c.expect) {
+    throw new Error("the claim cannot tell a duplicated row from a distinct one");
+  }
+  // And the section itself: if the heading goes, there is nothing to check and
+  // the claim must say so rather than pass on an empty table.
+  if (c.probe({ rows: [] }) === c.expect) {
+    throw new Error("the claim cannot tell a missing table from a whole one");
   }
 });
 
-t("suites-never-use-the-production-pass-db sees a suite that parses no config", () =>
-  mustFlipProbe("suites-never-use-the-production-pass-db",
-    "a relay whose config could not be found",
-    async () => [{ suite: "web/join-test.mjs", mode: "NO CONFIG FOUND", calls: 0 }]));
+t("scripts-suites-delegate-to-their-web-twin goes red on a twin that is not there", async () => {
+  // Delete the twin from the map the claim resolves against: what the runner
+  // would see on a branch where web/carddebug-test.mjs was never merged.
+  const c = claim("scripts-suites-delegate-to-their-web-twin");
+  const rows = await resolveInput(c.input);
+  const before = rows.find((r) => r.suite === "scripts/carddebug-test.mjs");
+  if (!before) throw new Error("precondition: the carddebug delegation is not in the rows");
+  if (c.probe(rows.map((r) => (r === before ? { ...r, exists: false, tracked: false } : r))) === c.expect) {
+    throw new Error("still passed with a delegation to a file that does not exist");
+  }
+  if (c.probe(rows.map((r) => (r === before ? { ...r, inCore: false } : r))) === c.expect) {
+    throw new Error("still passed with a delegation to a twin nobody runs");
+  }
+  if (c.probe([]) === c.expect) throw new Error("passed with no delegations at all");
+});
+
+t("kant-debug-is-tracked goes red when the tool is gone", async () => {
+  // The probe answers a boolean, so this is the two states that must be
+  // refused. The affirmative case is covered by "every claim still holds".
+  const c = claim("kant-debug-is-tracked");
+  if (c.probe({ onDisk: false, tracked: true }) === c.expect) {
+    throw new Error("passed with the tool missing from disk");
+  }
+  if (c.probe({ onDisk: true, tracked: false }) === c.expect) {
+    throw new Error("passed with a file git does not know");
+  }
+});
+
+t("kant-debug-is-spawned-not-imported goes red on a suite that imports it", async () => {
+  // The recorded cause was "carddebug *imports* kant-debug". If that sentence
+  // ever becomes true, the claim that corrects it has to go red.
+  const c = claim("kant-debug-is-spawned-not-imported");
+  const rows = await resolveInput(c.input);
+  if (!rows.some((r) => r.suite === "web/carddebug-test.mjs")) {
+    throw new Error("precondition: carddebug is not in the rows");
+  }
+  const imported = rows.map((r) => (r.suite === "web/carddebug-test.mjs"
+    ? { ...r, imports: true, spawns: false } : r));
+  if (c.probe(imported) === c.expect) throw new Error("passed on a suite that imports kant-debug");
+  const neither = rows.map((r) => (r.suite === "web/carddebug-test.mjs"
+    ? { ...r, imports: false, spawns: false } : r));
+  if (c.probe(neither) === c.expect) throw new Error("passed on a suite that mentions it and does nothing");
+  if (c.probe([]) === c.expect) throw new Error("passed with no suite mentioning kant-debug");
+});
+
+// ── the verification tooling itself ──────────────────────────────
+//
+// Everything above tests the ledger's *claims*. These test the machinery the
+// claims are made of: the scanner, the runner, the resolver. A claim checker
+// that cannot report its own failure honestly is worse than no checker, and
+// three branches below had no test at all — a claim whose input cannot be read,
+// a probe that throws, and an empty ledger.
+
+t("a claim whose input cannot be read is reported, not thrown", async () => {
+  const before = [...CLAIMS];
+  try {
+    // `fileNotFound` is the heartbeat class: the loudest failure there is. If
+    // reading it raised out of runClaims instead of becoming a red row, the
+    // whole run would die on one broken path and print no table.
+    CLAIMS.push({
+      id: "unit-test-missing-input",
+      claim: "a path that does not exist",
+      doc: "unit test",
+      kind: "health",
+      input: { kind: "file", path: "no/such/file.mjs", binary: false },
+      expect: true,
+      probe: () => true,
+    });
+    const rows = await runClaims();
+    const row = rows.find((r) => r.id === "unit-test-missing-input");
+    if (!row) throw new Error("the missing input produced no row at all");
+    if (row.ok) throw new Error("a claim whose input cannot be read reported ok");
+    if (!/input failed/.test(String(row.observed))) {
+      throw new Error(`no explanation given: ${row.observed}`);
+    }
+  } finally {
+    CLAIMS.length = 0;
+    CLAIMS.push(...before);
+  }
+});
+
+t("a probe that throws is reported with its message, and the run continues", async () => {
+  const c = {
+    id: "unit-test-throwing-probe",
+    claim: "a probe that throws",
+    doc: "unit test",
+    kind: "health",
+    expect: true,
+    probe: () => { throw new Error("ENOENT: no such file or directory"); },
+  };
+  const row = await evaluate(c, undefined);
+  if (row.ok) throw new Error("a throwing probe reported ok");
+  if (!/threw: ENOENT/.test(String(row.observed))) {
+    throw new Error(`the message was lost: ${row.observed}`);
+  }
+  // And the ledger as a whole still answers.
+  const rows = await runClaims();
+  if (!rows.length) throw new Error("runClaims returned nothing");
+});
+
+t("an empty ledger is refused rather than reported as a pass", async () => {
+  // The one failure mode that is invisible from outside: a checker that has
+  // been emptied is a checker that passes. CLAIMS is mutated rather than the
+  // probe, because the probe has no idea how many claims there should be.
+  const before = [...CLAIMS];
+  try {
+    CLAIMS.length = 0;
+    const rows = await runClaims();
+    if (rows.length !== 0) throw new Error("expected no rows from an empty ledger");
+  } finally {
+    CLAIMS.length = 0;
+    CLAIMS.push(...before);
+  }
+  if (!CLAIMS.length) throw new Error("the ledger was not restored");
+});
+
+t("relayPathKeys reads the relay's own CONFIG rather than a list written here", async () => {
+  const { relayPathKeys } = await import("./thunk-claims.mjs");
+  const keys = relayPathKeys(read("server/relay.mjs"));
+  const names = keys.map((k) => k.key);
+  // Non-empty, and the fields whose defaults are real filesystem paths or
+  // which name a place at all. If relay.mjs grows a `cacheDir` this picks it up
+  // with no edit here, which is the property being asserted.
+  if (!keys.length) throw new Error("no path keys were derived from relay.mjs");
+  for (const want of ["staticDir", "logFile", "passDb", "archiveDir"]) {
+    if (!names.includes(want)) throw new Error(`${want} is not in the derived keys: ${names.join(", ")}`);
+  }
+  // The flag comes from `args.get("…")` in the same line, so a renamed flag is
+  // followed rather than hard-coded.
+  if (keys.find((k) => k.key === "passDb").flag !== "pass-db") {
+    throw new Error("passDb's flag was not read out of relay.mjs");
+  }
+  if (keys.find((k) => k.key === "passDb").default !== "/var/lib/kant-zk/passes.sqlite") {
+    throw new Error("passDb's default was not read out of relay.mjs");
+  }
+  // A source with no CONFIG block yields nothing rather than throwing.
+  if (relayPathKeys("export const nothing = {};").length) {
+    throw new Error("invented path keys out of a source with no CONFIG");
+  }
+});
+
+t("the relay-config resolver tells a relay config from an http stub", async () => {
+  const { relayConfigs, fieldValue } = await import("./thunk-claims.mjs");
+  // The 404 stubs these suites put next to their real relay: node:http's own
+  // createServer, whose first argument is a handler. Counting one of those as an
+  // unconfigured relay was the first draft's bug.
+  const src = [
+    "import { createServer } from 'node:http';",
+    "const stub = createServer((_req, res) => { res.writeHead(404); res.end(); });",
+    "const cfg = { ...CONFIG, port: 0, staticDir: '', passDb };",
+    "const server = createServer(cfg, new Rooms(cfg));",
+  ].join("\n");
+  const configs = relayConfigs(src);
+  if (configs.length !== 1) throw new Error(`expected one relay config, found ${configs.length}`);
+  if (!/passDb/.test(fieldValue(configs[0], "passDb"))) {
+    throw new Error(`did not resolve the shorthand passDb: ${JSON.stringify(fieldValue(configs[0], "passDb"))}`);
+  }
+  // `passDb` resolves to itself, which resolveBindings then follows.
+  if (fieldValue(configs[0], "logFile") !== null) {
+    throw new Error("invented a value for a field the config does not give");
+  }
+  // A config that does not spread CONFIG is not a relay config.
+  if (relayConfigs("createServer({ port: 0, host: '127.0.0.1' });").length) {
+    throw new Error("counted a plain object as a relay config");
+  }
+});
+
+t("excluded-reasons-match-the-tree goes red on the three reasons that were wrong", async () => {
+  // The claim's reason for existing. Each of these is the *real* recorded
+  // cause — the sentence that was in check-all.mjs before this session — and
+  // each was wrong about a suite nobody had opened.
+  const c = claim("excluded-reasons-match-the-tree");
+  const rows = await resolveInput(c.input);
+  const rowFor = (suite) => rows.find((r) => r.suite === suite);
+  for (const suite of ["web/libp2p-test.mjs", "scripts/room-store-test.mjs"]) {
+    const r = rowFor(suite);
+    if (!r) throw new Error(`precondition: ${suite} is not in the rows`);
+    if (r.claimsNetwork) throw new Error(`precondition: ${suite} no longer claims the network`);
+    if (r.usesNetwork) throw new Error(`precondition: ${suite} starts a relay after all`);
+    // Put the old sentence back, as a row, and the claim must refuse it.
+    const lied = rows.map((x) => (x === r ? { ...x, why: "3s; starts a relay", claimsNetwork: true } : x));
+    if (c.probe(lied) === c.expect) {
+      throw new Error(`still passed on a reason that says ${suite} starts a relay`);
+    }
+  }
+  // And "hermetic" is a claim too: one suite that reaches a host is not
+  // hermetic, whatever its reason says.
+  const hermetic = rowFor("web/libp2p-test.mjs");
+  if (c.probe(rows.map((x) => (x === hermetic ? { ...x, remoteTargets: 1 } : x))) === c.expect) {
+    throw new Error("passed on a hermetic suite that makes a remote request");
+  }
+  if (c.probe([]) === c.expect) throw new Error("passed with nothing excluded at all");
+});
+
+t("classifyRepeats tells unstable from broken from untested", async () => {
+  const { classifyRepeats } = await import("./check-all.mjs");
+  // Fabricated outcomes are the right input here, and it is worth saying why:
+  // this function's entire job is the mapping from what was observed to a
+  // verdict. There is no tree for a fabricated row to misrepresent — feeding it
+  // a real suite would only test that spawnSync works.
+  //
+  // The shape that matters is the historical one: scripts/net-test.mjs passed
+  // three times and failed the fourth with a 429.
+  const verdicts = classifyRepeats([
+    { file: "scripts/net-test.mjs", ok: true },
+    { file: "scripts/net-test.mjs", ok: true },
+    { file: "scripts/net-test.mjs", ok: true },
+    { file: "scripts/net-test.mjs", ok: false },
+    { file: "server/thunk-test.mjs", ok: true },
+    { file: "web/wasm-test.mjs", ok: false },
+    { file: "web/wasm-test.mjs", ok: false },
+  ]);
+  const by = (f) => verdicts.find((v) => v.file === f);
+  if (by("scripts/net-test.mjs").verdict !== "UNSTABLE") {
+    throw new Error(`three passes and a 429 read as ${by("scripts/net-test.mjs").verdict}`);
+  }
+  if (by("scripts/net-test.mjs").passed !== 3) throw new Error("the passing count is wrong");
+  if (by("web/wasm-test.mjs").verdict !== "stable fail") {
+    throw new Error("a suite that failed every time read as something else");
+  }
+  if (by("server/thunk-test.mjs").verdict !== "stable pass") {
+    throw new Error("a suite that passed every time read as something else");
+  }
+  // One run is not a stability result, and saying "stable" there would claim
+  // more than one observation supports.
+  if (classifyRepeats([{ file: "x.mjs", ok: true }])[0].verdict !== "stable pass") {
+    throw new Error("a single run is not a stability result");
+  }
+  if (classifyRepeats([]).length) throw new Error("invented a verdict for no runs");
+});
 
 // ── the Lean proof gate can fail ──────────────────────────────────
 //

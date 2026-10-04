@@ -23,6 +23,9 @@ import {
 } from "./kant-file-ipfs.mjs";
 import { envelopeDecode, utf8 } from "./kantzk.mjs";
 import { createServer, Rooms, CONFIG } from "../server/relay.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { witness } from "./kantzk.mjs";
 import crypto from "node:crypto";
 
@@ -107,8 +110,17 @@ check("the manifest core commits to every field", () => {
 
 console.log("the real relay (server/relay.mjs)");
 
+// Both paths are under a directory made for this run. They used to be the
+// fixed strings `/tmp/kant-file-test/passes.sqlite` and
+// `/tmp/kant-file-test/archive`, which is not production state and so was
+// invisible to `suites-never-use-the-production-pass-db` — but it is shared by
+// every concurrent run of this suite, which is the same defect one level down:
+// two runs write one rate-limit ledger and one archive, and each one's
+// "an archive file exists" assertion can see the other's traffic. The relay
+// takes three paths, so the guard now asks about all three.
+const stateDir = mkdtempSync(join(tmpdir(), "kant-file-test-"));
 const cfg = { ...CONFIG, port: 0, host: "127.0.0.1", staticDir: "",
-  passDb: "/tmp/kant-file-test/passes.sqlite", archiveDir: "/tmp/kant-file-test/archive" };
+  passDb: join(stateDir, "passes.sqlite"), archiveDir: join(stateDir, "archive") };
 const server = createServer(cfg, new Rooms(cfg));
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -202,6 +214,8 @@ await checkAsync("the archive recorded the pins and the line", async () => {
 });
 
 server.close();
+// After the close, so nothing is holding the sqlite handle.
+rmSync(stateDir, { recursive: true, force: true });
 console.log(`\n${checks} checks passed.`);
 
 // ---------------------------------------------------------- IPFS storage
