@@ -13,7 +13,7 @@ fi
 
 # Use the system-manager all-services config which includes pastebin + nora + svg2anim
 # + ipld-car-shmem (shmem-dedup-dedup, tantivy-indexer, letta-ipld-memory) structures.
-FLAKE="${PASTEBIN_FLAKE:-git+file:///home/mdupont/projects/system-manager?ref=main#systemConfigs.all-services}"
+FLAKE="${PASTEBIN_FLAKE:-git+file:///home/mdupont/projects/system-manager?ref=d36e76e1054f9e7a108fa31fa726ac1ec2c91f65#systemConfigs.all-services}"
 
 LOG_DIR="${PASTEBIN_DIR}/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
