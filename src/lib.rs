@@ -1,6 +1,7 @@
 // Modules
 pub mod api;
 pub mod archive;
+pub mod archive_utils;
 pub mod dasl;
 pub mod git_mount;
 pub mod handlers;

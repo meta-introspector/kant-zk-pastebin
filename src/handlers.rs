@@ -4051,10 +4051,11 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
 
     // Store for later access
     let entry_count = result.entries.len();
+    let pattern_store = PatternStore::from_archive_entries(&result.entries);
     ARCHIVE_STORE
         .lock()
         .unwrap()
-        .insert(session_id.clone(), result);
+        .insert(session_id.clone(), (result, pattern_store));
 
     // ── Register the archive file itself in the spool + index ──────────
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
