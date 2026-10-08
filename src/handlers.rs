@@ -1,4 +1,6 @@
 // Handlers - Request handlers for kant-pastebin microservice
+use crate::archive::*;
+use crate::archive_utils::*;
 use crate::mesh::MeshState;
 use crate::model::{
     Avatar, Identity, MeshMessage, MeshMessageKind, MeshPeer, Paste, PasteIndex, Response,
