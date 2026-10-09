@@ -265,7 +265,7 @@ pub async fn index(
 ) -> Result<HttpResponse> {
     let reply_to = query.get("reply_to").map(|s| s.as_str()).unwrap_or("");
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
-    let version = option_env!("CARGO_PKG_VERSION").unwrap_or("0.1.0");
+    let version = option_env!("CARGO_PKG_VERSION").unwrap_or("0.2.0");
     let git_commit = option_env!("GIT_COMMIT").unwrap_or("unknown");
     let build_time = option_env!("BUILD_TIME").unwrap_or("unknown");
 
@@ -4043,6 +4043,8 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     result.title = title.clone();
     result.description = description.clone();
 
+    // Create pattern store from extracted entries
+
     // Generate a session ID
     let mut hasher = Sha256::new();
     hasher.update(&file_data);
@@ -4051,11 +4053,10 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
 
     // Store for later access
     let entry_count = result.entries.len();
-    let pattern_store = PatternStore::from_archive_entries(&result.entries);
     ARCHIVE_STORE
         .lock()
         .unwrap()
-        .insert(session_id.clone(), (result, pattern_store));
+        .insert(session_id.clone(), result);
 
     // ── Register the archive file itself in the spool + index ──────────
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());

@@ -12,6 +12,26 @@ pub struct ArchiveEntry {
     pub content: Option<String>,
 }
 
+impl ArchiveEntry {
+    /// Check if this entry is a text file (based on content or extension)
+    pub fn is_text(&self) -> bool {
+        if let Some(ref content) = self.content {
+            // Check if content looks like text
+            let printable = content
+                .bytes()
+                .filter(|&b| b >= 32 && b < 127 || b == 10 || b == 13 || b == 9)
+                .count();
+            let total = content.len().max(1);
+            printable * 100 / total > 90
+        } else {
+            // Check extension
+            let path_lower = self.path.to_lowercase();
+            let text_exts = [".md", ".txt", ".lean", ".tex", ".org", ".html", ".htm", ".css", ".js", ".rs", ".py", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv"];
+            text_exts.iter().any(|ext| path_lower.ends_with(ext))
+        }
+    }
+}
+
 /// Summary of the extracted archive
 #[derive(serde::Serialize)]
 pub struct ArchiveResult {
