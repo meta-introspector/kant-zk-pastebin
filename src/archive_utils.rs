@@ -233,11 +233,8 @@ impl FilePattern {
             if let Some(file_stem_str) = file_stem.to_str() {
                 let file_lower = file_stem_str.to_lowercase();
                 // Split into words (camelCase, snake_case, kebab-case)
-                let words: Vec<&str> = file_lower
-                    .replace('-', "_")
-                    .split('_')
-                    .filter(|w| !w.is_empty() && w.len() > 2)
-                    .collect();
+                let file_lower_owned = file_lower.replace('-', "_");
+                let words: Vec<&str> = file_lower_owned.split('_').collect();
                 for word in words {
                     tags.push(format!("word:{}", word));
                 }
@@ -541,8 +538,47 @@ impl Default for ArchiveFilterConfig {
 pub struct ArchivePatternAnalyzer;
 
 impl ArchivePatternAnalyzer {
+    /// Analyze archive entry and categorize it
+    pub fn categorize_entry(entry: &crate::archive::ArchiveEntry) -> String {
+        let path = &entry.path;
+        let path_obj = Path::new(path);
+        
+        if let Some(ext) = path_obj.extension() {
+            if let Some(ext_str) = ext.to_str() {
+                match ext_str.to_lowercase().as_str() {
+                    "lean" => return "lean".to_string(),
+                    "md" | "markdown" => return "markdown".to_string(),
+                    "txt" | "text" => return "text".to_string(),
+                    "html" | "htm" => return "web".to_string(),
+                    "js" | "css" => return "web".to_string(),
+                    "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => return "graphics".to_string(),
+                    "json" => return "data".to_string(),
+                    "rs" | "py" | "java" | "cpp" | "c" | "go" => return "source".to_string(),
+                    "pdf" => return "document".to_string(),
+                    "zip" | "tar" | "gz" | "bz2" | "xz" => return "archive".to_string(),
+                    _ => {}
+                }
+            }
+        }
+        
+        let lower = path.to_lowercase();
+        if lower.contains("lean") || lower.contains("proof") {
+            return "lean".to_string();
+        } else if lower.contains("doc") || lower.contains("readme") {
+            return "markdown".to_string();
+        } else if lower.contains("web") || lower.contains("site") {
+            return "web".to_string();
+        } else if lower.contains("image") || lower.contains("img") {
+            return "graphics".to_string();
+        } else if lower.contains("source") || lower.contains("src") {
+            return "source".to_string();
+        } else if lower.contains("data") || lower.contains("dataset") {
+            return "data".to_string();
+        }
+        
+        "other".to_string()
+    }
 
-    
     /// Extract patterns from a file path
     pub fn extract_path_patterns(path: &str) -> HashMap<String, Vec<String>> {
         let mut patterns: HashMap<String, Vec<String>> = HashMap::new();
@@ -564,7 +600,7 @@ impl ArchivePatternAnalyzer {
                 let parent_lower = parent_str.to_lowercase();
                 patterns.entry("parent_directory".to_string())
                     .or_default()
-                    .push(parent_lower);
+                    .push(parent_lower.clone());
                 
                 // Extract individual directory components
                 for component in parent_lower.split('/') {
@@ -724,9 +760,10 @@ impl ArchivePatternAnalyzer {
         let path = entry.path.clone();
         let size = entry.size;
         let is_dir = entry.is_dir;
-        let content = entry.content;
         
         let category = Self::categorize_entry(&entry);
+        let content = entry.content;
+        
         let patterns = Self::extract_path_patterns(&path);
         let is_excluded_by_default = Self::should_filter_entry(&entry, config);
         let is_markdown_lean_only = config.markdown_lean_only && (
