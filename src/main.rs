@@ -13,6 +13,7 @@ mod svg_anim;
 mod gallery;
 mod handlers;
 mod ipfs;
+mod mesh;
 mod model;
 mod plugin;
 mod plugins;
@@ -26,6 +27,7 @@ mod tiles;
 mod view;
 
 mod archive;
+mod archive_utils;
 
 mod git_mount;
 
@@ -489,6 +491,30 @@ async fn main() -> std::io::Result<()> {
 
     let registry = web::Data::new(std::sync::Mutex::new(registry));
 
+    // Relay-to-relay mesh. Peer relays come from MESH_PEER_RELAYS
+    // (comma-separated); this node's own advertised URL from MESH_RELAY_URL.
+    let mesh_config = mesh::MeshConfig {
+        local_relay_id: env::var("MESH_RELAY_ID")
+            .unwrap_or_else(|_| "relay-local".to_string()),
+        local_relay_url: env::var("MESH_RELAY_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string()),
+        peer_relays: env::var("MESH_PEER_RELAYS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        ..Default::default()
+    };
+    let mesh_storage = std::sync::Arc::new(storage::Storage::new(env::var("MESH_DATA_DIR").ok()));
+    let mesh_state = std::sync::Arc::new(mesh::MeshState::new(mesh_config, mesh_storage));
+    mesh_state.clone().start();
+    let mesh_state = web::Data::new(mesh_state);
+    log::info!(
+        "Mesh networking started (relay {})",
+        env::var("MESH_RELAY_ID").unwrap_or_else(|_| "relay-local".to_string())
+    );
+
     let openapi = ApiDoc::openapi();
 
     HttpServer::new(move || {
@@ -501,6 +527,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors)
             .app_data(registry.clone())
+            .app_data(mesh_state.clone())
             .app_data(web::PayloadConfig::new(256 * 1024 * 1024)) // 256MB max upload
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url("/openapi.json", openapi.clone()))
             .route("/", web::get().to(handlers::index))
@@ -526,6 +553,16 @@ async fn main() -> std::io::Result<()> {
             .route("/upload", web::post().to(upload_handler::upload_file))
             .route("/file/{id}", web::get().to(handlers::get_file))
             .route("/ipfs/{cid}", web::get().to(handlers::ipfs_proxy))
+            .route("/api/mesh/peers", web::get().to(mesh::handlers::list_peers))
+            .route("/api/mesh/ping", web::post().to(mesh::handlers::receive_ping))
+            .route(
+                "/api/mesh/message",
+                web::post().to(mesh::handlers::receive_message),
+            )
+            .route(
+                "/api/mesh/announce",
+                web::post().to(mesh::handlers::announce),
+            )
             .route("/svg2anim/{id}", web::get().to(svg_anim::svg2anim))
             .route("/gallery", web::get().to(gallery::gallery))
             .route("/gallery/img/{qid}", web::get().to(handlers::gallery_image))

@@ -27,12 +27,24 @@
 
 import { kernelBytes as embeddedKernelBytes, KERNEL_LENGTH } from "./kant-kernel-embedded.mjs";
 
-/** Locations tried, in order, before the embedded copy. */
+/**
+ * Locations tried, in order, before the embedded copy.
+ *
+ * The sibling path comes first because it is the only one that exists on every
+ * deployment: web/ is the static root for the systemd relay and the worker's
+ * assets directory. The dist/ paths only exist in a repository checkout, so
+ * probing them first meant every deployed page load began with a guaranteed
+ * 404 before falling through to a path that was right there. The remaining
+ * paths are still tried, so a checkout that serves from dist/ still works.
+ */
 export const KERNEL_URLS = [
-  new URL("../dist/kant_kernel.wasm", import.meta.url),  // repository checkout
   new URL("./kant_kernel.wasm", import.meta.url),        // web/ shipped as the root
   new URL("./dist/kant_kernel.wasm", import.meta.url),   // dist/ copied under web/
-];
+  new URL("../dist/kant_kernel.wasm", import.meta.url),  // repository checkout
+  // The two dist/ entries collapse to the same href whenever the module is
+  // served from the origin root (every deployed case), so the list used to
+  // fetch one 404 twice. Deduped by href, order preserved.
+].filter((url, i, all) => all.findIndex((u) => u.href === url.href) === i);
 
 /** Names exported by the module, in the order the code section holds them. */
 export const KERNEL_EXPORTS = [

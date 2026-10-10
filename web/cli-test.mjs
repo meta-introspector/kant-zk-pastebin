@@ -17,7 +17,7 @@
 //      runs) joining the very same link and displaying the very same
 //      conversation.
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -91,18 +91,15 @@ eq("...and on the same relay",
 // be here, because the clients are separate processes too and this one waits
 // for each of them in turn.
 const relayPath = join(root, "server", "relay.mjs");
-function startRelay(port) {
-  const proc = spawn(process.execPath,
-    [relayPath, "--port", String(port), "--static", join(root, "web")],
-    { stdio: ["ignore", "pipe", "pipe"] });
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
-    proc.stdout.on("data", (d) => {
-      if (String(d).includes("listening")) { clearTimeout(timer); resolve(proc); }
-    });
-    proc.on("error", reject);
-  });
-}
+// The relay's pass database, which defaults to /var/lib/kant-zk/passes.sqlite —
+// production state. Without `--pass-db` this suite posted its lines into a live
+// relay's rate-limit ledger: six peer_posts rows a run, left behind to be pruned
+// only once the 10-minute window turned.
+const passDb = join(tmpdir(), `kant-cli-test-${process.pid}.sqlite`);
+import { startRelay as startRelayProcess } from "../scripts/relay-start.mjs";
+const startRelay = (port) =>
+  startRelayProcess(relayPath, port,
+    ["--static", join(root, "web"), "--pass-db", passDb]);
 
 const port = 8901 + Math.floor(Math.random() * 90);
 const relay = await startRelay(port);
@@ -266,6 +263,9 @@ try {
   ok("the state file exists", existsSync(join(dir, viaFetch.stateA)));
 } finally {
   relay.kill();
+  // The relay holds the handle, so its database goes after the kill. -wal and
+  // -shm are SQLite's own and are removed with it.
+  for (const s of ["", "-wal", "-shm"]) rmSync(`${passDb}${s}`, { force: true });
   rmSync(dir, { recursive: true, force: true });
 }
 

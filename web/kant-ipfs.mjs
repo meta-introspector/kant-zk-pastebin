@@ -16,9 +16,11 @@
 //   const bytes = await ipfsCat(cid);          // gateway fetch, null when unreachable
 //
 // Size discipline: artifacts up to MAX_ARTIFACT_BYTES (one kubo chunk, 256 KiB)
-// are single-block, which is what makes the client-side CID identical to
-// kubo's. Larger artifacts must be chunked by the caller (or use the local
-// kubo directly and only announce the CID).
+// are single-block, and the client CID is the raw leaf itself. Larger
+// artifacts are split at the same boundary and addressed by a UnixFS dag-pb
+// root, so `cidOf` returns exactly what `kubo add --cid-version=1
+// --raw-leaves` returns at any size. See `unixfsCidOf` below; the encoding
+// notes there are the ones that actually change the hash.
 
 import { utf8, fromUtf8, hexDecode } from "./kantzk.mjs";
 
@@ -57,9 +59,31 @@ export async function wasmOnce() {
 /** One kubo chunk; ≤ this size the client CID == the node CID. */
 export const MAX_ARTIFACT_BYTES = 262144;
 
-/** Default kubo RPC and gateway endpoints (override via p2papp settings). */
-export const KUBO_RPC = "http://127.0.0.1:5001";
-export const GATEWAY = "http://127.0.0.1:8080";
+/** Loopback fallbacks, used only when there is no page origin to be
+ *  relative to (node, a worker, a `file://` copy). */
+const LOOPBACK_RPC = "http://127.0.0.1:5001";
+// 8081, not kubo's usual 8080: on this host the daemon's gateway is 8081,
+// and 8080 belongs to something else that answers 404 for /ipfs/<cid>.
+const LOOPBACK_GATEWAY = "http://127.0.0.1:8081";
+
+/** The origin this page was served from, or null when there is none. */
+const pageOrigin = () => {
+  const o = globalThis.location?.origin;
+  return o && o !== "null" ? o : null;
+};
+
+/**
+ * Default kubo RPC and gateway endpoints (override via p2papp settings).
+ *
+ *  Served behind a reverse proxy these have to be same-origin paths. A
+ *  browser resolving "127.0.0.1:5001" reaches its own machine, not the
+ *  one running kubo -- which is why p2p.html has to skip its probe when
+ *  it sees a loopback gateway on a deployed origin. Naming the paths
+ *  lets one nginx location carry both and the browser stay same-origin,
+ *  which is also what keeps CORS out of it.
+ */
+export const KUBO_RPC = pageOrigin() ? `${pageOrigin()}/ipfs-rpc` : LOOPBACK_RPC;
+export const GATEWAY = pageOrigin() ? `${pageOrigin()}/ipfs-gw` : LOOPBACK_GATEWAY;
 
 // ── CIDv1 raw sha2-256 ──────────────────────────────────────────────────
 
@@ -85,19 +109,128 @@ export function base32NoPad(bytes) {
  * Matches `kubo add --cid-version=1 --raw-leaves` for ≤ one-chunk inputs.
  */
 export async function cidOf(bytes) {
-  if (bytes.length > MAX_ARTIFACT_BYTES) {
-    throw new Error(`artifact ${bytes.length}B > ${MAX_ARTIFACT_BYTES}B — chunk it or use kubo directly`);
-  }
   const core = await wasmOnce();
-  if (core) return core.wasm_cid_of_bytes(bytes);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  const cidBytes = new Uint8Array(2 + 2 + digest.length);
-  cidBytes[0] = 0x01;              // CIDv1
-  cidBytes[1] = 0x55;              // raw codec
-  cidBytes[2] = 0x12;              // sha2-256
-  cidBytes[3] = 0x20;              // 32-byte digest length
-  cidBytes.set(digest, 4);
-  return "b" + base32NoPad(cidBytes);
+  if (core) return core.wasm_unixfs_cid(bytes);
+  return unixfsCidOf(bytes);
+}
+
+/** The block sizes an artifact of `size` bytes is split into. */
+export function chunkPlanOf(size) {
+  if (!Number.isInteger(size) || size < 1) throw new Error("empty artifact");
+  const sizes = [];
+  for (let left = size; left > 0; left -= MAX_ARTIFACT_BYTES) {
+    sizes.push(Math.min(left, MAX_ARTIFACT_BYTES));
+  }
+  return sizes;
+}
+
+// ── UnixFS dag-pb (the multi-chunk path) ─────────────────────────────────
+//
+// The Rust core does this in pastebin-wasm/src/lib.rs; this is the fallback
+// for browsers that cannot load the wasm. The two are held byte-identical by
+// scripts/wasm-crosscheck.mjs. Four details are not obvious from the spec and
+// each one changes the CID if you get it wrong, so they are pinned here:
+//
+//   * links come before the Data message;
+//   * every link carries a Name that is present but *empty* (`0x12 0x00`) —
+//     omitting it still parses, it just hashes differently;
+//   * Tsize is that leaf's own size, not a running total;
+//   * blocksizes are written unpacked (one `0x20` varint per chunk), not as
+//     the packed `0x22` blob protobuf would also accept.
+
+const CODEC_RAW = 0x55;
+const CODEC_DAG_PB = 0x70;
+
+function varint(value) {
+  const out = [];
+  let v = value;
+  for (;;) {
+    const byte = v & 0x7f;
+    v >>>= 7;
+    if (v === 0) { out.push(byte); return out; }
+    out.push(byte | 0x80);
+  }
+}
+
+const field = (n) => (n << 3);
+const lenField = (n) => (n << 3) | 2;
+
+/** The 36 CID identity bytes for a codec + digest. */
+function cidIdentity(codec, digest) {
+  const out = new Uint8Array(4 + digest.length);
+  out[0] = 0x01;      // CIDv1
+  out[1] = codec;
+  out[2] = 0x12;      // sha2-256
+  out[3] = 0x20;      // 32-byte digest
+  out.set(digest, 4);
+  return out;
+}
+
+const sha256 = async (bytes) => new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+
+/** The raw leaf CID for one chunk. */
+export async function rawCidOf(chunk) {
+  return "b" + base32NoPad(cidIdentity(CODEC_RAW, await sha256(chunk)));
+}
+
+/** UnixFS `Data`: Type = File(2), filesize, unpacked blocksizes. */
+function unixfsData(filesize, blocksizes) {
+  const out = [...varint(field(1)), ...varint(2)];
+  const push = (v) => out.push(...v);
+  push(varint(field(3)));
+  push(varint(filesize));
+  for (const size of blocksizes) {
+    push(varint(field(4)));
+    push(varint(size));
+  }
+  return out;
+}
+
+/** The dag-pb root PBNode for a flat UnixFS file. */
+function unixfsRoot(links, filesize, blocksizes) {
+  const out = [];
+  for (const { hash, tsize } of links) {
+    const link = [
+      ...varint(lenField(1)), ...varint(hash.length), ...hash,   // Hash
+      ...varint(lenField(2)), ...varint(0),                      // Name: empty
+      ...varint(field(3)), ...varint(tsize),                     // Tsize
+    ];
+    out.push(...varint(lenField(2)), ...varint(link.length), ...link);
+  }
+  const data = unixfsData(filesize, blocksizes);
+  out.push(...varint(lenField(1)), ...varint(data.length), ...data);
+  return Uint8Array.from(out);
+}
+
+/**
+ * The CID an artifact is published under, matching
+ * `kubo add --cid-version=1 --raw-leaves` at any size. Within one chunk this
+ * is the raw leaf CID, so artifacts already published under it keep working.
+ */
+export async function unixfsCidOf(bytes) {
+  const sizes = chunkPlanOf(bytes.length);
+  if (sizes.length === 1) return rawCidOf(bytes);
+
+  const links = [];
+  for (let at = 0, i = 0; at < bytes.length; at += MAX_ARTIFACT_BYTES, i += 1) {
+    const chunk = bytes.subarray(at, at + sizes[i]);
+    links.push({ hash: cidIdentity(CODEC_RAW, await sha256(chunk)), tsize: sizes[i] });
+  }
+  const root = unixfsRoot(links, bytes.length, sizes);
+  return "b" + base32NoPad(cidIdentity(CODEC_DAG_PB, await sha256(root)));
+}
+
+/** The full plan: root CID, size, chunk size, and every leaf in order. */
+export async function unixfsPlanOf(bytes) {
+  const sizes = chunkPlanOf(bytes.length);
+  const leaves = [];
+  let offset = 0;
+  for (let at = 0, i = 0; at < bytes.length; at += MAX_ARTIFACT_BYTES, i += 1) {
+    const chunk = bytes.subarray(at, at + sizes[i]);
+    leaves.push({ index: i, cid: await rawCidOf(chunk), size: sizes[i], offset });
+    offset += sizes[i];
+  }
+  return { root: await unixfsCidOf(bytes), size: bytes.length, chunkSize: MAX_ARTIFACT_BYTES, chunked: leaves.length > 1, leaves };
 }
 
 /** Round-trip helper used by tests: CID string → the 36 identity bytes. */
@@ -128,7 +261,8 @@ export function cidBytes(cid) {
  * in the room record. `rpcBase` injectable for tests.
  */
 export async function ipfsAdd(bytes, name = "artifact.bin", rpcBase = KUBO_RPC) {
-  if (bytes.length > MAX_ARTIFACT_BYTES) return null;
+  // No size ceiling here: kubo applies the same 256 KiB chunking this module
+  // does and returns the same root CID, so large artifacts pin fine.
   try {
     const form = new FormData();
     form.append("file", new Blob([bytes]), name);
@@ -191,7 +325,17 @@ export function b64ToBytes(b64) {
 export async function encodeCidRecord({ peer, name, bytes, pinned, note = "" }) {
   const cid = await cidOf(bytes);
   const rec = { tag: "kzcid", peer, name, cid, size: bytes.length, note, ts: Date.now() };
-  if (pinned) {
+  const plan = await unixfsPlanOf(bytes);
+  if (plan.chunked) {
+    // A room line is capped (the relay answers 413 above 262144B), so a
+    // chunked artifact's bytes can never ride in the record: base64 of a
+    // 400 KB zip is ~533 KB. Announce the leaves and let the fetcher pull
+    // them. The root CID is what the reassembly is verified against.
+    rec.pinned = Boolean(pinned);
+    rec.chunked = true;
+    rec.chunkSize = plan.chunkSize;
+    rec.leaves = plan.leaves.map((l) => ({ cid: l.cid, size: l.size, offset: l.offset }));
+  } else if (pinned) {
     rec.pinned = true;
   } else {
     rec.pinned = false;
@@ -203,7 +347,15 @@ export async function encodeCidRecord({ peer, name, bytes, pinned, note = "" }) 
 export function decodeCidRecord(lineObj) {
   if (!lineObj || lineObj.tag !== "kzcid") return null;
   if (typeof lineObj.cid !== "string" || !lineObj.cid.startsWith("b")) return null;
-  if (lineObj.pinned === false && typeof lineObj.b64 !== "string") return null;
+  if (lineObj.chunked !== true && lineObj.pinned === false && typeof lineObj.b64 !== "string") return null;
+  if (lineObj.chunked === true) {
+    // The bytes live behind the leaves, so a record without a usable leaf
+    // list announces nothing anyone could fetch.
+    if (!Array.isArray(lineObj.leaves) || !lineObj.leaves.length) return null;
+    if (typeof lineObj.chunkSize !== "number") return null;
+    const total = lineObj.leaves.reduce((a, l) => a + (typeof l.size === "number" ? l.size : 0), 0);
+    if (total !== lineObj.size) return null;
+  }
   return lineObj;
 }
 
