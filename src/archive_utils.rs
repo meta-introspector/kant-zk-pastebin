@@ -30,8 +30,8 @@ pub struct PatternStore {
     pub tag_map: HashMap<String, Vec<FilePattern>>,
     /// Common (frequent) patterns for quick access
     pub common_patterns: Vec<String>,
-    /// Directory groups (e.g. leans/, web/, docs/) -> files
-    pub directory_groups: HashMap<String, Vec<FilePattern>>,
+    /// Directory groups (e.g. leans/, web/, docs/) -> directory paths
+    pub directory_groups: HashMap<String, Vec<String>>,
 }
 
 /// File category for classification
@@ -346,19 +346,19 @@ impl PatternStore {
 
         // Store top-level directory groups
         for dir in lean_dirs {
-            store.directory_groups.insert("lean".into(), dir); // simplified - real impl below
+            store.directory_groups.entry("lean".to_string()).or_default().push(dir);
         }
         for dir in docs_dirs {
-            store.directory_groups.insert("docs".into(), dir);
+            store.directory_groups.entry("docs".to_string()).or_default().push(dir);
         }
         for dir in web_dirs {
-            store.directory_groups.insert("web".into(), dir);
+            store.directory_groups.entry("web".to_string()).or_default().push(dir);
         }
         for dir in graphics_dirs {
-            store.directory_groups.insert("graphics".into(), dir);
+            store.directory_groups.entry("graphics".to_string()).or_default().push(dir);
         }
         for dir in source_dirs {
-            store.directory_groups.insert("source".into(), dir);
+            store.directory_groups.entry("source".to_string()).or_default().push(dir);
         }
 
         // Extract common patterns (most frequent)
@@ -415,7 +415,12 @@ impl PatternStore {
     ///
     /// Groups: "lean", "docs", "web", "graphics", "source"
     pub fn get_by_directory(&self, dir: &str) -> Vec<FilePattern> {
-        self.directory_groups.get(dir).cloned().unwrap_or_default()
+        // Filter all patterns by the directory group
+        self.all_patterns
+            .iter()
+            .filter(|p| self.directory_groups.get(dir).map(|dirs| dirs.iter().any(|d| p.path.starts_with(d))).unwrap_or(false))
+            .cloned()
+            .collect()
     }
 
     /// Get a file by exact path
@@ -761,11 +766,16 @@ impl ArchivePatternAnalyzer {
         let size = entry.size;
         let is_dir = entry.is_dir;
         
+        // Get category first (needs to borrow entry)
         let category = Self::categorize_entry(&entry);
+        
+        // Compute exclusions (needs to borrow entry)
+        let is_excluded_by_default = Self::should_filter_entry(&entry, config);
+        
+        // Get content AFTER all borrows are done
         let content = entry.content;
         
         let patterns = Self::extract_path_patterns(&path);
-        let is_excluded_by_default = Self::should_filter_entry(&entry, config);
         let is_markdown_lean_only = config.markdown_lean_only && (
             category == "lean" || 
             category == "markdown" || 

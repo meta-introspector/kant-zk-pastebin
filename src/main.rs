@@ -27,6 +27,7 @@ mod tiles;
 mod view;
 
 mod archive;
+mod archive_utils;
 
 mod git_mount;
 

@@ -1349,7 +1349,7 @@ pub async fn api_version() -> Result<HttpResponse> {
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "name": "kant-pastebin",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "git_commit": version,
         "build_time": build_time,
         "binary": exe,
