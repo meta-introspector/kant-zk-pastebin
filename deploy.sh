@@ -11,10 +11,6 @@ if [ -n "$PASTEBIN_UPSTREAM" ]; then
   PASTEBIN_BRANCH="${PASTEBIN_UPSTREAM#*/}"
 fi
 
-# Use the system-manager all-services config which includes pastebin + nora + svg2anim
-# + ipld-car-shmem (shmem-dedup-dedup, tantivy-indexer, letta-ipld-memory) structures.
-FLAKE="${PASTEBIN_FLAKE:-git+file:///home/mdupont/projects/system-manager?ref=d36e76e1054f9e7a108fa31fa726ac1ec2c91f65#systemConfigs.all-services}"
-
 LOG_DIR="${PASTEBIN_DIR}/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LOG_FILE="${LOG_DIR}/deploy-${TIMESTAMP}.log"
@@ -46,17 +42,19 @@ main() {
       log "Branch: $PASTEBIN_BRANCH"
       log "Pastebin dir: $PASTEBIN_DIR"
       log "Log file: $LOG_FILE"
-      log "Step 1: Nix build check (verifies Rust compilation with vendored deps)"
 
       cd "$PASTEBIN_DIR"
-      if ! make build; then
-        log_err "Nix build failed"
+
+      # Build using nix develop (avoids system OpenSSL issues)
+      log "Step 1: Build with nix develop"
+      if ! nix develop . -c cargo build --release 2>&1 | tee -a "$LOG_FILE"; then
+        log_err "Build failed"
         exit 1
       fi
-
       log "✓ Step 1: Build successful"
-      log "Step 2: Git commit"
 
+      # Git commit and push
+      log "Step 2: Git commit"
       git add -A
       if ! git diff --cached --quiet; then
         git commit -m "Deploy: automatic release $(date -u +%Y-%m-%dT%H:%M:%SZ)"
