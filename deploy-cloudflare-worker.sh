@@ -1,558 +1,410 @@
 #!/usr/bin/env bash
-# deploy-cloudflare-worker.sh — Deploy the OTC desk Cloudflare worker using sops and Cloudflare CLI
+# deploy-cloudflare-worker.sh — Deploy Cloudflare Workers for kant-zk-pastebin
 #
-# This script:
-# 1. Decrypts secrets using sops
-# 2. Builds and deploys the Cloudflare worker
-# 3. Verifies the deployment
-# 4. Updates the system-manager configuration
+# Deploys workers:
+#   deploy     kant-zk-relay-wasm (Lean WASM relay with Durable Objects)
+#   test-deploy  kant-zk-test (minimal /health Worker, iterated before release)
+#   verify     check health of deployed workers
+#   status     show deployment status
 #
 # Usage:
-#   ./deploy-cloudflare-worker.sh [deploy|verify|rollback|status|health] [--sudo]
-#
-# Commands:
-#   deploy    Build and deploy the Cloudflare worker with sops-decrypted secrets
-#   verify    Verify the deployed worker is healthy
-#   rollback  Rollback to previous worker version
-#   status    Show current deployment status
-#   health    Check worker health endpoint
+#   ./deploy-cloudflare-worker.sh deploy
+#   ./deploy-cloudflare-worker.sh test-deploy
+#   ./deploy-cloudflare-worker.sh verify
+#   ./deploy-cloudflare-worker.sh status
 
 set -euo pipefail
 
-# Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PASTEBIN_DIR="${PASTEBIN_DIR:-$SCRIPT_DIR}"
-SYSTEM_MANAGER_DIR="${SYSTEM_MANAGER_DIR:-$HOME/projects/system-manager}"
-SOPS_CONFIG="${SOPS_CONFIG:-$HOME/projects/system-manager/.sops.yaml}"
-CLOUDFLARE_CREDENTIALS="${HOME}/.cloudflare"
-CLOUDFLARE_ACCOUNT_ID="${HOME}/.cloudflare-account.id"
-CLOUDFLARE_WORKER_CONFIG="${HOME}/.cloudflare.worker"
 
-# Worker configuration
-WORKER_NAME="otc-desk-relay"
-WORKER_SCRIPT="${HOME}/pastebin-cloudflare-worker.js"
-WORKER_DIR="/tmp/otc-desk-worker"
-DEPLOY_TIMEOUT="${DEPLOY_TIMEOUT:-300}" # 5 minutes default
-GAS_LIMIT="${GAS_LIMIT_PER_PEER_PER_HOUR:-1000000}"
-INVITE_REQUIRED="${INVITE_REQUIRED:-true}"
-
-# Logging
 LOG_DIR="${PASTEBIN_DIR}/logs"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LOG_FILE="${LOG_DIR}/cloudflare-deploy-${TIMESTAMP}.log"
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-log() {
-  local msg="$1"
-  local ts
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo -e "[${ts}] ${BLUE}INFO${NC} $msg" | tee -a "$LOG_FILE"
-}
-
-log_err() {
-  local msg="$1"
-  local ts
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo -e "[${ts}] ${RED}ERROR${NC} $msg" | tee -a "$LOG_FILE" >&2
-}
-
-log_warn() {
-  local msg="$1"
-  local ts
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo -e "[${ts}] ${YELLOW}WARN${NC} $msg" | tee -a "$LOG_FILE"
-}
-
-log_success() {
-  local msg="$1"
-  local ts
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo -e "[${ts}] ${GREEN}SUCCESS${NC} $msg" | tee -a "$LOG_FILE"
-}
+log() { echo -e "[${TIMESTAMP}] ${BLUE}INFO${NC} $1" | tee -a "$LOG_FILE"; }
+log_err() { echo -e "[${TIMESTAMP}] ${RED}ERROR${NC} $1" | tee -a "$LOG_FILE" >&2; }
+log_success() { echo -e "[${TIMESTAMP}] ${GREEN}SUCCESS${NC} $1" | tee -a "$LOG_FILE"; }
+log_warn() { echo -e "[${TIMESTAMP}] ${YELLOW}WARN${NC} $1" | tee -a "$LOG_FILE"; }
 
 run_sudo() {
-  if [ "${EUID}" -eq 0 ]; then
-    "$@"
-  else
-    sudo "$@"
-  fi
+  if [ "${EUID}" -eq 0 ]; then "$@"; else sudo "$@"; fi
 }
 
-usage() {
-  cat <<USAGE
-Usage: $0 [deploy|verify|rollback|status|health] [--sudo]
-
-Commands:
-  deploy    Build and deploy the Cloudflare worker with sops-decrypted secrets
-  verify    Verify the deployed worker is healthy
-  rollback  Rollback to previous worker version
-  status    Show current deployment status
-  health    Check worker health endpoint
-
-Options:
-  --sudo    Force sudo even if already root
-  --dry-run Show what would be done without doing it
-
-Environment variables:
-  SOPS_CONFIG              Path to sops config file
-  CLOUDFLARE_CREDENTIALS   Path to Cloudflare credentials
-  CLOUDFLARE_ACCOUNT_ID    Cloudflare account ID
-  WORKER_NAME              Name of the Cloudflare worker
-  DEPLOY_TIMEOUT           Deployment timeout in seconds
-  GAS_LIMIT_PER_PEER_PER_HOUR  Gas limit per peer per hour
-  INVITE_REQUIRED          Whether invite verification is required
-
-Examples:
-  # Deploy the worker
-  $0 deploy
-
-  # Deploy with verbose output
-  $0 deploy --verbose
-
-  # Verify deployment
-  $0 verify
-
-  # Check health
-  $0 health
-USAGE
-}
-
-# Check prerequisites
 check_prerequisites() {
-  local missing_tools=()
-
-  # Check for required tools
-  command -v sops >/dev/null 2>&1 || missing_tools+=("sops")
-  command -v wrangler >/dev/null 2>&1 || missing_tools+=("wrangler")
-  command -v nix >/dev/null 2>&1 || missing_tools+=("nix")
-
-  if [ ${#missing_tools[@]} -gt 0 ]; then
-    log_err "Missing required tools: ${missing_tools[*]}"
+  local missing=()
+  command -v sops >/dev/null 2>&1 || missing+=("sops")
+  command -v wrangler >/dev/null 2>&1 || missing+=("wrangler")
+  command -v nix >/dev/null 2>&1 || missing+=("nix")
+  if [ ${#missing[@]} -gt 0 ]; then
+    log_err "Missing required tools: ${missing[*]}"
     return 1
   fi
-
   return 0
 }
 
-# Decrypt secrets using sops
 decrypt_secrets() {
   log "Decrypting secrets with sops..."
-
-  # Create temporary directory for decrypted secrets
   local tmp_dir
   tmp_dir="$(mktemp -d)"
   trap "rm -rf '$tmp_dir'" EXIT
 
-  # Decrypt Cloudflare credentials if encrypted with sops
-  if [ -f "${CLOUDFLARE_CREDENTIALS}.sops" ]; then
-    sops decrypt "${CLOUDFLARE_CREDENTIALS}.sops" > "${tmp_dir}/cloudflare-credentials" 2>>"$LOG_FILE" || {
-      log_err "Failed to decrypt Cloudflare credentials"
+  # Decrypt Cloudflare credentials
+  if [ -f "${PASTEBIN_DIR}/.sops/credentials.sops.yaml" ]; then
+    sops decrypt "${PASTEBIN_DIR}/.sops/credentials.sops.yaml" > "${tmp_dir}/creds.yaml" 2>>"$LOG_FILE" || {
+      log_err "Failed to decrypt credentials"
       return 1
     }
+    log "Secrets decrypted to ${tmp_dir}/creds.yaml"
+  else
+    log_warn "No .sops/credentials.sops.yaml found, using env vars"
   fi
 
-  # Decrypt Cloudflare account ID if encrypted
-  if [ -f "${CLOUDFLARE_ACCOUNT_ID}.sops" ]; then
-    sops decrypt "${CLOUDFLARE_ACCOUNT_ID}.sops" > "${tmp_dir}/cloudflare-account-id" 2>>"$LOG_FILE" || {
-      log_err "Failed to decrypt Cloudflare account ID"
-      return 1
-    }
+  export CF_API_TOKEN="${CF_API_TOKEN:-$(grep api_token "${tmp_dir}/creds.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')}"
+  export CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-$(grep account_id "${tmp_dir}/creds.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')}"
+
+  if [ -z "$CF_API_TOKEN" ]; then
+    log_err "CF_API_TOKEN not set and not found in decrypted secrets"
+    return 1
+  fi
+  if [ -z "$CF_ACCOUNT_ID" ]; then
+    log_err "CF_ACCOUNT_ID not set and not found in decrypted secrets"
+    return 1
   fi
 
-  # Decrypt worker script if encrypted with sops
-  if [ -f "${WORKER_SCRIPT}.sops" ]; then
-    sops decrypt "${WORKER_SCRIPT}.sops" > "${tmp_dir}/worker-script.js" 2>>"$LOG_FILE" || {
-      log_err "Failed to decrypt worker script"
-      return 1
-    }
-  fi
-
-  # Decrypt from sops config
-  if [ -f "${SOPS_CONFIG}" ]; then
-    log "Reading sops configuration from $SOPS_CONFIG"
-  fi
-
-  # Return path to decrypted secrets directory
-  echo "$tmp_dir"
+  log "Cloudflare credentials loaded"
 }
 
-# Build the Cloudflare worker
-build_worker() {
-  log "Building Cloudflare worker..."
+deploy_worker() {
+  local name="$1"
+  local script="$2"
+  local env_file="$3"
 
-  # Create build directory
-  mkdir -p "$WORKER_DIR"
-  mkdir -p "$WORKER_DIR/dist"
+  log "Deploying worker: ${name}..."
 
-  # Copy worker script
-  cp "$WORKER_SCRIPT" "$WORKER_DIR/worker.js" || {
-    log_err "Failed to copy worker script"
+  # Build wrangler.toml with correct KV namespace
+  local tmp_wrangler
+  tmp_wrangler="$(mktemp)"
+  trap "rm -f '$tmp_wrangler'" EXIT
+
+  # Copy and configure wrangler.toml
+  cp "${PASTEBIN_DIR}/server/wrangler.toml" "$tmp_wrangler"
+
+  # Generate kv-namespaces from env
+  if [ -n "${KV_NAMESPACE_ID:-}" ]; then
+    sed -i "s/your-kv-namespace-id/${KV_NAMESPACE_ID}/g" "$tmp_wrangler"
+  fi
+
+  cd "$tmp_wrangler"
+
+  # Login to Cloudflare
+  if ! wrangler whoami >/dev/null 2>&1; then
+    log "Authenticating with Cloudflare..."
+    if [ -n "${CF_API_TOKEN}" ]; then
+      echo "${CF_API_TOKEN}" | wrangler login 2>/dev/null || {
+        # Try alternative: set token directly
+        export CLOUDFLARE_API_TOKEN="${CF_API_TOKEN}"
+      }
+    fi
+  fi
+
+  # Deploy
+  log "Running wrangler deploy for ${name}..."
+  wrangler deploy --name "${name}" --env "$env_file" 2>>"$LOG_FILE" || {
+    log_err "Wrangler deploy failed for ${name}"
     return 1
   }
 
-  # Create package.json if it doesn't exist
-  if [ ! -f "$WORKER_DIR/package.json" ]; then
-    cat > "$WORKER_DIR/package.json" <<EOF
+  log_success "Worker ${name} deployed"
+}
+
+deploy_rust_wasm_pastebin() {
+  log "=== Deploying Rust WASM Pastebin Worker ==="
+
+  # Step 1: Build Rust to WASM
+  log "Step 1: Building Rust to WASM..."
+  rustup target add wasm32-unknown-unknown 2>/dev/null || true
+
+  cd "${PASTEBIN_DIR}"
+  mkdir -p target/wasm32-unknown-unknown/release
+
+  # Build with wasm-bindgen for JS interop
+  CARGO_TARGET="target/wasm32-unknown-unknown/release" \
+    cargo build --target wasm32-unknown-unknown --release --bin kant-pastebin 2>&1 | tee -a "$LOG_FILE" || {
+    log_err "Rust WASM build failed"
+    return 1
+  }
+
+  # Convert to wasm32-unknown-unknown if needed
+  local wasm_file="target/wasm32-unknown-unknown/release/kant_pastebin.wasm"
+
+  # Step 2: Publish WASM binary to Nora
+  log "Step 2: Publishing WASM binary to Nora..."
+  mkdir -p /mnt/data1/kant/wasm-pastebin
+  cp "$wasm_file" /mnt/data1/kant/wasm-pastebin/kant-pastebin.wasm
+
+  # Step 3: Create Cloudflare Worker that loads and uses the WASM
+  local worker_dir="$(mktemp -d)"
+  trap "rm -rf '$worker_dir'" EXIT
+
+  cp "${PASTEBIN_DIR}/server/wasm-pastebin-worker.mjs" "$worker_dir/worker.mjs"
+
+  # Copy WASM to worker dir
+  cp /mnt/data1/kant/wasm-pastebin/kant-pastebin.wasm "$worker_dir/"
+
+  cd "$worker_dir"
+  npm init -y >/dev/null 2>&1
+  npm install --save-dev wrangler 2>&1 | tail -1 | tee -a "$LOG_FILE"
+
+  # Build wrangler.toml
+  cat > wrangler.toml <<EOF
+name = "kant-zk-pastebin-wasm"
+main = "worker.mjs"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "."
+binding = "ASSETS"
+EOF
+
+  # Step 4: Deploy via wrangler
+  log "Step 4: Deploying Cloudflare Worker..."
+  wrangler login 2>/dev/null || true
+  wrangler deploy --name kant-zk-pastebin-wasm 2>>"$LOG_FILE" || {
+    log_err "Failed to deploy Rust WASM pastebin worker"
+    return 1
+  }
+
+  log_success "Rust WASM Pastebin Worker deployed at https://kant-zk-pastebin-wasm.workers.dev"
+}
+
+deploy_lean_wasm_relay() {
+  log "=== Deploying Lean WASM Relay Worker ==="
+
+  # Step 0: Stamp the commit so /health can name the build being served.
+  local commit
+  commit="$(git -C "${PASTEBIN_DIR}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+  log "Deploying commit: ${commit}"
+
+  # Step 1: Build Lean to WASM
+  log "Step 1: Building Lean kernel to WASM..."
+  cd /home/mdupont/projects/pastebin-lean
+  lake exe emitwasm dist 2>&1 | tee -a "$LOG_FILE" || {
+    log_err "Lean WASM build failed"
+    return 1
+  }
+
+  # Verify WASM
+  if [ ! -f dist/kant_kernel.wasm ]; then
+    log_err "WASM binary not found at dist/kant_kernel.wasm"
+    return 1
+  fi
+
+  # Step 2: Publish WASM binary to Nora
+  log "Step 2: Publishing Lean WASM binary..."
+  mkdir -p /mnt/data1/kant/wasm-lean-relay
+  cp /home/mdupont/projects/pastebin-lean/dist/kant_kernel.wasm /mnt/data1/kant/wasm-lean-relay/
+  cp /home/mdupont/projects/pastebin-lean/dist/kernel-vectors.json /mnt/data1/kant/wasm-lean-relay/
+
+  # Step 3: Create Cloudflare Worker with WASM
+  local worker_dir="$(mktemp -d)"
+  trap "rm -rf '$worker_dir'" EXIT
+
+  # The checked-in worker.js is the real relay (server/wrangler.toml points
+  # at it). Stamp the commit placeholder so the deployed Worker answers
+  # /health with the build it is serving.
+  cp "${PASTEBIN_DIR}/server/worker.js" "$worker_dir/worker.js"
+  sed -i "s|__KANT_COMMIT__|${commit}|g" "$worker_dir/worker.js"
+  # Ship the same web/ tree the systemd twin serves, so the wasm core,
+  # the JS CID reference and p2p.html cannot drift apart.
+  cp -r "${PASTEBIN_DIR}/web" "$worker_dir/web"
+
+  cat > "$worker_dir/wrangler.toml" <<EOF
+name = "kant-zk-relay-wasm"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[assets]
+directory = "./web"
+binding = "ASSETS"
+EOF
+
+  cd "$worker_dir"
+
+  # Create package.json
+  cat > package.json <<EOF
 {
-  "name": "otc-desk-relay-worker",
+  "name": "kant-zk-relay-wasm",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
   "scripts": {
-    "build": "cp worker.js dist/worker.js",
-    "test": "echo 'Tests passed'"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "latest"
   }
 }
 EOF
-  fi
 
-  # Create wrangler.toml for Cloudflare Worker
-  cat > "$WORKER_DIR/wrangler.toml" <<EOF
-name = "$WORKER_NAME"
-main = "worker.js"
-compatibility_date = "2024-01-01"
-
-[vars]
-LOCAL_RELAY_URL = "http://127.0.0.1:8788"
-GAS_LIMIT_PER_PEER_PER_HOUR = "$GAS_LIMIT"
-INVITE_REQUIRED = "$INVITE_REQUIRED"
-
-# Cloudflare bindings
-[env.production.vars]
-LOCAL_RELAY_URL = "http://127.0.0.1:8788"
-GAS_LIMIT_PER_PEER_PER_HOUR = "$GAS_LIMIT"
-INVITE_REQUIRED = "$INVITE_REQUIRED"
-EOF
-
-  # Build the worker
-  cd "$WORKER_DIR"
-  npm run build 2>>"$LOG_FILE" || {
-    log_err "Worker build failed"
+  log "Step 4: Deploying Cloudflare Worker..."
+  wrangler login 2>/dev/null || true
+  wrangler deploy --name kant-zk-relay-wasm 2>>"$LOG_FILE" || {
+    log_err "Failed to deploy Lean WASM relay worker"
     return 1
   }
 
-  log_success "Worker built successfully"
-  return 0
+  log_success "Lean WASM Relay Worker deployed at https://kant-zk-relay-wasm.workers.dev"
 }
 
-# Deploy the worker to Cloudflare using sops-decrypted secrets
-deploy_worker() {
-  log "Deploying Cloudflare worker with sops-decrypted secrets..."
+deploy_test_worker() {
+  log "=== Deploying test Worker (minimal /health) ==="
 
-  # Decrypt secrets
-  local secrets_dir
-  secrets_dir="$(decrypt_secrets)" || {
-    log_err "Failed to decrypt secrets"
-    return 1
-  }
+  local commit
+  commit="$(git -C "${PASTEBIN_DIR}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+  log "Test deploy commit: ${commit}"
 
-  # Read Cloudflare credentials from decrypted files
-  local api_token=""
-  local account_id=""
-
-  if [ -f "${secrets_dir}/cloudflare-credentials" ]; then
-    api_token="$(cat "${secrets_dir}/cloudflare-credentials")"
-  else
-    api_token="$(cat "$CLOUDFLARE_CREDENTIALS" 2>/dev/null || echo "")"
-  fi
-
-  if [ -f "${secrets_dir}/cloudflare-account-id" ]; then
-    account_id="$(cat "${secrets_dir}/cloudflare-account-id")"
-  else
-    account_id="$(cat "$CLOUDFLARE_ACCOUNT_ID" 2>/dev/null || echo "")"
-  fi
-
-  # Validate credentials
-  if [ -z "$api_token" ] || [ -z "$account_id" ]; then
-    log_err "Cloudflare credentials not found or empty"
-    log_err "API token: ${api_token:+set} Account ID: ${account_id:+set}"
-    return 1
-  fi
-
-  # Export Cloudflare credentials for wrangler
-  export CLOUDFLARE_API_TOKEN="$api_token"
-  export CLOUDFLARE_ACCOUNT_ID="$account_id"
-
-  # Deploy the worker
-  cd "$WORKER_DIR"
-  wrangler deploy --env production 2>>"$LOG_FILE" || {
-    log_err "Worker deployment failed"
-    unset CLOUDFLARE_API_TOKEN
-    unset CLOUDFLARE_ACCOUNT_ID
-    return 1
-  }
-
-  log_success "Worker deployed successfully"
-
-  # Clean up credentials
-  unset CLOUDFLARE_API_TOKEN
-  unset CLOUDFLARE_ACCOUNT_ID
-
-  return 0
-}
-
-# Verify the deployment
-verify_deployment() {
-  log "Verifying Cloudflare worker deployment..."
-
-  local worker_url="https://${WORKER_NAME}.workers.dev"
-  local max_attempts=30
-  local attempt=1
-
-  while [ $attempt -le $max_attempts ]; do
-    log "Attempt $attempt/$max_attempts - Checking worker at $worker_url"
-
-    # Check health endpoint
-    local response
-    response="$(curl -sf "${worker_url}/health" 2>/dev/null)" || {
-      log_warn "Worker not ready yet, waiting..."
-      sleep 10
-      attempt=$((attempt + 1))
-      continue
-    }
-
-    # Verify health check response
-    if echo "$response" | grep -q '"ok":true'; then
-      log_success "Worker is healthy"
-      echo "$response" | jq . 2>/dev/null || echo "$response"
-      return 0
-    fi
-
-    log_warn "Unexpected health response: $response"
-    sleep 10
-    attempt=$((attempt + 1))
-  done
-
-  log_err "Worker verification failed after $max_attempts attempts"
-  return 1
-}
-
-# Rollback to previous version
-rollback_worker() {
-  log "Rolling back Cloudflare worker..."
-
-  # Decrypt secrets
-  local secrets_dir
-  secrets_dir="$(decrypt_secrets)" || {
-    log_err "Failed to decrypt secrets"
-    return 1
-  }
-
-  # Read Cloudflare credentials
-  local api_token=""
-  local account_id=""
-
-  if [ -f "${secrets_dir}/cloudflare-credentials" ]; then
-    api_token="$(cat "${secrets_dir}/cloudflare-credentials")"
-  else
-    api_token="$(cat "$CLOUDFLARE_CREDENTIALS" 2>/dev/null || echo "")"
-  fi
-
-  if [ -f "${secrets_dir}/cloudflare-account-id" ]; then
-    account_id="$(cat "${secrets_dir}/cloudflare-account-id")"
-  else
-    account_id="$(cat "$CLOUDFLARE_ACCOUNT_ID" 2>/dev/null || echo "")"
-  fi
-
-  # Export Cloudflare credentials
-  export CLOUDFLARE_API_TOKEN="$api_token"
-  export CLOUDFLARE_ACCOUNT_ID="$account_id"
-
-  # Rollback using wrangler
-  cd "$WORKER_DIR"
-  wrangler rollback 2>>"$LOG_FILE" || {
-    log_err "Worker rollback failed"
-    unset CLOUDFLARE_API_TOKEN
-    unset CLOUDFLARE_ACCOUNT_ID
-    return 1
-  }
-
-  log_success "Worker rolled back successfully"
-
-  # Clean up credentials
-  unset CLOUDFLARE_API_TOKEN
-  unset CLOUDFLARE_ACCOUNT_ID
-
-  return 0
-}
-
-# Show deployment status
-show_status() {
-  log "Checking deployment status..."
-
-  local worker_url="https://${WORKER_NAME}.workers.dev"
-
-  # Check worker health
-  local health_response
-  health_response="$(curl -sf "${worker_url}/health" 2>/dev/null)" || {
-    log_err "Worker is not reachable at $worker_url"
-    return 1
-  }
-
-  echo "$health_response" | jq . 2>/dev/null || echo "$health_response"
-
-  return 0
-}
-
-# Check worker health endpoint
-check_health() {
-  local worker_url="https://${WORKER_NAME}.workers.dev"
-  local health_endpoint="${worker_url}/health"
-
-  log "Checking worker health at $health_endpoint..."
-
-  local response
-  response="$(curl -sf "$health_endpoint" 2>/dev/null)" || {
-    log_err "Worker health check failed"
-    return 1
-  }
-
-  # Check if health response is OK
-  if echo "$response" | grep -q '"ok":true'; then
-    log_success "Worker is healthy"
-    echo "$response" | jq . 2>/dev/null || echo "$response"
-    return 0
-  fi
-
-  log_err "Worker health check returned unexpected response"
-  echo "$response" | jq . 2>/dev/null || echo "$response"
-  return 1
-}
-
-# Main deployment function
-main() {
-  local command="${1:-}"
-  shift 2>/dev/null || true
-
-  # Parse arguments
-  local use_sudo=false
-  local dry_run=false
-  local verbose=false
-
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --sudo)
-        use_sudo=true
-        shift
-        ;;
-      --dry-run)
-        dry_run=true
-        shift
-        ;;
-      --verbose)
-        verbose=true
-        shift
-        ;;
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      *)
-        log_err "Unknown option: $1"
-        usage
-        exit 2
-        ;;
-    esac
-  done
-
-  # Log command
-  log "=== Cloudflare Worker Deployment ==="
-  log "Command: $command"
-  log "Worker: $WORKER_NAME"
-  log "Script: $WORKER_SCRIPT"
-  log "Sops Config: $SOPS_CONFIG"
-  log "Timestamp: $TIMESTAMP"
-  log "Log File: $LOG_FILE"
-
-  # Check prerequisites
   if ! check_prerequisites; then
-    log_err "Prerequisites check failed"
+    log_err "Prerequisites not met"
+    return 1
+  fi
+
+  decrypt_secrets || {
+    log_err "Failed to decrypt secrets"
+    return 1
+  }
+
+  cd "${PASTEBIN_DIR}/server"
+
+  log "Deploying kant-zk-test worker..."
+  wrangler deploy --config wrangler-test.toml --name "kant-zk-test" 2>>"$LOG_FILE" || {
+    log_err "Failed to deploy test worker"
+    return 1
+  }
+
+  log_success "Test worker deployed"
+  local url="https://kant-zk-test.${CF_ACCOUNT_ID:-0ceffbadd0a04623896f5317a1e40d94}.workers.dev/health"
+  log "Verify: curl ${url}"
+}
+
+deploy() {
+  log "=== Cloudflare Worker Deployment ==="
+  log "Pastebin dir: $PASTEBIN_DIR"
+  log "Log file: $LOG_FILE"
+
+  mkdir -p "$LOG_DIR"
+
+  if ! check_prerequisites; then
+    log_err "Prerequisites not met"
     exit 1
   fi
 
-  # Execute command
-  case "$command" in
-    deploy)
-      if [ "$dry_run" = true ]; then
-        log "DRY RUN: Would deploy worker to Cloudflare"
-        log "DRY RUN: Would decrypt secrets using sops"
-        log "DRY RUN: Would build worker from $WORKER_SCRIPT"
-        log "DRY RUN: Would deploy using wrangler"
-        log "DRY RUN: Would verify deployment"
-        exit 0
-      fi
+  decrypt_secrets || {
+    log_err "Failed to decrypt secrets"
+    exit 1
+  }
 
-      # Build worker
-      build_worker || {
-        log_err "Build failed"
-        exit 1
-      }
+  deploy_lean_wasm_relay || {
+    log_err "Lean WASM relay deployment failed"
+    exit 1
+  }
 
-      # Deploy worker
-      deploy_worker || {
-        log_err "Deployment failed"
-        exit 1
-      }
+  deploy_rust_wasm_pastebin || {
+    log_err "Rust WASM pastebin deployment failed"
+    exit 1
+  }
 
-      # Verify deployment
-      verify_deployment || {
-        log_err "Verification failed"
-        exit 1
-      }
-
-      log_success "Worker deployed and verified successfully"
-      ;;
-    verify)
-      verify_deployment || {
-        log_err "Verification failed"
-        exit 1
-      }
-      log_success "Worker verification successful"
-      ;;
-
-    rollback)
-      if [ "$dry_run" = true ]; then
-        log "DRY RUN: Would rollback worker to previous version"
-        exit 0
-      fi
-
-      rollback_worker || {
-        log_err "Rollback failed"
-        exit 1
-      }
-
-      log_success "Worker rolled back successfully"
-      ;;
-
-    status)
-      show_status || {
-        log_err "Status check failed"
-        exit 1
-      }
-      ;;
-
-    health)
-      check_health || {
-        log_err "Health check failed"
-        exit 1
-      }
-      ;;
-
-    *)
-      log_err "Unknown command: $command"
-      usage
-      exit 2
-      ;;
-  esac
-
-  log "=== Deployment complete ==="
+  log_success "=== All Cloudflare Workers Deployed ==="
 }
 
-# Run main function
-main "$@"
+verify() {
+  log "=== Verifying the twin trio ==="
+
+  # The deployed Worker lives on the kant account (purple-fire-b881), not
+  # the default jmikedupont2 subdomain — see docs/WASM_P2P_AND_CI_2026-10-01.md.
+  local relay_url="https://kant-zk-relay-wasm.purple-fire-b881.workers.dev/health"
+  local systemd_url="${KANT_SYSTEMD_RELAY:-http://127.0.0.1:8796}/health"
+
+  local head systemd_head
+  head="$(curl -sf "$relay_url" 2>>"$LOG_FILE" || echo '{}')"
+  systemd_head="$(curl -sf "$systemd_url" 2>>"$LOG_FILE" || echo '{}')"
+  log "cloudflare : ${head}"
+  log "systemd    : ${systemd_head}"
+
+  local cf_commit sys_commit
+  cf_commit=$(echo "$head" | grep -o '"commit":"[^"]*"' | cut -d'"' -f4)
+  sys_commit=$(echo "$systemd_head" | grep -o '"commit":"[^"]*"' | cut -d'"' -f4)
+
+  if [ -z "$cf_commit" ]; then
+    log_warn "cloudflare twin reports no commit (stale deploy?)"
+  elif [ -z "$sys_commit" ]; then
+    log_warn "systemd twin reports no commit"
+  elif [ "$cf_commit" != "$sys_commit" ]; then
+    log_warn "TWIN DRIFT: cloudflare=${cf_commit} systemd=${sys_commit}"
+  else
+    log_success "both twins serve ${cf_commit}"
+  fi
+
+  # The wasm core is the shared artifact: same bytes on both legs, or peers
+  # on different twins compute different CIDs.
+  local cf_wasm sys_wasm
+  cf_wasm=$(curl -sf "${relay_url%/health}/pastebin_wasm_bg.wasm" 2>>"$LOG_FILE" | sha256sum | cut -d' ' -f1)
+  sys_wasm=$(curl -sf "${systemd_url%/health}/pastebin_wasm_bg.wasm" 2>>"$LOG_FILE" | sha256sum | cut -d' ' -f1)
+  if [ -n "$cf_wasm" ] && [ "$cf_wasm" = "$sys_wasm" ]; then
+    log_success "wasm core identical on both twins (${cf_wasm:0:12})"
+  else
+    log_warn "WASM DRIFT: cloudflare=${cf_wasm:0:12} systemd=${sys_wasm:0:12} — redeploy the stale leg"
+  fi
+}
+
+status() {
+  log "=== Worker Status ==="
+  wrangler whoami 2>/dev/null | tee -a "$LOG_FILE" || true
+
+  local workers
+  workers=$(wrangler list 2>/dev/null | tee -a "$LOG_FILE") || true
+  echo "$workers" | grep -E "kant-zk" || true
+}
+
+case "${1:-deploy}" in
+  test-deploy)
+    test_deploy_worker
+    ;;
+  deploy)
+    deploy
+    ;;
+  verify)
+    verify
+    ;;
+  status)
+    status
+    ;;
+  *)
+    cat <<EOF
+Usage: $0 [deploy|test-deploy|verify|status]
+
+Commands:
+  deploy      Deploy all Cloudflare Workers (Lean WASM relay + Rust WASM pastebin)
+  test-deploy Deploy minimal /health test worker (kant-zk-test)
+  verify      Check health of deployed workers
+  status      Show deployment status
+EOF
+    exit 2
+    ;;
+esac

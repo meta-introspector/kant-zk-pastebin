@@ -35,6 +35,7 @@ import crypto from "node:crypto";
 import { PassStore } from "./pass-store.mjs";
 import { pastePass, passOk, passRoom } from "../web/kant-pass.mjs";
 import { parseMsg } from "../web/kant-net.mjs";
+import { witness } from "../web/kantzk.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -70,7 +71,40 @@ export const CONFIG = {
   gasWindowMs: Number(args.get("gas-window") ?? 60 * 60 * 1000),
   archiveDir: args.get("archive-dir") ?? process.env.KANT_ARCHIVE ?? "",
   version: "1.0.0",
+  commit: process.env.KANT_COMMIT ?? "",
 };
+
+// Which build is this? The twins speak one protocol but are deployed
+// independently, so a stale twin is otherwise invisible: both reported
+// version "1.0.0" while serving different wasm. Stamp the commit at build
+// time (KANT_COMMIT) or read it from the checkout, and let the operator
+// override so a deployed artifact can be labelled without a rebuild.
+function resolveCommit() {
+  if (CONFIG.commit) return CONFIG.commit;
+  try {
+    // "." is the directory holding this file (server/); the checkout is its
+    // parent. Note `new URL("..", import.meta.url)` would resolve above the
+    // repo, which is why the path is joined explicitly.
+    const here = fs.realpathSync(new URL(".", import.meta.url).pathname);
+    const root = path.resolve(here, "..");
+    let ref = fs.readFileSync(path.join(root, ".git", "HEAD"), "utf8").trim();
+    if (ref.startsWith("ref: ")) {
+      const name = ref.slice(5).trim();
+      try {
+        ref = fs.readFileSync(path.join(root, ".git", name), "utf8").trim();
+      } catch {
+        // unborn or packed ref
+        const packed = fs.readFileSync(path.join(root, ".git", "packed-refs"), "utf8");
+        ref = (packed.split("\n").find((l) => l.endsWith(" " + name)) ?? "").split(" ")[0] ?? "";
+      }
+    }
+    return /^[0-9a-f]{7,40}$/.test(ref) ? ref.slice(0, 12) : "";
+  } catch {
+    return "";
+  }
+}
+
+const COMMIT = resolveCommit();
 
 // ------------------------------------------------------------- the log
 
@@ -166,8 +200,9 @@ export class Blocks {
   /** Pin bytes under their name.  Returns null on success, or
    *  { status, error } describing the refusal. */
   put(name, cid, bytes) {
-    const digest = crypto.createHash("sha256").update(bytes).digest("hex");
-    if (digest !== cid) return { status: 400, error: "cid is not the digest of the bytes" };
+    if (witness(Array.from(bytes)) !== cid) {
+      return { status: 400, error: "cid is not the digest of the bytes" };
+    }
     if (bytes.length > this.cfg.maxBlock) return { status: 413, error: "block too large" };
     const g = this.gas(name);
     if (g.stored + bytes.length > this.cfg.gasStoreBudget) {
@@ -302,6 +337,22 @@ function readBody(req, limit) {
   });
 }
 
+/** The same reader, but the bytes stay bytes — a block's ciphertext is
+ *  binary and must not pass through utf-8 on its way to the store. */
+function readBodyRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > limit) { reject(new Error("too large")); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
 // Serving `web/` as the document root leaves the Lean-extracted kernel, which
 // lives in the sibling `dist/`, outside the tree: `/dist/kant_kernel.wasm` used
 // to 404, and the page reported that as a kernel validation failure. Requests
@@ -385,7 +436,8 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
 
     if (url.pathname === "/health") {
       sendJson(res, cfg, 200, {
-        ok: true, name: "kant-zk-relay", version: cfg.version, ...rooms.stats(),
+        ok: true, name: "kant-zk-relay", version: cfg.version,
+        commit: COMMIT, platform: "systemd", ...rooms.stats(),
       });
       return;
     }
@@ -446,6 +498,55 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
         return;
       }
       log.warn("relay", "method not allowed", `${roomRef(room)} ${req.method}`);
+      sendJson(res, cfg, 405, { ok: false, error: "method not allowed" });
+      return;
+    }
+
+    // Content-addressed blocks, room-scoped: /room/<addr>/block/<cid>.
+    // Knowing the room is the trust credential, exactly as it is for the
+    // room's lines; every byte in and out is charged to the room's gas.
+    // A dropped file is only ever ciphertext here: the browser cuts it
+    // into chunks, encrypts each with a key the room already shares, and
+    // pins the ciphertext under the digest of the ciphertext itself.
+    const blk = url.pathname.match(/^\/room\/([^/]+)\/block\/([0-9a-f]{64})$/);
+    if (blk) {
+      const room = decodeURIComponent(blk[1]);
+      const cid = blk[2];
+      if (req.method === "POST" || req.method === "PUT") {
+        let body;
+        try { body = await readBodyRaw(req, cfg.maxBlock + 1024); }
+        catch (e) {
+          log.warn("block", "a body was refused", `${roomRef(room)}: ${e.message}`);
+          sendJson(res, cfg, 413, { ok: false, error: "block too large" });
+          return;
+        }
+        const refused = blocks.put(room, cid, body);
+        if (refused) {
+          log.warn("block", "a pin was refused", `${roomRef(room)} ${cid.slice(0, 12)}: ${refused.error}`);
+          sendJson(res, cfg, refused.status, { ok: false, error: refused.error });
+          return;
+        }
+        const g = blocks.gas(room);
+        log.info("block", "a block was pinned", `${roomRef(room)} ${cid.slice(0, 12)} ${body.length}B`);
+        archive(room, "block", { cid, bytes: body.length });
+        sendJson(res, cfg, 200, { ok: true, cid, bytes: body.length,
+          gasStored: g.stored, gasStoredLeft: cfg.gasStoreBudget - g.stored });
+        return;
+      }
+      if (req.method === "GET") {
+        const out = blocks.get(room, cid);
+        if (out.status) {
+          log.warn("block", "a fetch was refused", `${roomRef(room)} ${cid.slice(0, 12)}: ${out.error}`);
+          sendJson(res, cfg, out.status, { ok: false, error: out.error });
+          return;
+        }
+        log.info("block", "a block was served", `${roomRef(room)} ${cid.slice(0, 12)} ${out.length}B`);
+        res.writeHead(200, { ...cors(cfg), "content-type": "application/octet-stream",
+          "content-length": out.length });
+        res.end(out);
+        return;
+      }
+      log.warn("block", "method not allowed", `${roomRef(room)} ${req.method}`);
       sendJson(res, cfg, 405, { ok: false, error: "method not allowed" });
       return;
     }

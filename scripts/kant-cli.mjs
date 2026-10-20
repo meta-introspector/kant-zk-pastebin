@@ -48,6 +48,22 @@
  *                        (default solana.solfunmeme.com/pastebin)
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { basename } from "node:path";
+
+/** Just enough MIME to name a file honestly in the manifest.  The manifest
+ *  commits to this string, so it is part of what a peer checks — guessing
+ *  octet-stream for everything would be accurate but useless. */
+const MIME = {
+  txt: "text/plain", md: "text/markdown", html: "text/html",
+  css: "text/css", csv: "text/csv", json: "application/json",
+  js: "text/javascript", mjs: "text/javascript",
+  wasm: "application/wasm", pdf: "application/pdf",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+  svg: "image/svg+xml", webp: "image/webp", ico: "image/x-icon",
+  zip: "application/zip", gz: "application/gzip", tar: "application/x-tar",
+  mp3: "audio/mpeg", wav: "audio/wav", mp4: "video/mp4", webm: "video/webm",
+  lean: "text/plain", rs: "text/plain", ts: "text/plain",
+};
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import * as C from "../web/kant-cli.mjs";
@@ -91,6 +107,7 @@ for (let i = 0; i < argv.length; i += 1) {
     case "--wait": opts.wait = Number(take()) || 0; break;
     case "--spool": opts.spool = take(); break;
     case "--backend": opts.backend = take(); break;
+    case "--out": opts.out = take(); break;
     case "-h": case "--help": rest.push("help"); break;
     case "-V": case "--version":
       console.log(process.env.KANT_CLI_VERSION ?? "0.0.0-dev");
@@ -162,17 +179,42 @@ async function send(req) {
   if (opts.printCurl) console.error(`$ ${C.curlLine(req)}`);
   if (opts.transport === "curl") {
     const args = C.curlArgv(req).slice(1);
-    const out = spawnSync("curl", args, { encoding: "utf8" });
+    const out = spawnSync("curl", args, { encoding: "binary", maxBuffer: 64 * 1024 * 1024 });
     if (out.status !== 0) {
-      throw new Error(`curl failed (${out.status}): ${out.stderr.trim()}`);
+      throw new Error(`curl failed (${out.status}): ${String(out.stderr).trim()}`);
     }
     return out.stdout;
   }
   const r = await fetch(req.url, req.method === "post"
-    ? { method: "POST", headers: { "content-type": "text/plain" }, body: req.body }
+    ? { method: "POST", headers: { "content-type": req.binary ? "application/octet-stream" : "text/plain" },
+        body: req.binary ? req.body : req.body }
     : undefined);
   if (!r.ok) throw new Error(`relay ${req.method} failed: ${r.status}`);
   return r.text();
+}
+
+/** One request whose *body or result* is binary — a chunk, or a file.  Kept
+ *  apart from `send` because that one round-trips text, and a chunk pushed
+ *  through it would come back as a UTF-8 string with every byte above 0x7f
+ *  replaced.  A file dropped over `--transport curl` would then arrive
+ *  corrupt and fail the witness check on every chunk after the first. */
+async function sendBinary(req) {
+  if (opts.transport === "curl") {
+    const args = C.curlArgv(req).slice(1);
+    const out = spawnSync("curl", args, {
+      encoding: "buffer", maxBuffer: 64 * 1024 * 1024,
+    });
+    if (out.status !== 0) {
+      throw new Error(`curl failed (${out.status}): ${String(out.stderr ?? "").trim()}`);
+    }
+    return new Uint8Array(out.stdout);
+  }
+  const r = await fetch(req.url, req.method === "post"
+    ? { method: "POST", headers: { "content-type": "application/octet-stream" },
+        body: req.body }
+    : undefined);
+  if (!r.ok) throw new Error(`relay ${req.method} failed: ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
 }
 
 const sendJson = async (req) => JSON.parse(await send(req));
@@ -190,6 +232,25 @@ const needRoom = (c) => {
     process.exit(2);
   }
 };
+
+/** One conversation line for a terminal: the time when the sender put one
+ *  there, a `re: <file>` tag when the line quotes a dropped file, and the
+ *  quoted text rather than the raw `kzquote:<witness>` prefix.  The prefix
+ *  is machinery; printing it meant a reader saw the wire format instead of
+ *  what was said. */
+function lineText(c, m) {
+  const who = `${m.sender.slice(0, 8)}:`;
+  const when = m.at === null || m.at === undefined
+    ? ""
+    : ` ${new Date(m.at).toISOString().replace("T", " ").slice(0, 19)}`;
+  const quoted = C.quotedText(m);
+  if (quoted !== null && quoted !== undefined) {
+    const w = C.quoteWitness(m);
+    const f = C.filesOf(c).find((x) => C.manifestWitness(x) === w);
+    return `${who}${when} re: ${f ? f.name : "(a file)"} — ${quoted}`;
+  }
+  return `${who}${when} ${C.msgText(m)}`;
+}
 
 /** Take in whatever a text carries — a whole conversation in a bag, or an
  *  invitation to join a room — wherever in the text it happens to be.  On
@@ -233,11 +294,18 @@ function usage() {
   join <text>            join the room named by a pasted message or link
   load <url>             load a URL: join a room, or take in a conversation
   pastebinit [text]      post to the pastebin (default: this client's link;
-  pastebinit --file <f>    or the given text, a file, or stdin with `-`)
+  pastebinit --file <f>    or the given text, a file, or stdin with '-')
   accept [url]           take in a paste: the URL pastebinit printed, or
                          with no argument the latest paste in the spool
   say <text>             say something in the room
   read                   read the room and print the conversation
+  drop <file>            encrypt a file for the room and announce it;
+                         every chunk is pinned on the relay under its witness
+                         and only ciphertext leaves this machine
+  files                  the files announced in the room
+  fetch <n>              fetch and decrypt file n, writing it to --out
+                         (default: the announced name in the cwd)
+  quote <n> <text>        reply to file n, quoting it back into the room
   bag                    the whole conversation as one link (no relay needed)
   watch [--wait 25]      keep reading until interrupted
   health                 ask the relay whether it is there
@@ -245,7 +313,7 @@ function usage() {
 
 Options: --state <file> --json --transport fetch|curl --print-curl
          --origin <url> --config <file> --name <id> --relay <url>
-         --spool <dir> --backend <url>`);
+         --spool <dir> --backend <url> --out <path>`);
 }
 
 async function main() {
@@ -448,6 +516,100 @@ async function main() {
       return;
     }
 
+    case "drop": {
+      needRoom(c);
+      const path = rest[1];
+      if (!path) { console.error("drop needs a file"); process.exit(2); }
+      const bytes = new Uint8Array(readFileSync(path));
+      const name = basename(path);
+      const mime = MIME[name.split(".").pop()?.toLowerCase()] ?? "application/octet-stream";
+      const enc = await C.encryptFor(c.secret, name, mime, bytes);
+      // Pin every chunk under its own witness first.  A manifest names its
+      // chunks, so a manifest posted over a chunk that never landed would
+      // announce a file nobody can finish fetching.
+      for (let i = 0; i < enc.cids.length; i += 1) {
+        await sendBinary(C.postBlock(c, enc.cids[i], enc.chunks[i]));
+      }
+      const line = C.manifestLine(c, enc);
+      const answer = await sendJson(C.postLine(c, line));
+      c.seq += 1;
+      C.ingest(c, line);
+      save(store(st, c));
+      out(`dropped ${name} (${enc.size}B, ${enc.cids.length} chunk(s))`, {
+        ok: true, name, mime, size: enc.size, chunks: enc.cids.length,
+        cids: enc.cids, line, cursor: answer.cursor, room: C.clientRoom(c),
+      });
+      return;
+    }
+
+    case "files": {
+      needRoom(c);
+      const ans = await sendJson(C.pollFrom(c));
+      for (const l of ans.lines ?? []) C.ingest(c, l);
+      c.cursor = ans.cursor ?? c.cursor;
+      save(store(st, c));
+      const fs2 = C.filesOf(c);
+      out(fs2.length
+        ? fs2.map((f, i) => `${i}: ${f.name} (${f.size}B, ${f.cids.length} chunk(s))`).join("\n")
+        : "(no files announced)",
+        { ok: true, count: fs2.length, files: fs2.map((f) => ({
+          name: f.name, mime: f.mime, size: f.size, chunks: f.cids.length,
+          cids: f.cids, ipfs: f.ipfs ?? [],
+        })) });
+      return;
+    }
+
+    case "fetch": {
+      needRoom(c);
+      const ans = await sendJson(C.pollFrom(c));
+      for (const l of ans.lines ?? []) C.ingest(c, l);
+      c.cursor = ans.cursor ?? c.cursor;
+      save(store(st, c));
+      const fs2 = C.filesOf(c);
+      const idx = Number(rest[1]);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= fs2.length) {
+        console.error(`no file ${rest[1] ?? ""}: the room has ${fs2.length}`);
+        process.exit(2);
+      }
+      const f = fs2[idx];
+      const bytes = await C.takeFile(c.secret, f, async (cid) => {
+        const b = await sendBinary(C.getBlock(c, cid));
+        // `sendBinary` on a GET returns the relay's JSON envelope when the
+        // relay answers one; a block is raw, so anything that is not the
+        // right length is refused rather than decrypted into garbage.
+        return b;
+      });
+      const target = opts.out ?? f.name;
+      writeFileSync(target, bytes);
+      out(`fetched ${f.name} -> ${target} (${bytes.length}B)`, {
+        ok: true, name: f.name, wrote: target, size: bytes.length,
+      });
+      return;
+    }
+
+    case "quote": {
+      needRoom(c);
+      const ans = await sendJson(C.pollFrom(c));
+      for (const l of ans.lines ?? []) C.ingest(c, l);
+      c.cursor = ans.cursor ?? c.cursor;
+      const fs2 = C.filesOf(c);
+      const idx = Number(rest[1]);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= fs2.length) {
+        console.error(`no file ${rest[1] ?? ""}: the room has ${fs2.length}`);
+        process.exit(2);
+      }
+      const text = rest.slice(2).join(" ") || `re: ${fs2[idx].name}`;
+      const line = C.printTimed(C.sayQuote(C.clientRoom(c), c.self, c.seq + 1, fs2[idx], text));
+      const answer = await sendJson(C.postLine(c, line));
+      c.seq += 1;
+      C.ingest(c, line);
+      save(store(st, c));
+      out(`quoted ${fs2[idx].name}`, {
+        ok: true, quoting: fs2[idx].name, text, line, cursor: answer.cursor,
+      });
+      return;
+    }
+
     case "read": case "watch": {
       needRoom(c);
       const once = async () => {
@@ -462,10 +624,23 @@ async function main() {
       };
       if (cmd === "read") {
         const answer = await once();
-        out(C.viewText(c).join("\n"), {
+        // The room is chat *and* files, so `read` shows both: a line that is
+        // a dropped file has no text to print, and silently omitting it made
+        // a room where a file had just been shared look empty.
+        const files = C.filesOf(c);
+        const chat = C.viewAt(c).map((m) => lineText(c, m));
+        const human = [
+          ...chat,
+          ...files.map((f, i) => `[file ${i}] ${f.name} (${f.size}B, ${f.cids.length} chunk(s))`),
+        ].join("\n");
+        out(human || "(nothing said yet)", {
           ok: true, room: C.clientRoom(c), cursor: c.cursor,
           arrived: (answer.lines ?? []).length,
           view: C.view(c).map((m) => ({ sender: m.sender, seq: m.seq, text: C.msgText(m) })),
+          at: C.viewAt(c).map((m) => ({
+            sender: m.sender, seq: m.seq, text: C.msgText(m), at: m.at,
+          })),
+          files: files.map((f) => ({ name: f.name, size: f.size, chunks: f.cids.length })),
           lines: c.lines,
           curl: C.curlLine(C.pollFrom(c)),
         });

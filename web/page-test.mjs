@@ -37,6 +37,7 @@ class El {
     this.scrollTop = 0;
     this.scrollHeight = 0;
     this.srcObject = null;
+    this.dataset = {};
     this.href = "";
     this.download = "";
     this.classList = {
@@ -49,6 +50,36 @@ class El {
   get shown() { return this._classes.has("on"); }
   appendChild(c) { this.children.push(c); return c; }
   remove() {}
+
+  /** The anchors inside this element, parsed out of the innerHTML the page
+   *  just wrote.  The page wires handlers with
+   *  `box.querySelectorAll("a[data-f]")`, so the shim has to answer that or
+   *  renderFiles throws before the test can assert anything — which it did,
+   *  silently, on a click that reached renderFiles at all.
+   *
+   *  Returns El stubs carrying the matched attributes, so `.dataset` and
+   *  `.onclick` in the page behave as they do in a browser.  Descends into
+   *  children too, since a real querySelectorAll is not depth-limited. */
+  querySelectorAll(sel) {
+    const attr = /\[([\w-]+)\]/.exec(sel);
+    const tag = /^([a-z]+)/i.exec(sel)?.[1]?.toLowerCase();
+    const out = [];
+    const walk = (el) => {
+      for (const m of el.innerHTML.matchAll(/<([a-z]+)\s([^>]*)>/gi)) {
+        const [, t, attrs] = m;
+        if (tag && t.toLowerCase() !== tag) continue;
+        if (attr && !new RegExp(`\\b${attr}=["']([^"']*)["']`).test(attrs)) continue;
+        const a = /data-([\w-]+)=["']([^"']*)["']/.exec(attrs);
+        const e = new El("", t);
+        if (a) e.dataset = { [a[1].replace(/-(\w)/g, (_, c) => c.toUpperCase())]: a[2] };
+        out.push(e);
+      }
+      for (const c of el.children) walk(c);
+    };
+    walk(this);
+    return out;
+  }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
   select() {}
   click() { if (this.onclick) return this.onclick(); }
   play() { return Promise.resolve(); }
@@ -182,18 +213,57 @@ try {
   ok("the guide says so", /That is everything/.test($("prompt").textContent));
   ok("the line is in the room", $("chat").innerHTML.includes("hello"));
 
+  // ------------------------------------------------------ how it reads
+  // The formatting lives in kant-pretty.mjs and is unit-tested there. These
+  // check that the page actually routes the room through it, which is the part
+  // only this harness can see.
+  ok("the transcript is grouped by day", $("chat").innerHTML.includes('class="daysep"'));
+  ok("...and the day is labelled", /Today|Yesterday/.test($("chat").innerHTML));
+  ok("each line carries an avatar", $("chat").innerHTML.includes('class="avatar'));
+  ok("...which falls back to an initial for a peer with no profile",
+    /class="avatar initial"/.test($("chat").innerHTML));
+  ok("each line is timestamped", /class="at"/.test($("chat").innerHTML));
+  ok("the exact instant is one hover away",
+    $("chat").innerHTML.includes(new Date(Date.now()).toISOString().slice(0, 4)) ||
+    /title="[^"]*T\d\d:\d\d/.test($("chat").innerHTML));
+  ok("the reader's timezone is stated", /times shown in UTC/.test($("chatstatus").textContent));
+  ok("the room's own lines are marked as mine", $("chat").innerHTML.includes('class="line mine"'));
+
+  // Naming yourself: a name is your own claim, and the page says so. Asserted
+  // through the DOM only — `node` lives inside the page's module scope, which
+  // this harness deliberately does not reach into.
+  $("profname").value = "ada";
+  $("profbio").value = "maths";
+  await $("btn-profname").onclick();
+  ok("the page shows the name it just published", /ada/.test($("profstatus").textContent),
+    $("profstatus").textContent);
+  ok("...and the bio it just published", /maths/.test($("profstatus").textContent),
+    $("profstatus").textContent);
+  ok("the page says a name is only a claim",
+    /claim/i.test($("profstatus").textContent), $("profstatus").textContent);
+  ok("setting a name did not break the transcript",
+    $("chat").innerHTML.includes('class="daysep"') && $("chat").innerHTML.includes("hello"));
+  $("profname").value = "   ";
+  await $("btn-profname").onclick();
+  ok("an empty name is refused rather than published",
+    /showing as ada/.test($("profstatus").textContent), $("profstatus").textContent);
+
   // -------------------------------------------------------------- joining
   $("back").click();
   ok("back goes home", $("s-welcome").shown);
   $("btn-join").click();
   ok("the join screen is on show", $("s-join").shown);
   $("joinbox").value = "come in!!  " + link + " .\n";
-  $("btn-dojoin").click();
+  // Awaited: the join handler is async (it settles the relay before attaching),
+  // so checking the screen synchronously tests nothing but the microtask
+  // queue. This assertion was passing for the wrong reason — the click was
+  // still in flight.
+  await $("btn-dojoin").click();
   ok("a messy paste joins the room", $("s-chat").shown);
   $("back").click();
   $("btn-join").click();
   $("joinbox").value = "nothing here at all";
-  $("btn-dojoin").click();
+  await $("btn-dojoin").click();
   ok("junk does not join", $("s-join").shown);
   ok("...and says why", /no invite link/.test($("joinmsg").innerHTML));
 

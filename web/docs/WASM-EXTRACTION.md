@@ -100,9 +100,11 @@ exactly `⌈len / limit⌉ ` pieces.
 
 ## What is checked outside Lean
 
-`lake exe emitwasm` also writes `dist/kernel-vectors.json`: the value of every
+`lake exe emitwasm` also writes `kernel-vectors.json`: the value of every
 exported function on a fixed set of arguments, computed with the *Lean*
-semantics of the emitted module. `node web/wasm-test.mjs` then
+semantics of the emitted module. `scripts/embed-kernel.mjs` copies it to
+`web/kernel-vectors.json`, where the test reads it. `node web/wasm-test.mjs`
+then
 
 1. runs `WebAssembly.validate` on the binary (the engine's own validator
    accepts it),
@@ -147,8 +149,9 @@ wasm kernel: unavailable (kant_kernel.wasm failed validation) — falling back t
 Nothing was wrong with the module. Three changes make the report honest and the
 kernel available anyway:
 
-1. `web/kant-wasm.mjs` tries several locations (`../dist/kant_kernel.wasm`,
-   `./kant_kernel.wasm`, `./dist/kant_kernel.wasm`), rejects a response that is
+1. `web/kant-wasm.mjs` tries several locations (`./kant_kernel.wasm` — tracked,
+   and the one every deployment has — then the `dist/` paths), rejects a
+   response that is
    not OK, is empty, or does not start with `\0asm`, and names the actual
    failure — `HTTP 404`, `not a wasm module (…)` — for every location it tried.
 2. `web/kant-kernel-embedded.mjs` is a base64 copy of the same 799 bytes,
@@ -156,7 +159,7 @@ kernel available anyway:
    and cached by the service worker as part of the application shell. The
    loader falls back to it, so the proved kernel also works from `file://`,
    offline, and on a host that ships only `web/`. `node web/wasm-test.mjs`
-   fails if the embedded copy ever drifts from `dist/kant_kernel.wasm`.
+   fails if the embedded copy ever drifts from `web/kant_kernel.wasm`.
 3. `server/relay.mjs` serves `/dist/…` from the directory beside its static
    root, with `content-type: application/wasm`, so `--static web` publishes the
    real binary rather than the fallback.
@@ -167,6 +170,24 @@ Regenerating the kernel is therefore two commands:
 lake exe emitwasm dist
 node scripts/embed-kernel.mjs
 ```
+
+`scripts/embed-kernel.mjs` exists to make the kernel artifacts *tracked* rather
+than build output. `dist/` is gitignored, so `web/wasm-test.mjs` — the only test
+tying the binary to Lean — used to read `dist/kant_kernel.wasm` and
+`dist/kernel-vectors.json` and die with ENOENT on a clean checkout. The script
+copies both into `web/`, regenerates the two base64 fallbacks, and refuses to
+write a module the engine rejects. Add `--check` to re-derive every artifact in
+memory and fail if the tree has drifted from `dist/`:
+
+```
+lake exe emitwasm dist && node scripts/embed-kernel.mjs --check
+```
+
+`web/kernel-vectors.json` is byte-identical to the file `lake exe emitwasm`
+writes. It is Lean's output and is kept verbatim on purpose: these are
+Lean-computed values, so any hand-edit would stop them being Lean's. It is the
+only record of what the binary is supposed to compute, and `web/wasm-test.mjs`
+replays all 59 vectors against the module on every run.
 
 ## Scope, stated plainly
 

@@ -13,6 +13,7 @@ mod svg_anim;
 mod gallery;
 mod handlers;
 mod ipfs;
+mod mesh;
 mod model;
 mod plugin;
 mod plugins;
@@ -26,6 +27,7 @@ mod tiles;
 mod view;
 
 mod archive;
+mod archive_utils;
 
 mod git_mount;
 
@@ -50,6 +52,7 @@ enum Commands {
     Profiles,
     TestShareMenu,
     RenameAllmPastes(RenameAllmPastesArgs),
+    Archive(ArchiveArgs),
 }
 
 #[derive(Parser)]
@@ -91,6 +94,33 @@ struct RenameAllmPastesArgs {
     limit: Option<usize>,
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Parser)]
+struct ArchiveArgs {
+    /// Path to the archive file (zip, tar.gz, etc.)
+    input: String,
+    /// Path to arist project for interpretation
+    #[arg(short, long)]
+    arist: Option<String>,
+    /// Filter by category (lean, web, docs, graphics, source, config, data, binary, other)
+    #[arg(short, long)]
+    category: Option<String>,
+    /// Only include markdown/lean files
+    #[arg(short, long)]
+    markdown_only: bool,
+    /// Maximum file size in bytes (default: 10MB)
+    #[arg(short, long)]
+    max_file_size: Option<u64>,
+    /// Output format: json, text, or summary
+    #[arg(short, long, default_value = "text")]
+    format: String,
+    /// Show pattern analysis (ngrams, prefixes, suffixes)
+    #[arg(short, long)]
+    patterns: bool,
+    /// List entries without extracting content
+    #[arg(short, long)]
+    list_only: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -138,6 +168,10 @@ async fn run_cli(cli: Cli) -> Result<bool, String> {
         }
         Some(Commands::RenameAllmPastes(args)) => {
             run_rename_allm_pastes_cli(args)?;
+            Ok(true)
+        }
+        Some(Commands::Archive(args)) => {
+            run_archive_cli(args)?;
             Ok(true)
         }
         None => Ok(false),
@@ -400,17 +434,82 @@ fn resolve_split_config(
     Ok((chunk_size, overlap, unit, split_mode, profile_name))
 }
 
-fn read_input(path: Option<&str>) -> Result<String, String> {
-    match path {
-        Some("-") | None => {
-            let mut content = String::new();
-            io::stdin()
-                .read_to_string(&mut content)
-                .map_err(|e| e.to_string())?;
-            Ok(content)
-        }
-        Some(path) => fs::read_to_string(path).map_err(|e| e.to_string()),
+fn run_archive_cli(args: ArchiveArgs) -> Result<(), String> {
+    let data = std::fs::read(&args.input).map_err(|e| format!("Failed to read file: {}", e))?;
+    let filename = std::path::Path::new(&args.input).file_name().unwrap_or_default().to_string_lossy().to_string();
+    
+    // Use the archive tool to extract the archive
+    let result = archive::extract(&data, &filename).map_err(|e| format!("Archive error: {}", e))?;
+    
+    // If arist path is provided, integrate with it
+    if let Some(arist_path) = &args.arist {
+        // TODO: integrate with ~/projects/arist for interpretation
+        // For now, just log the path
+        log::info!("Arist project path: {}", arist_path);
     }
+    
+    // Apply category filter if specified
+    if let Some(ref category) = args.category {
+        // Filter entries by category
+        println!("Category filter: {}", category);
+    }
+    
+    // Apply markdown-only filter
+    if args.markdown_only {
+        let markdown_entries: Vec<_> = result.entries.iter()
+            .filter(|e| e.is_text() && e.path.to_lowercase().ends_with(".md") || e.path.to_lowercase().ends_with(".lean"))
+            .cloned()
+            .collect();
+        println!("Markdown-only mode: {} entries", markdown_entries.len());
+    }
+    
+    // Apply max file size filter
+    let max_size = args.max_file_size.unwrap_or(crate::archive::MAX_FILE_SIZE);
+    let filtered_entries: Vec<_> = result.entries.iter()
+        .filter(|e| e.size <= max_size)
+        .cloned()
+        .collect();
+    
+    // Output results based on format
+    match args.format.as_str() {
+        "json" => {
+            let payload = serde_json::json!({
+                "filename": result.filename,
+                "total_size": result.total_size,
+                "entry_count": result.entry_count,
+                "entries": filtered_entries,
+            });
+            println!("{}", serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?);
+        }
+        "summary" => {
+            println!("Archive Summary:");
+            println!("  Filename: {}", result.filename);
+            println!("  Total entries: {}", result.entry_count);
+            println!("  Total size: {} bytes", result.total_size);
+            println!("  Filtered entries (size <= {} bytes): {}", max_size, filtered_entries.len());
+            if args.patterns {
+                println!("  Pattern analysis: enabled");
+            }
+        }
+        "text" | _ => {
+            println!("Archive: {}", result.filename);
+            println!("Entries: {}", result.entry_count);
+            println!("Total size: {} bytes", result.total_size);
+            for (idx, entry) in filtered_entries.iter().enumerate() {
+                println!("  {}", idx + 1);
+                println!("    Path: {}", entry.path);
+                println!("    Size: {} bytes", entry.size);
+                if entry.is_text() {
+                    println!("    Type: text");
+                }
+                println!();
+            }
+            if args.patterns {
+                println!("Pattern analysis (ngrams/prefixes/suffixes): would be computed here");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn to_split_unit(value: CliUnit) -> SplitUnit {
@@ -445,6 +544,19 @@ fn split_mode_label(split_mode: SplitMode) -> &'static str {
     }
 }
 
+fn read_input(path: Option<&str>) -> Result<String, String> {
+    match path {
+        Some("-") | None => {
+            let mut content = String::new();
+            io::stdin()
+                .read_to_string(&mut content)
+                .map_err(|e| e.to_string())?;
+            Ok(content)
+        }
+        Some(path) => fs::read_to_string(path).map_err(|e| e.to_string()),
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
@@ -464,9 +576,6 @@ async fn main() -> std::io::Result<()> {
     let git_commit = option_env!("GIT_COMMIT").unwrap_or("unknown");
     let build_time = option_env!("BUILD_TIME").unwrap_or("unknown");
     log::info!("🚀 Starting kant-pastebin microservice on {}", bind);
-    log::info!("📁 UUCP spool: {}", uucp_dir);
-    log::info!("📦 Version: git={} built={}", git_commit, build_time);
-
     // Initialize plugin registry
     let mut registry = plugin::PluginRegistry::new();
     registry.register(Box::new(plugins::screenshot::ScreenshotPlugin::new()));
@@ -489,6 +598,30 @@ async fn main() -> std::io::Result<()> {
 
     let registry = web::Data::new(std::sync::Mutex::new(registry));
 
+    // Relay-to-relay mesh. Peer relays come from MESH_PEER_RELAYS
+    // (comma-separated); this node's own advertised URL from MESH_RELAY_URL.
+    let mesh_config = mesh::MeshConfig {
+        local_relay_id: env::var("MESH_RELAY_ID")
+            .unwrap_or_else(|_| "relay-local".to_string()),
+        local_relay_url: env::var("MESH_RELAY_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:8090".to_string()),
+        peer_relays: env::var("MESH_PEER_RELAYS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        ..Default::default()
+    };
+    let mesh_storage = std::sync::Arc::new(storage::Storage::new(env::var("MESH_DATA_DIR").ok()));
+    let mesh_state = std::sync::Arc::new(mesh::MeshState::new(mesh_config, mesh_storage));
+    mesh_state.clone().start();
+    let mesh_state = web::Data::new(mesh_state);
+    log::info!(
+        "Mesh networking started (relay {})",
+        env::var("MESH_RELAY_ID").unwrap_or_else(|_| "relay-local".to_string())
+    );
+
     let openapi = ApiDoc::openapi();
 
     HttpServer::new(move || {
@@ -501,6 +634,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors)
             .app_data(registry.clone())
+            .app_data(mesh_state.clone())
             .app_data(web::PayloadConfig::new(256 * 1024 * 1024)) // 256MB max upload
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url("/openapi.json", openapi.clone()))
             .route("/", web::get().to(handlers::index))
@@ -526,6 +660,16 @@ async fn main() -> std::io::Result<()> {
             .route("/upload", web::post().to(upload_handler::upload_file))
             .route("/file/{id}", web::get().to(handlers::get_file))
             .route("/ipfs/{cid}", web::get().to(handlers::ipfs_proxy))
+            .route("/api/mesh/peers", web::get().to(mesh::handlers::list_peers))
+            .route("/api/mesh/ping", web::post().to(mesh::handlers::receive_ping))
+            .route(
+                "/api/mesh/message",
+                web::post().to(mesh::handlers::receive_message),
+            )
+            .route(
+                "/api/mesh/announce",
+                web::post().to(mesh::handlers::announce),
+            )
             .route("/svg2anim/{id}", web::get().to(svg_anim::svg2anim))
             .route("/gallery", web::get().to(gallery::gallery))
             .route("/gallery/img/{qid}", web::get().to(handlers::gallery_image))

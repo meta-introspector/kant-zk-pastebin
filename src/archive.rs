@@ -12,6 +12,31 @@ pub struct ArchiveEntry {
     pub content: Option<String>,
 }
 
+impl ArchiveEntry {
+    /// Check if this entry is a text file (based on extension or content)
+    pub fn is_text(&self) -> bool {
+        // Check extension FIRST - known text extensions are always text
+        let path_lower = self.path.to_lowercase();
+        let text_exts = [".md", ".txt", ".lean", ".tex", ".org", ".html", ".htm", ".css", ".js", ".rs", ".py", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv"];
+        if text_exts.iter().any(|ext| path_lower.ends_with(ext)) {
+            return true;
+        }
+        
+        // Fall back to content analysis for unknown extensions
+        if let Some(ref content) = self.content {
+            // Check if content looks like text
+            let printable = content
+                .bytes()
+                .filter(|&b| b >= 32 && b < 127 || b == 10 || b == 13 || b == 9)
+                .count();
+            let total = content.len().max(1);
+            printable * 100 / total > 90
+        } else {
+            false
+        }
+    }
+}
+
 /// Summary of the extracted archive
 #[derive(serde::Serialize)]
 pub struct ArchiveResult {
@@ -22,6 +47,19 @@ pub struct ArchiveResult {
     pub total_size: u64,
     pub entry_count: usize,
 }
+
+/// Allowed file extensions for markdown/lean only mode
+const MARKDOWN_EXTENSIONS: &[&str] = &[
+    ".md",
+    ".txt",
+    ".lean",
+    ".tex",
+    ".org",
+];
+/// Excluded file extensions (svg, json, etc.)
+const EXCLUDED_EXTENSIONS: &[&str] = &[".svg", ".json"];
+/// Maximum file size in bytes (0 = no limit)
+pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 110MB
 
 /// Detect format from filename extension and extract
 pub fn extract(data: &[u8], filename: &str) -> Result<ArchiveResult, String> {
@@ -129,6 +167,18 @@ fn extract_single_compressed<D: Decoder>(
             .all(|&b| b.is_ascii_graphic() || b == b'\n' || b == b'\r' || b == b'\t' || b == b' ')
     }) || content.is_empty();
 
+    // After decompression, check if the result is actually a tar archive
+    // (tar magic bytes at offset 257: "ustar"). If so, recursively extract.
+    if content.len() >= 262 && &content[257..262] == b"ustar" {
+        // The decompressed content is a tar archive — extract it recursively
+        let tar_filename = filename
+            .trim_end_matches(".gz")
+            .trim_end_matches(".bz2")
+            .trim_end_matches(".xz")
+            .to_string();
+        return extract_tar_from_reader(std::io::Cursor::new(content), &tar_filename);
+    }
+
     let entry_content = if is_text {
         Some(String::from_utf8_lossy(&content).to_string())
     } else {
@@ -201,38 +251,64 @@ fn extract_tar_from_reader<R: Read>(reader: R, filename: &str) -> Result<Archive
         let size = entry.size();
         let is_dir = entry.header().entry_type().is_dir();
 
-        // Skip directory entries in content listing
-        if is_dir {
-            entries.push(ArchiveEntry {
-                path,
-                size: 0,
-                is_dir: true,
-                content: None,
-            });
+        // Apply file filtering: exclude svg, json, and large files by default
+        let lower_path = path.to_lowercase();
+        
+        // Skip excluded extensions (.svg, .json)
+        if EXCLUDED_EXTENSIONS.iter().any(|&ext| lower_path.ends_with(ext)) {
+            continue;
+        }
+
+        // Skip files larger than MAX_FILE_SIZE
+        if size > MAX_FILE_SIZE {
+            continue;
+        }
+
+        // Markdown/lean-only mode: only allow specific extensions
+        // Check if path has a markdown/lean extension
+        let allowed = MARKDOWN_EXTENSIONS.iter().any(|&mext| lower_path.ends_with(mext))
+            || lower_path.ends_with(".tar.gz")
+            || lower_path.ends_with(".tgz")
+            || lower_path.ends_with(".tar.bz2")
+            || lower_path.ends_with(".tar.xz")
+            || lower_path.ends_with(".zip");
+        
+        // If not in markdown/lean mode and file doesn't have allowed extension, skip
+        // (When MARKDOWN_EXTENSIONS check passes, we continue; otherwise skip)
+        if !allowed && !lower_path.ends_with(".tar.gz") && !lower_path.ends_with(".tgz")
+            && !lower_path.ends_with(".tar.bz2") && !lower_path.ends_with(".tar.xz")
+            && !lower_path.ends_with(".zip")
+        {
             continue;
         }
 
         total_size += size;
 
-        // Read content for all files (smallish files only) — no binary
-        // filter: preserve every file's content (lossy for binary).
-        let mut raw = Vec::new();
+        // Read content for files under size limit
         let content = if size < 1024 * 1024 {
-            entry.read_to_end(&mut raw).ok();
-            Some(String::from_utf8_lossy(&raw).to_string())
+            let mut raw = Vec::new();
+            let read_result = entry.read_to_end(&mut raw);
+            // Only include text content, skip binary
+            if read_result.is_ok() && raw.windows(4).all(|w| {
+                w.iter()
+                    .all(|&b| b.is_ascii_graphic() || b == b'\n' || b == b'\r' || b == b'\t' || b == b' ')
+            }) {
+                Some(String::from_utf8_lossy(&raw).to_string())
+            } else {
+                None
+            }
         } else {
             None
         };
 
         // Recursive unpack: nested archives (.tar.gz/.tgz/.zip inside)
-        let lower_path = path.to_lowercase();
         let is_nested = lower_path.ends_with(".tar.gz")
             || lower_path.ends_with(".tgz")
             || lower_path.ends_with(".tar.bz2")
             || lower_path.ends_with(".tar.xz")
             || lower_path.ends_with(".zip");
-        if is_nested && !raw.is_empty() {
-            if let Ok(nested) = extract(&raw, &path) {
+        if is_nested && content.is_some() {
+            if let Ok(nested) = extract(content.as_ref().unwrap().as_bytes(), &path) {
                 for mut ne in nested.entries {
                     ne.path = format!("{}/{}", path, ne.path);
                     entries.push(ne);
@@ -293,8 +369,36 @@ fn extract_zip(data: &[u8], filename: &str) -> Result<ArchiveResult, String> {
             .map_err(|e| format!("Zip entry {}: {}", i, e))?;
 
         let path = file.name().to_string();
+        let lower_path = path.to_lowercase();
         let is_dir = file.is_dir();
         let size = file.size();
+
+        // Apply file filtering: exclude svg, json, and large files by default
+        // Skip excluded extensions (.svg, .json)
+        if EXCLUDED_EXTENSIONS.iter().any(|&ext| lower_path.ends_with(ext)) {
+            continue;
+        }
+
+        // Skip files larger than MAX_FILE_SIZE
+        if size > MAX_FILE_SIZE {
+            continue;
+        }
+
+        // Markdown/lean-only mode: only allow specific extensions
+        let allowed = MARKDOWN_EXTENSIONS.iter().any(|&mext| lower_path.ends_with(mext))
+            || lower_path.ends_with(".tar.gz")
+            || lower_path.ends_with(".tgz")
+            || lower_path.ends_with(".tar.bz2")
+            || lower_path.ends_with(".tar.xz")
+            || lower_path.ends_with(".zip");
+        
+        // If not in markdown/lean mode and file doesn't have allowed extension, skip
+        if !allowed && !lower_path.ends_with(".tar.gz") && !lower_path.ends_with(".tgz")
+            && !lower_path.ends_with(".tar.bz2") && !lower_path.ends_with(".tar.xz")
+            && !lower_path.ends_with(".zip")
+        {
+            continue;
+        }
 
         if is_dir {
             entries.push(ArchiveEntry {
@@ -311,7 +415,15 @@ fn extract_zip(data: &[u8], filename: &str) -> Result<ArchiveResult, String> {
         let content = if size < 1024 * 1024 {
             let mut buf = Vec::new();
             file.read_to_end(&mut buf).ok();
-            Some(String::from_utf8_lossy(&buf).to_string())
+            // Only include text content, skip binary
+            if buf.windows(4).all(|w| {
+                w.iter()
+                    .all(|&b| b.is_ascii_graphic() || b == b'\n' || b == b'\r' || b == b'\t' || b == b' ')
+            }) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -358,4 +470,86 @@ fn guess_is_text(buf: &[u8]) -> bool {
         .filter(|&&b| b.is_ascii_graphic() || b == b'\n' || b == b'\r' || b == b'\t' || b == b' ')
         .count();
     printable > (buf.len() * 9 / 10)
+}
+/// Extract all files of a specific category from an archive
+pub fn extract_by_category(data: &[u8], filename: &str, category: &str) -> Result<Vec<ArchiveEntry>, String> {
+    let result = extract(data, filename)?;
+    let filtered: Vec<ArchiveEntry> = result.entries
+        .into_iter()
+        .filter(|e| categorize_by_extension(&e.path) == category)
+        .collect();
+    Ok(filtered)
+}
+
+/// Extract all Lean files (.lean) from an archive
+pub fn extract_lean_files(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, String> {
+    extract_by_category(data, filename, "lean")
+}
+
+/// Extract all Markdown files (.md, .txt, .tex, .org) from an archive
+pub fn extract_markdown_files(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, String> {
+    extract_by_category(data, filename, "markdown")
+}
+
+/// Extract all SVG files from an archive
+pub fn extract_svg_files(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, String> {
+    extract_by_category(data, filename, "svg")
+}
+
+/// Extract all web files (HTML, CSS, JS) from an archive
+pub fn extract_web_files(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, String> {
+    extract_by_category(data, filename, "web")
+}
+
+/// Extract all GIF files from an archive
+pub fn extract_gif_files(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, String> {
+    extract_by_category(data, filename, "gif")
+}
+
+/// Extract all graphics files (PNG, JPG, SVG, GIF, WebP) from an archive
+pub fn extract_graphics_files(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, String> {
+    extract_by_category(data, filename, "graphics")
+}
+
+/// Extract all source code files from an archive
+pub fn extract_source_files(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, String> {
+    extract_by_category(data, filename, "source")
+}
+
+/// Extract all data files (JSON, CSV, YAML, TOML, XML) from an archive
+pub fn extract_data_files(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, String> {
+    extract_by_category(data, filename, "data")
+}
+
+/// Categorize a file by its extension
+pub fn categorize_by_extension(path: &str) -> &'static str {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".lean") {
+        return "lean";
+    }
+    if lower.ends_with(".md") || lower.ends_with(".txt") || lower.ends_with(".tex") || lower.ends_with(".org") {
+        return "markdown";
+    }
+    if lower.ends_with(".svg") {
+        return "svg";
+    }
+    if lower.ends_with(".gif") {
+        return "gif";
+    }
+    if lower.ends_with(".html") || lower.ends_with(".htm") || lower.ends_with(".css") || lower.ends_with(".js") || lower.ends_with(".ts") || lower.ends_with(".jsx") || lower.ends_with(".tsx") {
+        return "web";
+    }
+    if lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg") || lower.ends_with(".webp") || lower.ends_with(".svg") || lower.ends_with(".gif") {
+        return "graphics";
+    }
+    if lower.ends_with(".rs") || lower.ends_with(".py") || lower.ends_with(".go") || lower.ends_with(".java") || lower.ends_with(".cpp") || lower.ends_with(".c") || lower.ends_with(".h") || lower.ends_with(".hpp") || lower.ends_with(".js") || lower.ends_with(".ts") {
+        return "source";
+    }
+    if lower.ends_with(".json") || lower.ends_with(".csv") || lower.ends_with(".yaml") || lower.ends_with(".yml") || lower.ends_with(".toml") || lower.ends_with(".xml") {
+        return "data";
+    }
+    if lower.ends_with(".bin") || lower.ends_with(".exe") || lower.ends_with(".so") || lower.ends_with(".dll") || lower.ends_with(".dylib") {
+        return "binary";
+    }
+    "other"
 }

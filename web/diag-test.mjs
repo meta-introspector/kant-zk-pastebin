@@ -5,8 +5,8 @@
 
 import * as D from "./kant-diag.mjs";
 import * as N from "./kant-net.mjs";
-import { spawn } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -71,6 +71,28 @@ ok("reportText carries the block",
   D.parseReport(D.reportText(report).split(
     "--- machine-readable, paste into the diagnostics page ---\n")[1]) !== null);
 ok("reportText is readable", D.reportText(report).includes("relay post failed"));
+
+// --------------------------------------------------- where the relay is
+
+// `servedBase` decides which URL the page probes for a relay, and getting it
+// wrong is silent: the probe 404s and the client reports that nobody can join
+// while the relay is answering one path down. These are the shapes that decide
+// it, so they are pinned rather than reasoned about again later.
+eq("servedBase at the root", D.servedBase("http://127.0.0.1:8787/index.html"),
+  "http://127.0.0.1:8787");
+eq("servedBase under a sub-path", D.servedBase("https://solana.solfunmeme.com/p2p-relay/"),
+  "https://solana.solfunmeme.com/p2p-relay");
+eq("servedBase drops the file", D.servedBase("https://solana.solfunmeme.com/p2p-relay/index.html"),
+  "https://solana.solfunmeme.com/p2p-relay");
+eq("servedBase keeps query and hash out of it",
+  D.servedBase("https://h.example/p2p-relay/index.html?room=x#frag"),
+  "https://h.example/p2p-relay");
+// Without the trailing slash the last segment is a *file*, so the base is the
+// parent. Standard URL resolution, and the reason the mount must redirect
+// `/p2p-relay` to `/p2p-relay/`.
+eq("servedBase: no trailing slash means a file", D.servedBase("https://h.example/p2p-relay"),
+  "https://h.example");
+eq("servedBase refuses nonsense rather than throwing", D.servedBase("not a url"), "");
 
 // ----------------------------------------------------------------- the log
 
@@ -151,19 +173,20 @@ const client = (o) => D.clientOf({ room: "r1", reach: reach(o.reach ?? {}), ...o
 const here = path.dirname(fileURLToPath(import.meta.url));
 const relayPath = path.join(here, "..", "server", "relay.mjs");
 
-const logFile = path.join(here, ".diag-relay.log");
-function startRelay(port) {
-  const proc = spawn(process.execPath,
-    [relayPath, "--port", String(port), "--static", here, "--log", logFile, "--quiet"],
-    { stdio: ["ignore", "pipe", "pipe"] });
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
-    proc.stdout.on("data", (d) => {
-      if (String(d).includes("listening")) { clearTimeout(timer); resolve(proc); }
-    });
-    proc.on("error", reject);
-  });
-}
+// The relay's log used to be `web/.diag-relay.log` — inside the checkout, where
+// a run of the suite leaves a file behind. It is read back below (to assert the
+// relay logs rooms as handles) and removed at the end, so moving it to tmpdir()
+// costs nothing.
+const logFile = path.join(tmpdir(), `kant-diag-relay-${process.pid}.log`);
+// The relay's pass database, which defaults to /var/lib/kant-zk/passes.sqlite —
+// production state. Passing `--pass-db` explicitly also makes the relay rethrow
+// instead of silently falling back to a shared tmpdir copy if it is unusable,
+// so a broken path here fails loudly rather than quietly sharing a ledger.
+const passDb = path.join(tmpdir(), `kant-diag-test-${process.pid}.sqlite`);
+import { startRelay as startRelayProcess } from "../scripts/relay-start.mjs";
+const startRelay = (port) =>
+  startRelayProcess(relayPath, port,
+    ["--static", here, "--log", logFile, "--pass-db", passDb, "--quiet"]);
 
 const port = 8801 + Math.floor(Math.random() * 90);
 let relay = null;
@@ -190,6 +213,37 @@ if (relay) {
     const res = await fetch(`${base}/${file}`).catch(() => null);
     ok(`the relay serves ${what}`, !!res && res.ok, res ? `status ${res.status}` : "no answer");
   }
+
+  // The real page derives its probe base from where it was served, so the
+  // self-hosting case has to survive that round trip and not just work when
+  // the base is handed in directly.
+  const derived = await D.resolveReachability({
+    configured: "", origin: D.servedBase(`${base}/index.html`), log: new D.DiagLog({ cap: 100 }),
+  });
+  ok("a base derived from location finds the relay", derived.originIsRelay === true);
+  eq("…and it is the relay we started", D.effectiveRelay(derived), base);
+
+  // A configured relay that is DOWN. `effectiveRelay` still hands it back —
+  // that is the spec: a configured relay wins, and it is `relayUsable` that
+  // says whether it answered. The banner used to read `used` for its wording
+  // and so announced this dead host as up; it must read `relayUsable`.
+  //
+  // `fetchImpl` is stubbed, and that is the point: `resolveReachability`
+  // probes whatever it is configured with, so without this the suite really
+  // did fetch `https://kant-relay.cicada71.net/health` — from the core run, on
+  // every `npm run verify`, against the deployment this repo is for. The
+  // assertions below are about what the module concludes from a relay that does
+  // not answer, and a refused connection answers that just as well as a 404.
+  const noNetwork = () => { throw new Error("network disabled in this suite"); };
+  const deadCfg = await D.resolveReachability({
+    configured: "https://kant-relay.cicada71.net", origin: base,
+    log: new D.DiagLog({ cap: 100 }), fetchImpl: noNetwork,
+  });
+  ok("a configured-but-dead relay is not usable", D.relayUsable(deadCfg) === false);
+  ok("…even though effectiveRelay still names it",
+    D.effectiveRelay(deadCfg) === "https://kant-relay.cicada71.net");
+  ok("…which is exactly the pair the banner must not confuse",
+    D.effectiveRelay(deadCfg) !== "" && !D.relayUsable(deadCfg));
 
   // A configured relay that is not there is reported, not swallowed.
   const log2 = new D.DiagLog({ cap: 100 });
@@ -254,6 +308,8 @@ if (relay) {
   alice.stop(); bob.stop();
   relay.kill();
   rmSync(logFile, { force: true });
+  // The relay holds the handle, so its database goes after the kill.
+  for (const s of ["", "-wal", "-shm"]) rmSync(`${passDb}${s}`, { force: true });
 }
 
 // ------------------------- polling with no relay must idle, never spin

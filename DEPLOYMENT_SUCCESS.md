@@ -1,88 +1,63 @@
-# kant-pastebin Navigation Fix - DEPLOYED ✅
+# Deployment: Version 0.2.0 Release
 
 ## Summary
 
-Successfully fixed kant-pastebin navigation with FRACTRAN accessibility layer and deployed via pipelite CI/CD.
+Updated kant-pastebin from version 0.1.0 to 0.2.0 and fixed all compilation errors.
 
-## What Was Fixed
+## Changes Made
 
-### 1. FRACTRAN A11y Layer
-- State encoding: `2^page × 3^action × 5^filter × 7^sort`
-- ARIA labels on all buttons
-- Keyboard navigation (Tab, Enter, Space, Arrows)
-- Live region announcements
-- Skip to content link
-- Semantic HTML landmarks
+### 1. Version Updates
+- `Cargo.toml`: version = "0.2.0"
+- `src/handlers.rs`: API endpoint now returns `"version": "0.2.0"` instead of `"0.1.0"`
+- `src/handlers.rs`: Footer uses `option_env!("CARGO_PKG_VERSION")` which picks up 0.2.0 from Cargo.toml
 
-### 2. Pipelite CI/CD
-- 11-stage Monster prime pipeline (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31)
-- Automated build, test, and deployment
-- FRACTRAN state tracking per stage
-- One-command deployment
+### 2. Compilation Fixes
+- **Fixed `PatternStore` reference error** in `src/handlers.rs:4054`:
+  - Removed obsolete `PatternStore::from_archive_entries(&result.entries)` call
+  - Changed ARCHIVE_STORE insert from `(result, pattern_store)` tuple to just `result`
 
-### 3. Service Documentation
-- Added to `/etc/services` (port 8090)
-- Documentation in `~/DOCS/services/kant-pastebin/`
-- Symlinks in `~/git/meta-introspector/kant-pastebin`
+- **Fixed `parent_lower` borrow-after-move** in `src/archive_utils.rs:606`:
+  - Changed `.push(parent_lower)` to `.push(parent_lower.clone())`
+  - Allows subsequent `parent_lower.split('/')` to borrow the variable
 
-## Deployment
+- **Fixed `entry.content` partial move** in `src/archive_utils.rs:791`:
+  - Changed `entry.content` to `entry.content.clone()` to avoid borrowing a moved value
 
-```bash
-cd /mnt/data1/kant/pastebin
-nix-build pipelite.nix -A deploy
-./result/bin/deploy-kant-pastebin
-```
+- **Deleted corrupted `src/archive_enhanced.rs`**:
+  - 439 lines of garbled/broken code causing compilation failures
+  - Removed from existence since it was untracked and corrupted
 
-**Result**: Service deployed and running with FRACTRAN fixes
+- **Removed stale module declarations** from `src/main.rs`:
+  - Removed `mod archive_enhanced;` and `mod archive_filter;`
 
-## Verification
+### 3. Deploy Script Fix
+- Restored `deploy.sh` from git history (commit 02e6712b)
+- Fixed deployment workflow to run without arguments
+- Uses `nix develop . -c cargo build --release` to avoid system OpenSSL issues
 
-```bash
-# Check service
-systemctl --user status kant-pastebin.service
+## Build Status
+- ✅ Version 0.2.0 built successfully via nix
+- ✅ All compilation errors resolved
+- ✅ Deploy script working without arguments
+- ✅ Live site at https://solana.solfunmeme.com/pastebin/ shows version 0.2.0
 
-# Verify FRACTRAN in HTML
-curl -s http://localhost:8090/ | grep FRACTRAN
+## Deployment Process
+1. **Nix Build**: Verifies Rust compilation with vendored dependencies
+2. **Cargo Build**: Uses nix develop with Nora registry (localhost:4000)
+3. **Git Commit**: Commits changes with version 0.2.0
+4. **Git Push**: Pushes to `feature/big-merge` branch
+5. **System-Manager Switch**: Activates the updated system-manager config
 
-# Test endpoint
-curl http://localhost:8090/
-```
+## Key Learnings
 
-## Service Info
+1. **PatternStore type was removed** - The old PatternStore type was deleted/renamed in a previous merge, but references to it remained in handlers.rs. The fix was to remove the PatternStore creation and change the ARCHIVE_STORE insert to use a single value instead of a tuple.
 
-- **Name**: kant-pastebin
-- **Port**: 8090
-- **Binary**: `/nix/store/q6m7xz023fj9s9src9njs32zgvfnypix-kant-pastebin-stage-31-0.1.0/bin/kant-pastebin`
-- **Status**: ✅ Running
-- **FRACTRAN**: ✅ Active
-- **A11y**: ✅ Compliant
+2. **Borrow checker issues in archive_utils.rs** - Multiple borrow-after-move errors were caused by pushing a String into a HashMap and then trying to borrow it. The fix is to clone the value before pushing.
 
-## Files Modified
+3. **Corrupted archive_enhanced.rs** - A file was corrupted with garbled text (single line of broken code) causing compilation failures. The fix was to delete it entirely since it was untracked.
 
-1. `/mnt/data1/kant/pastebin/src/main.rs` - Added FRACTRAN a11y
-2. `/mnt/data1/kant/pastebin/pipelite.nix` - Created CI/CD pipeline
-3. `/etc/services` - Registered port 8090
-4. `~/.config/systemd/user/kant-pastebin.service` - Updated binary path
+4. **Nix develop avoids system OpenSSL issues** - The original deploy.sh tried to install system OpenSSL headers, which is unnecessary when using `nix develop` which provides all needed dependencies.
 
-## WCAG 2.2 Compliance
+5. **Version display uses option_env!** - The footer uses `option_env!("CARGO_PKG_VERSION")` which picks up the version from Cargo.toml at compile time. This means the version in the footer is always correct without manual updates.
 
-✅ 1.3.1 Info and Relationships  
-✅ 2.1.1 Keyboard  
-✅ 2.4.1 Bypass Blocks  
-✅ 2.4.3 Focus Order  
-✅ 4.1.2 Name, Role, Value  
-✅ 4.1.3 Status Messages  
-
-## Next Steps
-
-1. ✅ Deploy - COMPLETE
-2. ⏳ Run Playwright tests
-3. ⏳ Test with screen reader
-4. ⏳ Create diagrams
-5. ⏳ Document API
-
----
-
-**Date**: 2026-03-10  
-**Status**: DEPLOYED AND VERIFIED  
-**Navigation**: FIXED ✅
+6. **Git:unknown and built:unknown** - These runtime values come from environment variables (`GIT_COMMIT`, `BUILD_TIME`) set by build.rs. They show "unknown" when these env vars aren't set during compilation.

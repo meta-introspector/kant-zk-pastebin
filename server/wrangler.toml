@@ -1,6 +1,6 @@
 name = "kant-zk-relay-wasm"
 main = "worker.js"
-account_id = "2c5da35f915a13c131bead97f3f7bc75"
+account_id = "0ceffbadd0a04623896f5317a1e40d94"
 compatibility_date = "2025-01-01"
 
 # One Durable Object per room: the append-only log of

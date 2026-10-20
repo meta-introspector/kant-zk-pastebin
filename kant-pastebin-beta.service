@@ -1,0 +1,26 @@
+[Unit]
+Description=Kant Pastebin Beta (commit d5b18fb8db43318ade41b924c259d03537f9edaf)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/data1/kant/pastebin
+ExecStart=/mnt/data1/kant/pastebin/target/release/kant-pastebin --bind 0.0.0.0 --port 8084
+Restart=always
+RestartSec=10
+Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
+Environment="BASE_PATH=/pastebin"
+Environment="BASE_URL=https://solana.solfunmeme.com"
+Environment="RUST_LOG=info"
+Environment="GIT_COMMIT=d5b18fb8db43318ade41b924c259d03537f9edaf"
+Environment="BUILD_TIME=2026-10-19T14:35:31Z"
+TimeoutStartSec=0
+TimeoutStopSec=0
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=default.target

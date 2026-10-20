@@ -17,7 +17,7 @@
 //      runs) joining the very same link and displaying the very same
 //      conversation.
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -91,19 +91,11 @@ eq("...and on the same relay",
 // be here, because the clients are separate processes too and this one waits
 // for each of them in turn.
 const relayPath = join(root, "server", "relay.mjs");
-function startRelay(port) {
-  const proc = spawn(process.execPath,
-    [relayPath, "--port", String(port), "--static", join(root, "web"),
-      "--pass-db", join(tmpdir(), `kant-cli-passes-${Date.now()}.sqlite`)],
-    { stdio: ["ignore", "pipe", "pipe"] });
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("relay did not start")), 8000);
-    proc.stdout.on("data", (d) => {
-      if (String(d).includes("listening")) { clearTimeout(timer); resolve(proc); }
-    });
-    proc.on("error", reject);
-  });
-}
+import { startRelay as startRelayProcess } from "./relay-start.mjs";
+const startRelay = (port) =>
+  startRelayProcess(relayPath, port,
+    ["--static", join(root, "web"),
+      "--pass-db", join(tmpdir(), `kant-cli-passes-${Date.now()}.sqlite`)]);
 
 const port = 8901 + Math.floor(Math.random() * 90);
 const relay = await startRelay(port);

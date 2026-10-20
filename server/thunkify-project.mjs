@@ -1,0 +1,279 @@
+#!/usr/bin/env node
+// server/thunkify-project.mjs — Generic project thunkification
+//
+// Walks a project directory, finds source modules, wraps each as a thunk
+// definition with `reduce(state, input)` + `initialState`, stores in ThunkStore,
+// and advertises on the relay mesh. Pattern reused from nora-thunk-bridge.mjs.
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
+import { ThunkStore } from "./thunk-store.mjs";
+import { Thunk } from "./thunk.mjs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const PROJECT_ROOT = process.env.PROJECT_ROOT || "/home/mdupont/projects/twitterstorm/tracker";
+const THUNK_STORE_DIR = process.env.THUNK_STORE_DIR || "/tmp/thunks-twitterstorm";
+const RELAY_URL = process.env.RELAY_URL || "http://localhost:8787";
+const DISCOVERY_ROOM = process.env.DISCOVERY_ROOM || "thunk-servers";
+const TARGET_DIRS = (process.env.TARGET_DIRS || "src,scripts").split(",").map(s => s.trim());
+const MAX_FILES = Number(process.env.MAX_FILES) || 500;
+const SKIP_RELAY = process.env.SKIP_RELAY === "1";
+
+const EXTENSIONS = [".js", ".mjs", ".ts"];
+const EXCLUDE_DIRS = [
+  "node_modules", ".git", "dist", "build", ".wrangler", "coverage", "vendor",
+  ".lake", ".kilo", ".freebuff", "data", "secrets-quarantine",
+  ".ruff_cache", "worktrees", "twitterstorm-worktrees",
+  "aristo", "archive", "others",
+];
+const EXCLUDE_PATTERNS = [".d.ts", ".test.", ".spec.", "schema.", "migrations"];
+const LARGE_FILE_THRESHOLD = 512 * 1024; // skip files > 512KB
+
+function shouldProcessFile(file, sourceText) {
+  const ext = path.extname(file);
+  if (!EXTENSIONS.includes(ext)) return false;
+  if (EXCLUDE_PATTERNS.some(x => file.includes(x))) return false;
+  if (sourceText.length > LARGE_FILE_THRESHOLD) return false;
+  return true;
+}
+
+function collectSourceFiles(dir, out = []) {
+  if (out.length >= MAX_FILES * 3) return out;
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (out.length >= MAX_FILES * 3) break;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const base = entry.name;
+        if (EXCLUDE_DIRS.includes(base) || base.startsWith(".")) continue;
+        const relToRoot = path.relative(PROJECT_ROOT, full);
+        const inTarget = TARGET_DIRS.some(d => relToRoot === d || relToRoot.startsWith(d + path.sep));
+        const parentInTarget = TARGET_DIRS.some(d => relToRoot.split(path.sep).slice(0, -1).join(path.sep).startsWith(d));
+        if (inTarget || parentInTarget) {
+          collectSourceFiles(full, out);
+        }
+      } else if (entry.isFile()) {
+        try {
+          const sourceText = fs.readFileSync(full, "utf8");
+          if (shouldProcessFile(full, sourceText)) {
+            const relToRoot = path.relative(PROJECT_ROOT, full);
+            const atRoot = dir === PROJECT_ROOT;
+            const inTarget = TARGET_DIRS.some(d => atRoot ? d === "." : relToRoot === d || relToRoot.startsWith(d + path.sep));
+            const parentInTarget = atRoot ? false : TARGET_DIRS.some(d => relToRoot.split(path.sep).slice(0, -1).join(path.sep).startsWith(d));
+            if (inTarget || parentInTarget) {
+              out.push({ file: full, sourceText });
+            }
+          }
+        } catch {
+          // skip unreadable files
+        }
+      }
+    }
+  } catch (e) {
+    // ignore permission errors etc.
+  }
+  return out;
+}
+
+function extractModuleName(file, projectRoot) {
+  const rel = path.relative(projectRoot, file);
+  return rel.replace(/\.(js|ts|mjs|jsx|tsx)$/, "").replace(/[\\/]/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Sanitize source for embedding in a thunk string.
+ *
+ * The thunk sandbox's loadSource() rejects any source containing
+ * `import(` or `import.meta`. Since the original source is only stored
+ * as a string constant inside the thunk (never executed), we can safely
+ * replace these patterns with inert placeholders.
+ */
+function sanitizeForThunk(sourceText) {
+  // import.meta.url → __IMPORT_META_URL__
+  // import.meta → __IMPORT_META__
+  // import("...") / import ('...') → __DYNAMIC_IMPORT__("...")
+  // import( → __DYNAMIC_IMPORT__(
+  let s = sourceText;
+  s = s.replace(/\bimport\s*\.\s*meta\s*\.\s*url\b/g, "__IMPORT_META_URL__");
+  s = s.replace(/\bimport\s*\.\s*meta\b/g, "__IMPORT_META__");
+  s = s.replace(/\bimport\s*\(/g, "__DYNAMIC_IMPORT__(");
+  return s;
+}
+
+function makeThunkSource(moduleName, sourcePath, sourceText) {
+  const safeName = moduleName.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const sourceHash = crypto.createHash("sha256").update(sourceText).digest("hex").slice(0, 16);
+  const safeSource = sanitizeForThunk(sourceText);
+  const escapedSource = JSON.stringify(safeSource).slice(1, -1);
+  return `// Thunkified from: ${sourcePath}
+// Original module: ${moduleName}
+// Generated by thunkify-project.mjs
+// Source hash: ${sourceHash}
+// Sanitized: ESM patterns replaced with placeholders for sandbox compatibility
+
+const MAX_STATE_SIZE = 1024 * 1024;
+
+const originalSource = ${JSON.stringify(safeSource)};
+
+function reduce(state, input) {
+  // ${safeName} thunk - wraps module state transitions
+  // Input types: "init", "update", "query", "snapshot", "reset"
+  const s = state ?? { initialized: false, data: null, lastUpdate: 0 };
+
+  switch (input?.type) {
+    case "init": {
+      return {
+        ...s,
+        initialized: true,
+        data: input.config ?? {},
+        lastUpdate: Date.now(),
+        module: "${moduleName}",
+      };
+    }
+    case "update": {
+      if (!s.initialized) return s;
+      return {
+        ...s,
+        data: { ...s.data, ...input.data },
+        lastUpdate: Date.now(),
+      };
+    }
+    case "query": {
+      return { ...s };
+    }
+    case "snapshot": {
+      return {
+        initialized: s.initialized,
+        data: s.data,
+        lastUpdate: s.lastUpdate,
+        module: s.module,
+      };
+    }
+    case "reset": {
+      return { initialized: false, data: null, lastUpdate: 0, module: "${moduleName}" };
+    }
+    default:
+      return s;
+  }
+}
+
+const initialState = {
+  initialized: false,
+  data: null,
+  lastUpdate: 0,
+  module: "${moduleName}",
+  sourcePath: "${sourcePath}",
+  sourceHash: "${sourceHash}",
+};
+
+module.exports = { reduce, initialState };
+`
+}
+
+let relayReady = false;
+let relaySocket = null;
+
+async function ensureRelay() {
+  if (SKIP_RELAY) return false;
+  if (relaySocket && relaySocket.readyState === 1) return true;
+  try {
+    const WebSocket = (await import("ws")).default;
+    const wsUrl = new URL(`/ws/${DISCOVERY_ROOM}`, RELAY_URL).toString().replace("http:", "ws:");
+    relaySocket = new WebSocket(wsUrl);
+    await new Promise((resolve) => {
+      relaySocket.on("open", () => { relayReady = true; resolve(); });
+      relaySocket.on("error", () => resolve());
+      relaySocket.on("close", () => { relayReady = false; });
+      setTimeout(() => resolve(), 3000);
+    });
+  } catch (e) {
+    console.error(`[thunkify] relay connection failed: ${e.message}`);
+  }
+  return relayReady;
+}
+
+async function advertiseOnRelay(thunkId, name, version) {
+  if (SKIP_RELAY) return false;
+  if (!relaySocket || relaySocket.readyState !== 1) {
+    const ok = await ensureRelay();
+    if (!ok) return false;
+  }
+  return new Promise((resolve) => {
+    if (relaySocket.readyState !== 1) return resolve(false);
+    relaySocket.send(JSON.stringify({ type: "thunk-announce", thunkId, name, version }));
+    resolve(true);
+  });
+}
+
+async function main() {
+  console.log(`[thunkify-project] starting`);
+  console.log(`  PROJECT_ROOT: ${PROJECT_ROOT}`);
+  console.log(`  THUNK_STORE_DIR: ${THUNK_STORE_DIR}`);
+  console.log(`  RELAY_URL: ${RELAY_URL}`);
+  console.log(`  TARGET_DIRS: ${TARGET_DIRS.join(", ")}`);
+  console.log(`  MAX_FILES: ${MAX_FILES}`);
+
+  if (!fs.existsSync(PROJECT_ROOT)) {
+    console.error(`[thunkify-project] PROJECT_ROOT not found: ${PROJECT_ROOT}`);
+    process.exit(1);
+  }
+
+  const thunkStore = new ThunkStore(THUNK_STORE_DIR);
+
+  const collected = collectSourceFiles(PROJECT_ROOT, []);
+  const files = collected.slice(0, MAX_FILES);
+  console.log(`[thunkify-project] found ${collected.length} candidate files, processing ${files.length}`);
+
+  await ensureRelay();
+  console.log(`[thunkify-project] relay ready: ${relayReady}`);
+
+  const results = [];
+  let stored = 0;
+  for (const { file, sourceText } of files) {
+    try {
+      const moduleName = extractModuleName(file, PROJECT_ROOT);
+      const source = makeThunkSource(moduleName, file, sourceText);
+      const version = "1.0.0";
+
+      const id = await Thunk.load(source, moduleName, version).then(t => thunkStore.store(t));
+      const announced = await advertiseOnRelay(id, moduleName, version);
+
+      results.push({ module: moduleName, file, thunkId: id, announced });
+      stored++;
+      if (stored % 10 === 0) console.log(`[thunkify-project] ${stored}/${files.length} thunks stored...`);
+    } catch (e) {
+      console.error(`[thunkify-project] error for ${file}: ${e.message}`);
+      results.push({ module: extractModuleName(file, PROJECT_ROOT), file, error: e.message });
+    }
+  }
+
+  console.log(`[thunkify-project] completed: ${stored}/${files.length} thunks stored`);
+  console.log(`[thunkify-project] announced: ${results.filter(r => r.announced).length}/${stored} on relay`);
+
+  // Write summary to store dir
+  const summaryPath = path.join(THUNK_STORE_DIR, "thunkify-summary.json");
+  const summary = {
+    createdAt: new Date().toISOString(),
+    projectRoot: PROJECT_ROOT,
+    targetDirs: TARGET_DIRS,
+    totalFiles: files.length,
+    stored: stored,
+    modules: results.filter(r => r.thunkId).map(r => ({ module: r.module, file: r.file, thunkId: r.thunkId, announced: r.announced })),
+    errors: results.filter(r => r.error).map(r => ({ module: r.module, file: r.file, error: r.error })),
+  };
+  fs.mkdirSync(THUNK_STORE_DIR, { recursive: true });
+  fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2), "utf8");
+  console.log(`[thunkify-project] summary written to ${summaryPath}`);
+
+  process.exit(0);
+}
+
+main().catch((e) => {
+  console.error("[thunkify-project] fatal", e);
+  process.exit(1);
+});

@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- Without this the browser asks for /favicon.ico on every load and logs a
+     404, which the browser check counts as a console error. -->
+<link rel="icon" href="kant-logo.svg" type="image/svg+xml">
 <title>Kant — a private room you share with one link</title>
 <style>
   :root { --ink: #0f0; --dim: #7a7; --hi: #0ff; --bg: #0a0a0a; --panel: #111; }
@@ -41,6 +44,35 @@
           padding: 10px; min-height: 180px; max-height: 46vh; overflow-y: auto;
           font-family: ui-monospace, monospace; font-size: .9rem; }
   #chat .me { color: var(--hi); }
+  /* A transcript, one line per message. `kant-pretty.mjs` builds these
+     strings; nothing here decides what a line says. */
+  #chat .daysep { display: flex; align-items: center; gap: 8px; margin: 12px 0 6px;
+                  color: var(--dim); font-size: .75rem; letter-spacing: .18em; }
+  #chat .daysep::before, #chat .daysep::after { content: ""; flex: 1;
+                                                border-top: 1px solid #222; }
+  #chat .line { display: flex; gap: 8px; align-items: baseline;
+                padding: 2px 0; overflow-wrap: anywhere; }
+  #chat .line.grouped { padding-top: 0; }
+  #chat .who { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
+  #chat .name { color: var(--hi); }
+  #chat .indent { flex: 0 0 auto; width: 22px; }
+  #chat .at { color: var(--dim); flex: 0 0 auto; font-size: .8rem;
+              font-variant-numeric: tabular-nums; }
+  #chat .body { flex: 1 1 auto; }
+  #chat .avatar { width: 20px; height: 20px; border-radius: 50%;
+                  object-fit: cover; flex: 0 0 auto; }
+  #chat .avatar.initial { display: inline-flex; align-items: center;
+                          justify-content: center; background: #1a2a1a;
+                          color: var(--ink); font-size: .7rem; }
+  #chat .kcode { background: #06210b; border: 1px solid #1a5; border-radius: 4px;
+                 padding: 0 4px; font-family: ui-monospace, monospace;
+                 font-size: .85rem; overflow-wrap: anywhere; }
+  #chat details.clip > summary { cursor: pointer; color: var(--dim); }
+  #chat details.clip .full { border-left: 2px solid #1a5; padding-left: 8px;
+                             margin-top: 4px; white-space: pre-wrap; }
+  #profile { margin: 10px 0; padding: 10px; background: var(--panel);
+             border: 1px solid #222; border-radius: 10px; }
+  #profile .row { margin-bottom: 6px; }
   #cam { width: 100%; max-width: 420px; border-radius: 10px; background: #000; }
   .row { display: flex; gap: 8px; align-items: center; }
   .row input { flex: 1; }
@@ -123,10 +155,31 @@
 <!-- --------------------------------------------------------------- chat -->
 <section id="s-chat">
   <div id="chat">(nothing said yet)</div>
+  <div id="profile">
+    <div class="row">
+      <input id="profname" placeholder="your name in this room" maxlength="64" />
+      <button id="btn-profname" class="ghost">Set</button>
+    </div>
+    <div class="row">
+      <input id="profbio" placeholder="a line about you" maxlength="512" />
+    </div>
+    <div class="row">
+      <input type="file" id="profavatar" accept="image/png,image/jpeg,image/gif,image/webp"
+             title="encrypted with the room key before it leaves this browser" />
+      <button id="btn-profavatar" class="ghost">Set picture</button>
+    </div>
+    <div class="meta" id="profstatus">your name is your own claim, covered by your key —
+      anyone may pick the same one.</div>
+  </div>
   <div class="row" style="margin-top:10px">
     <input id="say" placeholder="say something" />
     <button id="btn-send">Send</button>
   </div>
+  <div class="row" style="margin-top:6px">
+    <input type="file" id="dropfile" title="drop a file into the room — encrypted in your browser, pinned by its digest" />
+    <button id="btn-drop">Drop file</button>
+  </div>
+  <div id="files" class="meta"></div>
   <button class="ghost" id="btn-shareroom">Show the link and code</button>
   <button class="ghost" id="btn-leave">Leave the room</button>
   <div class="meta" id="chatstatus"></div>
@@ -211,6 +264,8 @@ import * as D from "./kant-diag.mjs";
 import * as C from "./kant-carddebug.mjs";
 import * as SL from "./kant-sharelog.mjs";
 import { qrEncode, qrDraw, qrPng, qrCopyPng } from "./kant-qr.mjs";
+import * as FL from "./kant-file.mjs";
+import * as PR from "./kant-pretty.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -330,7 +385,7 @@ function newNode() {
     relay: D.effectiveRelay(reach),
     log: LOG,
     reach,
-    onChange: () => { renderChat(); },
+    onChange: () => { renderChat(); renderFiles(); },
   });
 }
 
@@ -338,7 +393,7 @@ function attach(fresh) {
   if (node) node.stop();
   node = fresh;
   node.connect();
-  node.onChange = () => renderChat();
+  node.onChange = () => { renderChat(); renderFiles(); };
   node.announceSelf()
     .then(() => node.dialKnownPeers())
     .catch((e) => LOG.error("app", "could not announce into the room", e));
@@ -397,18 +452,239 @@ function transportLine() {
   return `${relay}\n${others} other person(s) heard from, ${direct} direct connection(s)`;
 }
 
+/** Avatars already fetched this session, by peer. An avatar arrives over the
+ *  network, so it cannot be in the first paint; asking for it here would send
+ *  one request per render. Cached per peer and re-requested only when the
+ *  profile names a different avatar witness. */
+const avatarFor = new Map();
+
+async function loadAvatars(peers) {
+  let changed = false;
+  for (const peer of peers) {
+    const want = node.profileOf(peer)?.avatar ?? "";
+    const have = avatarFor.get(peer);
+    if (have === want) continue;
+    avatarFor.set(peer, want);
+    const uri = want ? await node.avatarDataUri(peer) : null;
+    if (uri) { avatarFor.set(peer, want); avatarFor.set(`${peer}:uri`, uri); }
+    changed = true;
+  }
+  if (changed) renderChat();
+}
+
+function avatarHtmlFor(peer) {
+  const name = node.displayName(peer);
+  return PR.avatarHtml({
+    dataUri: avatarFor.get(`${peer}:uri`) ?? null,
+    name: peer === node.self ? "you" : name,
+    ref: D.ref(peer),
+  });
+}
+
+/** The timestamp beside a line.
+ *
+ *  A `kzat` line carries the SENDER's clock, so a bare "14:03" is only true
+ *  for the reader whose zone it happens to match. The zone is stated once per
+ *  render, the exact instant is on the hover, and an untimed line says so
+ *  rather than showing a time nobody claimed. */
+function whenHtml(m) {
+  if (m.at === null) {
+    return `<span class="at" title="this peer did not timestamp the line">·</span>`;
+  }
+  const rel = PR.relTime(m.at);
+  return `<span class="at" title="${PR.escAttr(PR.isoAt(m.at))}">` +
+    `${PR.esc(PR.clockAt(m.at))}${rel ? ` ${PR.esc(rel)}` : ""}</span>`;
+}
+
 function renderChat() {
-  if (!node) { $("chat").textContent = "(not in a room)"; $("chatstatus").textContent = ""; return; }
-  const lines = node.view();
-  $("chat").innerHTML = lines.length
-    ? lines.map((m) => {
-        const who = m.sender === node.self ? "you" : m.sender;
-        const cls = m.sender === node.self ? "me" : "";
-        return `<div class="${cls}">${K.escapeHtml(who)}: ${K.escapeHtml(N.msgText(m))}</div>`;
-      }).join("")
-    : "(nothing said yet)";
+  if (!node) {
+    $("chat").textContent = "(not in a room)";
+    $("chatstatus").textContent = "";
+    return;
+  }
+  // viewAt, not view: a kzat line carries the sender's own clock, so a peer
+  // that joins late reads the room in the order it was talked rather than in
+  // whatever order the counter happens to run in. Untimed chat from an older
+  // peer still shows, sorted last and marked, rather than vanishing.
+  //
+  // byDay does the bucketing and the ordering — untimed lines get their own
+  // bucket rather than an invented date — and kant-pretty only adds labels, so
+  // the two cannot disagree about what belongs where.
+  const sections = PR.daySections(node.viewByDay());
+  const peers = new Set(node.viewAt().map((m) => m.sender));
+  loadAvatars([...peers]).catch(() => {});
+
+  let prev = null;
+  const html = [];
+  for (const sec of sections) {
+    html.push(PR.dayHtml(sec.label));
+    for (const m of sec.messages) {
+      // Consecutive lines from one peer within a minute share an author block.
+      // A gap in time, or a change of speaker, starts a new block — a run is
+      // about a burst, not about who happened to speak last.
+      const grouped = Boolean(prev) && prev.sender === m.sender &&
+        prev.at !== null && m.at !== null && Math.abs(m.at - prev.at) < 60000;
+      const quoted = quoteOf(m);
+      html.push(PR.lineHtml({
+        who: m.sender === node.self ? "you" : node.displayName(m.sender),
+        avatar: avatarHtmlFor(m.sender),
+        when: whenHtml(m),
+        text: `${quoted ? `${quoted} ` : ""}${N.msgText(m)}`,
+        title: m.at === null ? "this peer did not timestamp the line" : PR.isoAt(m.at),
+        grouped,
+        mine: m.sender === node.self,
+      }));
+      prev = m;
+    }
+  }
+
+  $("chat").innerHTML = html.length ? html.join("") : "(nothing said yet)";
   $("chat").scrollTop = $("chat").scrollHeight;
-  $("chatstatus").textContent = transportLine();
+  $("chatstatus").textContent =
+    transportLine() + `\ntimes shown in ${PR.tzLabel()} — a peer sets its own clock`;
+  renderProfileStatus();
+}
+
+function renderProfileStatus() {
+  const box = $("profstatus");
+  if (!box || !node) return;
+  const mine = node.profileOf(node.self);
+  const state = mine
+    ? `showing as ${mine.name}${mine.bio ? ` — ${mine.bio}` : ""}${mine.avatar ? " (picture set)" : ""}`
+    : "no name set — you show up as your short ref until you set one";
+  // The caveat stays in every state. It is the whole reason the witness is
+  // the identity and the name is not, and a warning that only appears before
+  // you have used the feature is a warning most people never read.
+  box.textContent =
+    `${state}. Your name is your own claim, covered by your key: nobody can ` +
+    "put it on your messages, and anyone may pick the same one.";
+}
+
+/** The file a line is quoting, if any: a `kzquote` body is the sender's
+ *  text prefixed by the file's witness, so the quote is checkable against a
+ *  file the room actually announced rather than being free text. */
+function quoteOf(m) {
+  const files = node?.files ?? [];
+  for (const f of files) {
+    const w = FL.manifestWitness(f);
+    const prefix = `kzquote:${w.slice(0, 12)}… `;
+    if (N.msgText(m).startsWith(prefix)) return `re: ${f.name}`;
+  }
+  return null;
+}
+
+/** The files dropped in the room, ours and others'.  A click fetches
+ *  every chunk by its digest from the relay, decrypts with the room
+ *  secret, and saves the file — the relay never saw a plaintext byte. */
+function renderFiles() {
+  const box = $("files");
+  if (!box) return;
+  if (!node) { box.textContent = ""; return; }
+  const files = node.files ?? [];
+  box.innerHTML = files.length
+    ? "dropped: " + files.map((f, i) =>
+        `<a href="#" data-f="${i}">${K.escapeHtml(f.name)}</a>` +
+        ` <span>(${f.size}B, ${f.cids.length} chunk${f.cids.length > 1 ? "s" : ""}` +
+        `${f.ipfs?.length ? ", pinned on ipfs" : ""})</span>` +
+        ` <a href="#" data-q="${i}" title="reply in the room, quoting this file">quote</a>`
+      ).join(" · ")
+    : "";
+  for (const a of box.querySelectorAll("a[data-q]")) {
+    a.onclick = async (ev) => {
+      ev.preventDefault();
+      await quoteFile(files[Number(a.dataset.q)]);
+    };
+  }
+  for (const a of box.querySelectorAll("a[data-f]")) {
+    a.onclick = async (ev) => {
+      ev.preventDefault();
+      const f = files[Number(a.dataset.f)];
+      try {
+        const bytes = await FL.decryptFile(node.secret, f, (cid) => fetchChunkFor(f, cid));
+        const url = URL.createObjectURL(new Blob([bytes], { type: f.mime }));
+        const link = document.createElement("a");
+        link.href = url; link.download = f.name; link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } catch (e) {
+        LOG.error("app", "a file could not be fetched or decrypted", e.message);
+      }
+    };
+  }
+}
+
+/**
+ * Where one chunk of one file comes from.
+ *
+ * Three places, tried in order of how much they trust the network: the
+ * swarm first (a peer-to-peer pubsub answer), then IPFS, then the relay's
+ * own block store. All three hand back CIPHERTEXT, which `decryptFile`
+ * checks against the chunk's Kant witness before it decrypts anything —
+ * so a peer that lies about a chunk costs a failed download, never a
+ * corrupted file.
+ *
+ * The swarm is optional in every direction. If libp2p did not start, or the
+ * file was announced before this peer joined its topic, the fallbacks carry
+ * the download on their own; nothing here is load-bearing for correctness,
+ * only for speed and for peers who are not reachable through the relay.
+ */
+async function fetchChunkFor(f, cid) {
+  const viaRelay = async () => new Uint8Array(await (await fetch(
+    `${node.relayBase}/room/${encodeURIComponent(f.room)}/block/${cid}`)).arrayBuffer());
+
+  const swarm = await libp2p();
+  if (swarm) {
+    try {
+      const { libp2pFetcher, topicOf } = await import("./kant-libp2p.mjs");
+      const topic = topicOf(f.room, FL.manifestWitness(f));
+      const fetchChunk = libp2pFetcher(swarm.transport, {
+        topic, cidOf: FL.cidOf, timeoutMs: 2500,
+      });
+      try {
+        return await fetchChunk(cid);
+      } finally {
+        fetchChunk.close();
+      }
+    } catch (e) {
+      // No peer answered. That is the normal case on a small room, so it is
+      // not worth a console error — the fallbacks below are the point.
+      LOG.warn("app", "no swarm answer for a chunk, falling back", e.message);
+    }
+  }
+
+  // IPFS, when the manifest named locations for this file.
+  if (f.ipfs?.length) {
+    try {
+      const { getChunk } = await import("./kant-file-ipfs.mjs");
+      const at = f.cids.indexOf(cid);
+      const ipfsCid = f.ipfs[at]?.ipfs ?? f.ipfs[at];
+      if (ipfsCid) {
+        const got = await getChunk(ipfsCid);
+        if (got) return new Uint8Array(got);
+      }
+    } catch (e) {
+      LOG.warn("app", "no ipfs copy of a chunk, falling back", e.message);
+    }
+  }
+
+  return viaRelay();
+}
+
+/** The swarm, started once, or null if libp2p is unavailable here. */
+let _swarm = null;
+let _swarmTried = false;
+async function libp2p() {
+  if (_swarmTried) return _swarm;
+  _swarmTried = true;
+  try {
+    const { libp2pNode } = await import("./kant-libp2p.mjs");
+    _swarm = await libp2pNode({
+      onError: (e) => LOG.warn("app", "libp2p", e?.message ?? String(e)),
+    });
+    if (!_swarm) LOG.warn("app", "no swarm: files will come from ipfs and the relay");
+  } catch (e) {
+    LOG.warn("app", "libp2p did not load", e.message);
+  }
+  return _swarm;
 }
 
 // -------------------------------------------------------------- the taps
@@ -491,10 +767,143 @@ $("btn-send").onclick = async () => {
   const text = $("say").value;
   if (!text) return;
   $("say").value = "";
-  await node.say(text);
+  // Stamped: the line carries our own clock, so a peer joining tomorrow
+  // reads the room in the order it was talked. An old peer still reads it —
+  // it ignores kzat lines rather than choking on them.
+  await node.sayAt(text);
   dispatch({ type: "say" });
 };
+
+/** Reply to a dropped file, quoting it back into the room. */
+async function quoteFile(f) {
+  if (!node) return;
+  const text = $("say").value.trim() || `re: ${f.name}`;
+  $("say").value = "";
+  await node.quoteFile(f, text);
+  dispatch({ type: "say" });
+}
 $("say").onkeydown = (e) => { if (e.key === "Enter") $("btn-send").click(); };
+
+// ------------------------------------------------------------- the profile
+//
+// A name here is a CLAIM, and the page says so under the box. It is covered
+// by the peer's own witness, so nobody can put your name on their messages —
+// but nothing stops two peers choosing the same name, and nothing stops you
+// changing yours. That is a property of Kant, not an oversight: there is no
+// name registry, and adding one would mean a server that knows who you are.
+
+$("btn-profname").onclick = async () => {
+  if (!node || !node.room) { LOG.warn("app", "join a room before naming yourself", ""); return; }
+  const name = $("profname").value.trim();
+  if (!name) { LOG.warn("app", "a profile needs a name", ""); return; }
+  if (name.length > N.PROF_LIMITS.name) {
+    LOG.warn("app", `a name is at most ${N.PROF_LIMITS.name} characters`,
+      `${name.length} given — readers would refuse the line`);
+    return;
+  }
+  try {
+    await node.setProfile(name, {
+      bio: $("profbio").value.trim().slice(0, N.PROF_LIMITS.bio),
+      // Keep a picture already set: publishing a name must not silently drop
+      // the avatar, which is the kind of quiet data loss this page has been
+      // bitten by elsewhere.
+      avatar: node.profileOf(node.self)?.avatar ?? "",
+    });
+    LOG.info("app", "profile published", name);
+  } catch (e) {
+    LOG.error("app", "the profile did not reach the room", e.message);
+  }
+};
+
+$("btn-profavatar").onclick = async () => {
+  if (!node || !node.secret) { LOG.warn("app", "no room to put a picture in", ""); return; }
+  const picked = $("profavatar").files[0];
+  if (!picked) { LOG.warn("app", "no picture picked", ""); return; };
+  if (!/^image\/(png|jpeg|gif|webp)$/.test(picked.type)) {
+    LOG.warn("app", `not a picture type readers will render (${picked.type})`,
+      "png, jpeg, gif and webp only — svg can carry script");
+    return;
+  }
+  LOG.info("app", `setting a picture (${picked.name})`, "encrypting and pinning…");
+  try {
+    const data = new Uint8Array(await picked.arrayBuffer());
+    await node.setAvatar(data, picked.type, { name: picked.name });
+    LOG.info("app", "picture set", "encrypted with the room key; the relay saw ciphertext");
+  } catch (e) {
+    LOG.error("app", "the picture could not be set", e.message);
+  }
+  $("profavatar").value = "";
+};
+
+// Drop a file: encrypt it in this browser with a key only the room knows,
+// pin every ciphertext chunk on the relay under its witness, then announce
+// the manifest as an ordinary self-certifying room line. With a kubo
+// reachable the chunks are pinned on IPFS too, and the manifest carries
+// both names — the witness, which is what the signature covers, and the
+// CID, which is where the bytes can be fetched.
+$("btn-drop").onclick = async () => {
+  if (!node || !node.secret) { LOG.warn("app", "no room to drop into", ""); return; }
+  const picked = $("dropfile").files[0];
+  if (!picked) { LOG.warn("app", "no file picked", ""); return; }
+  const data = new Uint8Array(await picked.arrayBuffer());
+  LOG.info("app", `dropping ${picked.name} (${data.length}B)`, "encrypting…");
+  try {
+    const enc = await FL.encryptFile(node.secret, picked.name, picked.type || "application/octet-stream", data);
+    for (let i = 0; i < enc.cids.length; i += 1) {
+      const r = await fetch(
+        `${node.relayBase}/room/${encodeURIComponent(node.room)}/block/${enc.cids[i]}`,
+        { method: "POST", body: enc.chunks[i] });
+      if (!r.ok) throw new Error(`the relay refused chunk ${i} (${r.status})`);
+    }
+    // Pin on IPFS as well. A partial pin is announced as relay-only rather
+    // than carrying names a reader could chase and fail to find.
+    let ipfs = [];
+    try {
+      const { putChunks } = await import("./kant-file-ipfs.mjs");
+      const res = await putChunks(enc.chunks);
+      if (res.complete) ipfs = res.cids;
+      else LOG.warn("app", `ipfs kept ${res.cids.length}/${enc.chunks.length} chunk(s)`,
+        "announcing relay-only");
+    } catch (e) {
+      LOG.warn("app", "no ipfs daemon reachable", "announcing relay-only");
+    }
+    node.seq += 1;
+    const m = FL.manifest(node.room, node.self, node.seq,
+      enc.name, enc.mime, enc.size, enc.nonce, enc.cids, ipfs);
+    await node.publish(FL.printManifest(m));
+
+    // Offer the chunks on the swarm too. A topic is scoped to this one
+    // file, so a peer subscribed to it gets exactly these chunks and no
+    // other file's. The chunks are already ciphertext; the room secret
+    // never enters this, so a peer in the topic learns the file's size and
+    // chunk count and nothing more.
+    let swarmServed = 0;
+    try {
+      const swarm = await libp2p();
+      if (swarm) {
+        const { serveChunks, topicOf } = await import("./kant-libp2p.mjs");
+        const topic = topicOf(node.room, FL.manifestWitness(m));
+        serveChunks(swarm.transport, {
+          topic,
+          chunks: new Map(enc.chunks.map((c, i) => [enc.cids[i], c])),
+          cidOf: FL.cidOf,
+        });
+        swarmServed = enc.chunks.length;
+      }
+    } catch (e) {
+      // Not being on the swarm is fine: the relay and IPFS copies stand.
+      LOG.warn("app", "chunks not offered on the swarm", e.message);
+    }
+
+    LOG.info("app", `dropped ${picked.name}`,
+      `${enc.cids.length} chunk(s) on the relay` +
+      `${ipfs.length ? `, ${ipfs.length} pinned on ipfs` : ""}` +
+      `${swarmServed ? `, ${swarmServed} offered on the swarm` : ""}`);
+  } catch (e) {
+    LOG.error("app", "the file could not be dropped", e.message);
+  }
+  $("dropfile").value = "";
+};
 
 $("btn-leave").onclick = () => {
   if (node) node.stop();
@@ -509,7 +918,7 @@ $("btn-leave").onclick = () => {
  * wrapped in a sentence, in brackets, with a full stop after it, or with a
  * trailing newline.
  */
-function joinFrom(text, msgId) {
+async function joinFrom(text, msgId) {
   const inv = F.findInvite(text);
   if (!inv) {
     // Say what it *is*, not only what it is not (`Kant.CardDebug.classify`).
@@ -531,8 +940,17 @@ function joinFrom(text, msgId) {
   }
   const fresh = newNode();
   fresh.joinInvite(N.copyInvite(inv));
+  // The relay in the invite is used only if it answers; otherwise the one
+  // serving this page, loudly. `joinFrom` was synchronous and is now not —
+  // every caller is a click handler or startup, so awaiting is safe.
+  const settled = await fresh.settleRelay({ fallback: D.effectiveRelay(reach) });
   attach(fresh);
-  $(msgId).textContent = `joined room ${fresh.room.slice(0, 12)}…`;
+  $(msgId).textContent = settled.fellBack
+    ? `joined room ${fresh.room.slice(0, 12)}… — but the relay this invitation names ` +
+      `(${settled.from}) did not answer, so this is <b>not</b> the room the sender is in. ` +
+      "Ask them to send a fresh invitation."
+    : `joined room ${fresh.room.slice(0, 12)}…`;
+  $(msgId).className = settled.fellBack ? "meta bad" : "meta";   // `.bad` is colour only
   dispatch({ type: "joinText", text });
   return true;
 }
@@ -562,7 +980,8 @@ async function startCamera() {
       const found = await detector.detect(video).catch(() => []);
       if (found.length) {
         const text = found[0].rawValue;
-        joinFrom(text, "scanmsg");
+        camera = null;          // stop scanning before awaiting the join
+        await joinFrom(text, "scanmsg");
         return;
       }
       requestAnimationFrame(tick);
@@ -633,11 +1052,21 @@ async function copy(text) {
 async function refreshTransport() {
   reach = await D.resolveReachability({
     configured: relayBase,
-    origin: location.origin,
+    // The directory this page came from, not `location.origin`: a relay
+    // mounted at a sub-path answers /health under that prefix. See
+    // `D.servedBase` — probing the bare origin is why this deployment could
+    // not find the relay it was served by.
+    origin: D.servedBase(location.href),
     log: LOG,
   });
+  // `used` is what we would talk to; `relayUsable` is whether it answered.
+  // They differ exactly when a relay is configured and down — `effectiveRelay`
+  // hands back a configured relay whether or not the probe found it, so asking
+  // `used` alone had the banner announce a dead relay as up. The dead one this
+  // deployment actually had answered that way for as long as it was configured.
   const used = D.effectiveRelay(reach);
-  const text = used
+  const live = D.relayUsable(reach) && used !== "";
+  const text = live
     ? (reach.configured
         ? `Relay ${used} is up — other devices can join.`
         : `This page is served by a relay (${used}) — other browsers on this machine, ` +
@@ -648,7 +1077,7 @@ async function refreshTransport() {
         : "No relay: two tabs of THIS browser will find each other, but a second " +
           "browser or a second device will not. Serve the page with " +
           "`node server/relay.mjs --static web`, or set `relay =` in kant.config.");
-  $("transport").innerHTML = used ? K.escapeHtml(text) : `<span class="warn">${K.escapeHtml(text)}</span>`;
+  $("transport").innerHTML = live ? K.escapeHtml(text) : `<span class="warn">${K.escapeHtml(text)}</span>`;
   $("relaymsg").textContent = text;
   if (node) {
     node.reach = reach;
@@ -781,8 +1210,10 @@ $("btn-diagpage").onclick = () => {
   $("icon").value = cfg.picture;
 
   // An invite link opened in the browser walks straight into the room.
+  // Awaited: `joinFrom` settles the relay before attaching, and rendering
+  // before it finishes would paint a page with no room on it.
   const frag = location.hash.slice(1);
-  if (frag && F.findInvite(frag)) joinFrom(frag, "joinmsg");
+  if (frag && F.findInvite(frag)) await joinFrom(frag, "joinmsg");
 
   render();
   renderDiag();

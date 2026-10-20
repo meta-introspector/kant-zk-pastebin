@@ -313,6 +313,29 @@ export function findReport(text) {
 
 // ------------------------------------------------------------ probing relays
 
+/**
+ * The base URL to probe for a relay, derived from where this page is served.
+ *
+ * `location.origin` is not it. A relay mounted under a sub-path — and this one
+ * is, at https://solana.solfunmeme.com/p2p-relay — answers `/health` and
+ * `/room/{room}` under that prefix, so probing the bare origin asks
+ * https://solana.solfunmeme.com/health, gets a 404, and the client concludes
+ * that nobody outside this browser can join. Which is what it did, silently,
+ * while the relay it was looking for was answering perfectly well one path down.
+ *
+ * The directory the page was served from is the right base: it equals the bare
+ * origin when the relay serves at the root, which is the
+ * `node server/relay.mjs --static web` case the config describes, and carries
+ * the mount prefix when it does not.
+ */
+export function servedBase(href) {
+  try {
+    return new URL(".", href).href.replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
 /** Ask a base URL whether it is a relay.  Never throws: every outcome is
  *  a value, and every outcome is logged. */
 export async function probeRelay(base, { fetchImpl = globalThis.fetch, log = null,
