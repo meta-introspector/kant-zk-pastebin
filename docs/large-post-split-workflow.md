@@ -60,6 +60,36 @@ Response shape:
 
 Implementation: `src/handlers.rs:3656`
 
+### `POST /archive-pattern/{session_id}`
+
+Selects the files of an uploaded/browsed archive by pattern, so the selection can be split. The session is the one `/upload-archive` returned; sessions are persisted under `$UUCP_SPOOL/archive_sessions/<session_id>.json`, so an archive browsed before a restart still resolves.
+
+Request:
+
+```json
+{
+  "pattern": "src/**/*.rs"
+}
+```
+
+Pattern language:
+
+- `*` matches within one path segment; `**` crosses `/` (`**/` also matches zero directories); `?` is one character; everything else is literal.
+- A pattern with no `/` also matches the bare file name, so `*.md` finds `docs/README.md`.
+- A pattern ending in `/` selects everything under that directory.
+- Plain text (no `*`/`?`, not ending in `/`) is a case-insensitive path search that also consults the archive's prefix, ngram and tag indexes (`src/archive_utils.rs`, `PatternStore`).
+
+Response:
+
+```json
+{
+  "pattern": "src/**/*.rs",
+  "matches": ["src/main.rs", "src/db/schema.rs"],
+  "count": 2,
+  "total": 137
+}
+```
+
 ### `POST /api/split-download`
 
 Downloads split chunks as a ZIP. Accepts either `paste_id` or raw `content`.
@@ -83,6 +113,13 @@ Response:
 - No manifest or extra files
 
 Implementation: `src/handlers.rs:3720`
+
+### Archive viewer pattern bar
+
+`GET /browse-archive/{session_id}` carries a pattern bar above the file table:
+
+- **🎯 Select matching** posts the pattern to `/archive-pattern/{session_id}` and checks the matching rows, so **✂️ Split Selected** and **📝 Generate allm.txt** act on the pattern's selection.
+- **🔗 Share pattern** puts the pattern in the page URL (`?pattern=…`, percent-encoded) and copies the link; opening that link re-applies the pattern on load. Rebuilding a pattern store per call is cheap — it is derived from the session's stored entries, not persisted separately.
 
 ### `POST /api/split-upload`
 

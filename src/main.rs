@@ -698,6 +698,10 @@ async fn main() -> std::io::Result<()> {
                 web::post().to(handlers::archive_split),
             )
             .route(
+                "/archive-pattern/{session_id}",
+                web::post().to(handlers::archive_pattern),
+            )
+            .route(
                 "/archive-preview/{session_id}/{idx}",
                 web::get().to(handlers::archive_preview),
             )

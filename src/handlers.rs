@@ -4272,8 +4272,6 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     result.title = title.clone();
     result.description = description.clone();
 
-    // Create pattern store from extracted entries
-
     // Generate a session ID
     let mut hasher = Sha256::new();
     hasher.update(&file_data);
@@ -4313,11 +4311,16 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
         return Ok(HttpResponse::InternalServerError()
             .json(serde_json::json!({"error": "failed to persist archive"})));
     }
-    // Store for later access
+    // Store for later access, in memory and on disk: the in-memory map alone
+    // lost every browsable archive on restart. A failed write must not fail
+    // the upload -- the archive file and its sidecar are already stored.
     ARCHIVE_STORE
         .lock()
         .unwrap()
-        .insert(session_id.clone(), result);
+        .insert(session_id.clone(), result.clone());
+    if let Err(e) = crate::archive_store::save_session(&uucp_dir, &session_id, &result) {
+        error!("[upload_archive] failed to persist session {}: {}", session_id, e);
+    }
     // CID dedup file
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
     publish_cid_alias("upload_archive", &cid_file, &steam_id);
@@ -4481,6 +4484,13 @@ input[type="checkbox"]{{accent-color:#0f0}}
   <button id="splitBtn" onclick="splitSelected()">✂️ Split Selected</button>
 </div>
 
+<div class="actions">
+  <input id="patternInput" type="text" size="26" placeholder="src/**/*.rs · *.md · docs/ · lean" style="background:#000;color:#0f0;border:1px solid #0f0;padding:8px">
+  <button id="patternBtn" onclick="selectByPattern()">🎯 Select matching</button>
+  <button id="shareBtn" onclick="sharePattern()">🔗 Share pattern</button>
+  <div class="summary" id="patternStatus" style="margin-top:8px">Match files by pattern, then Split or Generate the same selection.</div>
+</div>
+
 <table>
 <thead><tr><th style="width:30px"></th><th>File</th><th>Size</th><th>Type</th></tr></thead>
 <tbody>
@@ -4546,6 +4556,60 @@ async function splitSelected() {{
     window.location = base_path + data.url;
   }} catch(e) {{ alert('Error: ' + e.message); }}
   finally {{ btn.disabled = false; btn.textContent = '✂️ Split Selected'; }}
+}}
+
+// ── pattern selection: the selection Split/Generate act on, shareable as a link ──
+const patternInput = document.getElementById('patternInput');
+const patternStatus = document.getElementById('patternStatus');
+
+function setSelection(paths) {{
+  const want = new Set(paths);
+  let selected = 0;
+  document.querySelectorAll('.file-select').forEach(cb => {{
+    cb.checked = want.has(cb.value);
+    if (cb.checked) selected++;
+  }});
+  updateSelectAll();
+  return selected;
+}}
+
+async function selectByPattern() {{
+  const pattern = patternInput.value.trim();
+  if (!pattern) {{ patternStatus.textContent = 'Enter a pattern first.'; return; }}
+  const btn = document.getElementById('patternBtn');
+  btn.disabled = true; btn.textContent = '⏳ Selecting...';
+  try {{
+    const res = await fetch(base_path + '/archive-pattern/' + session_id, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{pattern}})
+    }});
+    const data = await res.json();
+    if (data.error) {{ patternStatus.textContent = 'Error: ' + data.error; return; }}
+    const selected = setSelection(data.matches || []);
+    patternStatus.textContent = selected + ' of ' + data.total + ' files match “' + data.pattern + '”';
+  }} catch(e) {{ patternStatus.textContent = 'Error: ' + e.message; }}
+  finally {{ btn.disabled = false; btn.textContent = '🎯 Select matching'; }}
+}}
+
+function sharePattern() {{
+  const pattern = patternInput.value.trim();
+  if (!pattern) {{ patternStatus.textContent = 'Enter a pattern first.'; return; }}
+  const encoded = encodeURIComponent(pattern);
+  const url = location.origin + base_path + '/browse-archive/' + session_id + '?pattern=' + encoded;
+  history.replaceState(null, '', '?pattern=' + encoded);
+  const shown = () => {{ patternStatus.textContent = 'Pattern link: ' + url; }};
+  if (navigator.clipboard && navigator.clipboard.writeText) {{
+    navigator.clipboard.writeText(url).then(shown, () => prompt('Copy this pattern link', url));
+  }} else {{
+    prompt('Copy this pattern link', url);
+  }}
+}}
+
+const initialPattern = new URLSearchParams(location.search).get('pattern');
+if (initialPattern) {{
+  patternInput.value = initialPattern;
+  selectByPattern();
 }}
 
 function previewFile(idx, name) {{
@@ -4804,6 +4868,49 @@ pub async fn archive_split(
         "chunk_ids": chunk_ids,
         "total_size": all_text.len(),
         "url": format!("/paste/{}", index_id),
+    })))
+}
+
+/// POST /archive-pattern/{session_id} — select archive files by pattern.
+///
+/// The pattern is a glob (`src/**/*.rs`, `*.md`, `docs/`) or plain text. The
+/// selection is exactly what the viewer's Split button then acts on, and the
+/// viewer keeps it in the URL so a pattern can be shared as a link.
+pub async fn archive_pattern(
+    path: web::Path<String>,
+    body: web::Json<HashMap<String, String>>,
+) -> Result<HttpResponse> {
+    let session_id = path.into_inner();
+    let pattern = body.get("pattern").cloned().unwrap_or_default();
+    if pattern.trim().is_empty() {
+        return Ok(
+            HttpResponse::BadRequest().json(serde_json::json!({"error": "no pattern given"}))
+        );
+    }
+
+    let result = match get_archive_session(&session_id) {
+        Some(r) => r,
+        None => {
+            return Ok(
+                HttpResponse::NotFound().json(serde_json::json!({"error": "Session expired"}))
+            )
+        }
+    };
+
+    let store = crate::archive_utils::PatternStore::from_archive_entries(&result.entries);
+    let matches: Vec<String> = store
+        .select(&pattern)
+        .into_iter()
+        .map(|p| p.path)
+        .collect();
+    let count = matches.len();
+    let total = store.all_patterns.len();
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "pattern": pattern.trim(),
+        "matches": matches,
+        "count": count,
+        "total": total,
     })))
 }
 
