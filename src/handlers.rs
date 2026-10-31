@@ -1284,7 +1284,7 @@ function bundleSelected() {{
     .catch(e => alert('Bundle error: ' + e));
 }}
 </script>
-<script src="{share_menu}/static/a11y.js"></script>
+<script src="{bp}/static/a11y.js"></script>
 <div style="margin-top:20px;padding-top:10px;border-top:1px solid #333;font-size:11px;color:#666">
   kant-pastebin v0.2.0 | built {build_time} | git {git_commit:<7} | <a href="{bp}/api/version" style="color:#0ff">API version</a>
 </div>
