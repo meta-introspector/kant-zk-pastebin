@@ -559,6 +559,14 @@ fn read_input(path: Option<&str>) -> Result<String, String> {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn configure_integrity_route(cfg: &mut web::ServiceConfig) {
+    cfg.route("/integrity/{id}", web::get().to(handlers::get_integrity));
+}
+
+#[cfg(not(target_os = "linux"))]
+fn configure_integrity_route(_cfg: &mut web::ServiceConfig) {}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
@@ -656,6 +664,7 @@ async fn main() -> std::io::Result<()> {
             )
             .route("/preview/{id}", web::get().to(handlers::preview_paste))
             .route("/raw/{id}", web::get().to(handlers::get_raw))
+            .configure(configure_integrity_route)
             .route("/upgrade", web::post().to(handlers::upgrade_pastes))
             .route(
                 "/thread/{id}/export",

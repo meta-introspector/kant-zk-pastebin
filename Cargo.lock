@@ -3516,6 +3516,7 @@ dependencies = [
  "ipld-core 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "ipld-dagpb",
  "lazy_static",
+ "libc 0.2.186",
  "libloading",
  "libp2p",
  "libp2p-gossipsub",

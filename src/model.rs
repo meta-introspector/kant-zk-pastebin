@@ -32,6 +32,8 @@ pub struct PasteIndex {
     pub keywords: Vec<String>,
     pub cid: String,
     pub witness: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_witness: Option<String>,
     pub timestamp: String,
     pub filename: String,
     pub ngrams: Vec<(String, usize)>,

@@ -140,6 +140,9 @@ pub fn rename_allm_pastes(options: &RenameOptions) -> Result<RenameReport, Strin
         new_entry.description = Some(new_description.clone());
         new_entry.cid = new_cid.clone();
         new_entry.witness = witness;
+        // Header/content changes invalidate the previously stored envelope hash.
+        // A new witness requires a separately validated persistence workflow.
+        new_entry.envelope_witness = None;
 
         let mut item = RenameItem {
             id: new_entry.id.clone(),
@@ -443,6 +446,7 @@ mod tests {
             reply_to: None,
             size: 123,
             uucp_path: String::new(),
+            envelope_witness: None,
             root: None,
         };
         let target = derive_rename_target(&entry, content).expect("target");
@@ -452,6 +456,71 @@ mod tests {
         assert_eq!(title, "my-project");
         assert_eq!(target.selected_files, 2);
         assert_eq!(description, "2 selected files from my-project (123 bytes)");
+    }
+
+
+    #[test]
+    fn rename_invalidates_envelope_witness() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        let id = "sample";
+
+        let content = "--- sample ---\nTitle: allm.txt\nDescription: old\nKeywords: allm\nCID: old\nWitness: old\n\n=== ALLM.TXT ===\nSource archive: my-project.tar.gz\nSelected files: a.txt, b.txt\n";
+
+        let entry = PasteIndex {
+            id: id.to_string(),
+            title: "allm.txt".to_string(),
+            description: Some("old".to_string()),
+            keywords: vec!["allm".to_string()],
+            cid: "old".to_string(),
+            witness: "old".to_string(),
+            filename: "sample.txt".to_string(),
+            uucp_path: dir.join("sample.txt").display().to_string(),
+            envelope_witness: Some("old-envelope-hash".to_string()),
+            ..PasteIndex::default()
+        };
+
+        fs::write(dir.join("sample.txt"), content).unwrap();
+        let original_index = format!(
+            "{}\n",
+            serde_json::to_string(&entry).unwrap()
+        );
+        fs::write(dir.join("index.jsonl"), &original_index).unwrap();
+
+        let options = RenameOptions {
+            uucp_dir: dir.display().to_string(),
+            apply: false,
+            rename_files: false,
+            limit: None,
+        };
+
+        let preview = rename_allm_pastes(&options).unwrap();
+        assert_eq!(preview.renamed, 1);
+        assert_eq!(
+            fs::read_to_string(dir.join("index.jsonl")).unwrap(),
+            original_index
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("sample.txt")).unwrap(),
+            content
+        );
+
+        let apply_options = RenameOptions {
+            apply: true,
+            ..options
+        };
+        let applied = rename_allm_pastes(&apply_options).unwrap();
+        assert_eq!(applied.renamed, 1);
+
+        let index = fs::read_to_string(dir.join("index.jsonl")).unwrap();
+        let updated: PasteIndex = serde_json::from_str(index.trim()).unwrap();
+
+        assert_eq!(updated.id, id);
+        assert!(updated.envelope_witness.is_none());
+        assert_ne!(
+            fs::read_to_string(dir.join("sample.txt")).unwrap(),
+            content
+        );
     }
 
     #[test]

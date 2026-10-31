@@ -577,6 +577,348 @@ fn write_new_file(path: &str, data: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Read a regular spool file without following the final symlink.
+/// The spool directory itself must also not be a symlink.
+/// Linux-specific; does not establish independent authenticity.
+#[cfg(target_os = "linux")]
+fn read_integrity_file(
+    spool: &Path,
+    filename: &str,
+    max_bytes: usize,
+) -> std::io::Result<Vec<u8>> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    let invalid = || std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "invalid integrity filename",
+    );
+
+    if filename.is_empty()
+        || filename == "."
+        || filename == ".."
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.as_bytes().contains(&0)
+    {
+        return Err(invalid());
+    }
+
+    let dir_name = CString::new(spool.as_os_str().as_bytes())
+        .map_err(|_| invalid())?;
+    let file_name = CString::new(filename).map_err(|_| invalid())?;
+
+    let dir_fd = unsafe {
+        libc::open(
+            dir_name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if dir_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let dir = unsafe { OwnedFd::from_raw_fd(dir_fd) };
+
+    let fd = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            file_name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let file = fs::File::from(fd);
+
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > max_bytes as u64 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "not a regular file or size limit exceeded",
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    file.take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "integrity file exceeds size limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Hash a regular envelope in bounded memory.
+/// Reuses the secure descriptor-opening rules of the integrity reader.
+#[cfg(target_os = "linux")]
+fn hash_integrity_envelope(
+    spool: &Path,
+    filename: &str,
+    max_bytes: usize,
+) -> std::io::Result<String> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    if filename.is_empty()
+        || filename == "."
+        || filename == ".."
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.as_bytes().contains(&0)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid envelope filename",
+        ));
+    }
+
+    let dir_name = CString::new(spool.as_os_str().as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid spool path")
+    })?;
+    let file_name = CString::new(filename).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid filename")
+    })?;
+
+    let dir_fd = unsafe {
+        libc::open(
+            dir_name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if dir_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let dir = unsafe { OwnedFd::from_raw_fd(dir_fd) };
+
+    let file_fd = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            file_name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
+    if file_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let file_fd = unsafe { OwnedFd::from_raw_fd(file_fd) };
+    let mut file = fs::File::from(file_fd);
+
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > max_bytes as u64 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid envelope size or type",
+        ));
+    }
+
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total = 0usize;
+
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        total = total.checked_add(n).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "size overflow")
+        })?;
+        if total > max_bytes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "envelope exceeds size limit",
+            ));
+        }
+        hasher.update(&buffer[..n]);
+    }
+
+    if u64::try_from(total).ok() != Some(metadata.len()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "envelope length changed during hashing",
+        ));
+    }
+
+    use std::os::unix::fs::MetadataExt;
+
+    let after = file.metadata()?;
+    if !after.is_file()
+        || after.dev() != metadata.dev()
+        || after.ino() != metadata.ino()
+        || after.len() != metadata.len()
+        || after.mtime() != metadata.mtime()
+        || after.mtime_nsec() != metadata.mtime_nsec()
+        || after.ctime() != metadata.ctime()
+        || after.ctime_nsec() != metadata.ctime_nsec()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "envelope changed during hashing",
+        ));
+    }
+
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Strict index lookup for local integrity checks.
+/// Rejects malformed lines and duplicate identifiers.
+#[cfg(target_os = "linux")]
+fn read_integrity_index_entry(
+    spool: &Path,
+    id: &str,
+) -> std::io::Result<Option<PasteIndex>> {
+    const MAX_INDEX_BYTES: usize = 64 * 1024 * 1024;
+
+    let bytes = read_integrity_file(spool, "index.jsonl", MAX_INDEX_BYTES)?;
+    let content = std::str::from_utf8(&bytes).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "index is not UTF-8")
+    })?;
+
+    let mut found = None;
+    let mut seen = std::collections::HashSet::new();
+
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "empty index record",
+            ));
+        }
+
+        let entry: PasteIndex = serde_json::from_str(line).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "malformed index record",
+            )
+        })?;
+
+        if !seen.insert(entry.id.clone()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "duplicate index id",
+            ));
+        }
+
+        if entry.id == id {
+            found = Some(entry);
+        }
+    }
+
+    Ok(found)
+}
+
+/// Validate a canonical text-paste ID for the integrity endpoint.
+#[cfg(target_os = "linux")]
+fn is_safe_integrity_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_FILENAME_BYTES - ".txt".len()
+        && !id.starts_with('.')
+        && !id.ends_with('.')
+        && !id.chars().any(|c| {
+            c == '/' || c == '\\' || c.is_control()
+        })
+}
+
+/// GET /integrity/{id} — verify local persisted envelope bytes.
+/// MATCH is local consistency only, not independent authenticity.
+#[cfg(target_os = "linux")]
+pub async fn get_integrity(path: web::Path<String>) -> Result<HttpResponse> {
+    let id = path.into_inner();
+    let (status, body) = web::block(move || get_integrity_blocking(id))
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    let status = actix_web::http::StatusCode::from_u16(status)
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    Ok(HttpResponse::build(status).json(body))
+}
+
+#[cfg(target_os = "linux")]
+fn get_integrity_blocking(id: String) -> (u16, serde_json::Value) {
+    if !is_safe_integrity_id(&id) {
+        return (400, serde_json::json!({
+            "status": "ERROR",
+            "reason": "invalid_id"
+        }));
+    }
+
+    let spool = env::var("UUCP_SPOOL")
+        .unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let spool = Path::new(&spool);
+
+    let entry = match read_integrity_index_entry(spool, &id) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => return (404, serde_json::json!({
+            "status": "UNVERIFIABLE",
+            "reason": "not_indexed"
+        })),
+        Err(_) => return (500, serde_json::json!({
+            "status": "ERROR",
+            "reason": "index_unavailable_or_invalid"
+        })),
+    };
+
+    let filename = format!("{}.txt", id);
+    if entry.filename != filename {
+        return (409, serde_json::json!({
+            "status": "ERROR",
+            "reason": "filename_mismatch"
+        }));
+    }
+
+    let expected = match entry.envelope_witness.as_deref() {
+        Some(value) => value,
+        None => return (200, serde_json::json!({
+            "status": "UNVERIFIABLE",
+            "reason": "missing_envelope_witness"
+        })),
+    };
+
+    if expected.len() != 64
+        || !expected.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return (200, serde_json::json!({
+            "status": "UNVERIFIABLE",
+            "reason": "invalid_envelope_witness"
+        }));
+    }
+
+    // Provisional cap; review before deployment.
+    const MAX_ENVELOPE_BYTES: usize = 512 * 1024 * 1024;
+
+    let actual = match hash_integrity_envelope(
+        spool,
+        &filename,
+        MAX_ENVELOPE_BYTES,
+    ) {
+        Ok(actual) => actual,
+        Err(_) => return (500, serde_json::json!({
+            "status": "ERROR",
+            "reason": "envelope_unavailable_or_invalid"
+        })),
+    };
+
+    let status = if actual.eq_ignore_ascii_case(expected) {
+        "MATCH"
+    } else {
+        "MISMATCH"
+    };
+
+    (200, serde_json::json!({
+        "id": id,
+        "status": status,
+        "algorithm": "sha256",
+        "scope": "local_stored_envelope"
+    }))
+}
+
 /// Whether the current request created the CID alias or found one in place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AliasClaim {
@@ -750,6 +1092,7 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
         content, section.to_rdfa());
     // Persist the paste first. `create_new` refuses to overwrite another
     // paste with the same filename (same-second collision).
+    let envelope_witness = hex::encode(Sha256::digest(paste_content.as_bytes()));
     if let Err(e) = write_new_file(&uucp, paste_content.as_bytes()) {
         error!("[create_paste] failed to write paste {}: {}", uucp, e);
         return Ok(persist_failed());
@@ -775,6 +1118,7 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
         reply_to: paste.reply_to.clone(),
         size: content.len(),
         uucp_path: uucp.clone(),
+        envelope_witness: Some(envelope_witness),
         root: None,
     };
 
@@ -3644,6 +3988,7 @@ pub async fn api_bundle(body: web::Json<serde_json::Value>) -> Result<HttpRespon
         reply_to: None,
         size: cbor_bytes.len(),
         uucp_path: uucp.clone(),
+        envelope_witness: None,
         root: None,
     };
     let index_file = format!("{}/index.jsonl", uucp_dir);
@@ -3845,6 +4190,7 @@ async fn create_chunked_paste(
         reply_to: None,
         size: content.len(),
         uucp_path: uucp.clone(),
+        envelope_witness: None,
         root: None,
     };
     let index_line = format!("{}\n", serde_json::to_string(&index_entry).unwrap());
@@ -6087,6 +6433,107 @@ pub async fn api_git_reindex() -> Result<HttpResponse> {
         "status": "ok",
         "stats": cache.stats(),
     })))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod integrity_tests {
+    use super::*;
+
+    #[test]
+    fn envelope_hash_matches_reference() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("sample.txt"), b"hello").unwrap();
+
+        let result = hash_integrity_envelope(&dir, "sample.txt", 1024).unwrap();
+
+        assert_eq!(
+            result,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+
+    }
+    #[test]
+    fn envelope_hash_rejects_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("real.txt"), b"hello").unwrap();
+        symlink("real.txt", dir.join("link.txt")).unwrap();
+
+        assert!(
+            hash_integrity_envelope(&dir, "link.txt", 1024).is_err()
+        );
+
+    }
+
+    #[test]
+    fn envelope_hash_rejects_oversized_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("large.txt"), b"1234567890").unwrap();
+
+        assert!(
+            hash_integrity_envelope(&dir, "large.txt", 5).is_err()
+        );
+
+    }
+
+    fn sample_index(id: &str) -> PasteIndex {
+        PasteIndex {
+            id: id.to_string(),
+            filename: format!("{}.txt", id),
+            envelope_witness: Some(
+                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
+            ),
+            ..PasteIndex::default()
+        }
+    }
+
+    #[test]
+    fn integrity_index_accepts_valid_record() {
+        let temp = tempfile::tempdir().unwrap();
+        let record = sample_index("sample");
+        let json = serde_json::to_string(&record).unwrap();
+        fs::write(temp.path().join("index.jsonl"), format!("{json}\n")).unwrap();
+
+        let result = read_integrity_index_entry(temp.path(), "sample")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.id, "sample");
+        assert_eq!(result.filename, "sample.txt");
+        assert_eq!(result.envelope_witness, record.envelope_witness);
+    }
+
+    #[test]
+    fn integrity_index_rejects_malformed_jsonl() {
+        let temp = tempfile::tempdir().unwrap();
+        let record = serde_json::to_string(&sample_index("sample")).unwrap();
+
+        fs::write(
+            temp.path().join("index.jsonl"),
+            format!("{record}\n{{invalid-json\n"),
+        ).unwrap();
+
+        assert!(read_integrity_index_entry(temp.path(), "sample").is_err());
+    }
+
+    #[test]
+    fn integrity_index_rejects_duplicate_ids() {
+        let temp = tempfile::tempdir().unwrap();
+        let record = serde_json::to_string(&sample_index("sample")).unwrap();
+
+        fs::write(
+            temp.path().join("index.jsonl"),
+            format!("{record}\n{record}\n"),
+        ).unwrap();
+
+        assert!(read_integrity_index_entry(temp.path(), "sample").is_err());
+    }
+
 }
 
 #[cfg(test)]
