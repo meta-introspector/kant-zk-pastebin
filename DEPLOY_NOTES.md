@@ -62,24 +62,21 @@ The `deploy-cloudflare-worker.sh` script uses SOPS to manage Cloudflare credenti
 
 1. Ensure you have the Cloudflare API token and account ID for the kant account.
 
-2. Create a temporary file with the credentials:
+2. Encrypt the credentials into the one registry, `.sops/registry.sops.yaml`:
    ```bash
-   cat > /tmp/creds.yaml <<EOF
-   api_token: <your_cloudflare_api_token>
-   account_id: <your_cloudflare_account_id>
-   EOF
+   ./scripts/setup-cloudflare-credentials.sh
    ```
 
-3. Encrypt the credentials using SOPS and the project's PGP keys:
-   ```bash
-   sops --encrypt --pgp A76A0CF9079EC60D --pgp 445EB57704130B8D -o .sops/credentials.sops.yaml /tmp/creds.yaml
-   ```
+   This prompts for the token and account ID, merges them under the
+   `cloudflare:` key without disturbing the registry's other secrets, and
+   re-encrypts to the age and PGP recipients in `.sops.yaml`. Every reader
+   (`scripts/sops-run.sh`, `deploy-cloudflare-worker.sh`,
+   `scripts/deploy-all.sh`) reads that same file.
 
-   Note: The PGP keys are defined in `.sops.yaml`.
-
-4. Remove the temporary file:
+3. Verify it round-trips before deploying:
    ```bash
-   rm /tmp/creds.yaml
+   SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
+     sops --decrypt --output-type json .sops/registry.sops.yaml | head -3
    ```
 
 ### Deploy the Workers
