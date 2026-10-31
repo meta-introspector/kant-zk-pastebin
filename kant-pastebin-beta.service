@@ -1,5 +1,5 @@
 [Unit]
-Description=Kant Pastebin Beta (commit f60454547baebc0c1e80c5b18a4715e2375c4340)
+Description=Kant Pastebin Beta (commit 172b27eb144c11ea3a645a92fb0276bc5dfc8081)
 After=network.target
 
 [Service]
@@ -9,13 +9,13 @@ ExecStart=/mnt/data1/kant/pastebin/target/release/kant-pastebin
 Restart=always
 RestartSec=10
 Environment="UUCP_SPOOL=/mnt/data1/spool/uucp/pastebin"
-Environment="BIND_ADDR=0.0.0.0:8085"
+Environment="BIND_ADDR=127.0.0.1:8085"
 Environment="PORT=8085"
 Environment="BASE_PATH=/pastebin/beta"
 Environment="BASE_URL=https://solana.solfunmeme.com"
 Environment="RUST_LOG=info"
-Environment="GIT_COMMIT=f60454547baebc0c1e80c5b18a4715e2375c4340"
-Environment="BUILD_TIME=2026-10-25T16:25:55Z"
+Environment="GIT_COMMIT=172b27eb144c11ea3a645a92fb0276bc5dfc8081"
+Environment="BUILD_TIME=2026-10-28T14:04:05Z"
 TimeoutStartSec=0
 TimeoutStopSec=0
 NoNewPrivileges=true

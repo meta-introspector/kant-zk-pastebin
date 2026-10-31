@@ -698,6 +698,10 @@ async fn main() -> std::io::Result<()> {
                 web::post().to(handlers::archive_split),
             )
             .route(
+                "/archive-pattern/{session_id}",
+                web::post().to(handlers::archive_pattern),
+            )
+            .route(
                 "/archive-preview/{session_id}/{idx}",
                 web::get().to(handlers::archive_preview),
             )
@@ -774,6 +778,9 @@ async fn main() -> std::io::Result<()> {
                 "/api/git-reindex",
                 web::post().to(handlers::api_git_reindex),
             )
+            // Pages reference {BASE_PATH}/static/*.js; without this service those
+            // requests fall through to the paste route and 404.
+            .service(actix_files::Files::new("/static", "static"))
     })
     .bind(&bind)?
     .run()

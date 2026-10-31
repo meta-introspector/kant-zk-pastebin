@@ -34,6 +34,42 @@ pub struct PatternStore {
     pub directory_groups: HashMap<String, Vec<String>>,
 }
 
+/// Match a shell-style glob against a path.
+///
+/// `*` matches any run of characters except `/`; `**` matches across `/`
+/// (`**/` also matches zero directories); `?` matches one character except
+/// `/`. Everything else is literal.
+pub fn glob_match(pattern: &str, path: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut re = String::with_capacity(pattern.len() * 2 + 2);
+    re.push('^');
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '*' if chars.get(i + 1) == Some(&'*') => {
+                if chars.get(i + 2) == Some(&'/') {
+                    re.push_str("(?:.*/)?");
+                    i += 2;
+                } else {
+                    re.push_str(".*");
+                    i += 1;
+                }
+            }
+            '*' => re.push_str("[^/]*"),
+            '?' => re.push_str("[^/]"),
+            c => {
+                if "\\^$.|+()[]{}".contains(c) {
+                    re.push('\\');
+                }
+                re.push(c);
+            }
+        }
+        i += 1;
+    }
+    re.push('$');
+    Regex::new(&re).map(|r| r.is_match(path)).unwrap_or(false)
+}
+
 /// File category for classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FileCategory {
@@ -379,9 +415,11 @@ impl PatternStore {
         let mut results = Vec::new();
         let pat_lower = pattern.to_lowercase();
 
-        // Prefix / directory match
+        // Prefix / directory match. An empty key is the archive root: it
+        // would match every pattern (`pat.contains("")` is always true) and
+        // pull every top-level file into every search, so it is skipped.
         for (key, files) in &self.path_prefix_map {
-            if key.contains(&pat_lower) || pat_lower.contains(key) {
+            if !key.is_empty() && (key.contains(&pat_lower) || pat_lower.contains(key)) {
                 results.extend(files.clone());
             }
         }
@@ -398,6 +436,62 @@ impl PatternStore {
 
         results.sort_by(|a, b| a.path.cmp(&b.path));
         results.dedup_by(|a, b| a.path == b.path);
+        results
+    }
+
+    /// Get files whose path matches a glob pattern (`*`, `**`, `?`).
+    ///
+    /// A pattern naming no directory also matches against the bare file name,
+    /// so `*.md` finds `docs/README.md`; a pattern ending in `/` selects
+    /// everything under that directory.
+    pub fn select_by_glob(&self, pattern: &str) -> Vec<FilePattern> {
+        let pat = pattern.trim();
+        let mut results: Vec<FilePattern> = self
+            .all_patterns
+            .iter()
+            .filter(|p| {
+                let path = p.path.trim_start_matches("./");
+                if pat.ends_with('/') {
+                    return path.starts_with(pat);
+                }
+                if glob_match(pat, path) {
+                    return true;
+                }
+                !pat.contains('/')
+                    && Path::new(path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| glob_match(pat, n))
+                        .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        results.sort_by(|a, b| a.path.cmp(&b.path));
+        results
+    }
+
+    /// Select files by any pattern.
+    ///
+    /// A pattern containing `*` or `?` (or ending in `/`) is a glob; anything
+    /// else is a case-insensitive path search that also consults the prefix,
+    /// ngram and tag indexes built in [`Self::from_archive_entries`].
+    pub fn select(&self, pattern: &str) -> Vec<FilePattern> {
+        let pat = pattern.trim();
+        if pat.is_empty() {
+            return Vec::new();
+        }
+        if pat.contains('*') || pat.contains('?') || pat.ends_with('/') {
+            return self.select_by_glob(pat);
+        }
+
+        let mut results = self.select_by_pattern(pat);
+        let lower = pat.to_lowercase();
+        for p in &self.all_patterns {
+            if p.path.to_lowercase().contains(&lower) && !results.iter().any(|r| r.path == p.path) {
+                results.push(p.clone());
+            }
+        }
+        results.sort_by(|a, b| a.path.cmp(&b.path));
         results
     }
 
@@ -860,5 +954,91 @@ impl ArchivePatternAnalyzer {
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::archive::ArchiveEntry;
+
+    fn entry(path: &str, content: &str) -> ArchiveEntry {
+        ArchiveEntry {
+            path: path.to_string(),
+            size: content.len() as u64,
+            is_dir: false,
+            content: Some(content.to_string()),
+        }
+    }
+
+    fn paths(found: Vec<FilePattern>) -> Vec<String> {
+        found.into_iter().map(|p| p.path).collect()
+    }
+
+    #[test]
+    fn single_star_does_not_cross_directories() {
+        assert!(glob_match("src/*.rs", "src/main.rs"));
+        assert!(!glob_match("src/*.rs", "src/db/schema.rs"));
+    }
+
+    #[test]
+    fn double_star_crosses_and_also_matches_no_directory() {
+        assert!(glob_match("src/**/*.rs", "src/db/schema.rs"));
+        assert!(glob_match("src/**/*.rs", "src/main.rs"));
+    }
+
+    #[test]
+    fn question_mark_is_exactly_one_character() {
+        assert!(glob_match("part_00?.txt", "part_001.txt"));
+        assert!(!glob_match("part_00?.txt", "part_0011.txt"));
+    }
+
+    #[test]
+    fn regex_metacharacters_in_a_pattern_are_literal() {
+        assert!(!glob_match("a.txt", "axtxt"));
+        assert!(glob_match("a.txt", "a.txt"));
+        assert!(glob_match("v1.2+x", "v1.2+x"));
+    }
+
+    #[test]
+    fn glob_without_a_slash_matches_the_basename() {
+        let entries = [entry("docs/README.md", "# readme"), entry("src/main.rs", "fn main() {}")];
+        let store = PatternStore::from_archive_entries(&entries);
+        assert_eq!(paths(store.select("*.md")), vec!["docs/README.md".to_string()]);
+    }
+
+    #[test]
+    fn directory_pattern_selects_everything_beneath_it() {
+        let entries = [
+            entry("docs/a.md", "a"),
+            entry("docs/deep/b.txt", "b"),
+            entry("src/main.rs", "fn main() {}"),
+        ];
+        let store = PatternStore::from_archive_entries(&entries);
+        assert_eq!(paths(store.select("docs/")), vec!["docs/a.md", "docs/deep/b.txt"]);
+    }
+
+    #[test]
+    fn plain_text_selects_by_case_insensitive_path_substring() {
+        let entries = [entry("docs/README.md", "# readme"), entry("src/main.rs", "fn main() {}")];
+        let store = PatternStore::from_archive_entries(&entries);
+        assert_eq!(paths(store.select("readme")), vec!["docs/README.md".to_string()]);
+    }
+
+    #[test]
+    fn plain_text_does_not_drag_in_root_entries() {
+        let entries = [entry("README.md", "# r"), entry("docs/a.md", "a")];
+        let store = PatternStore::from_archive_entries(&entries);
+        assert!(
+            store.select("nothing-here").is_empty(),
+            "the empty root prefix matched a pattern that names nothing"
+        );
+    }
+
+    #[test]
+    fn an_empty_pattern_selects_nothing() {
+        let entries = [entry("docs/a.md", "a")];
+        let store = PatternStore::from_archive_entries(&entries);
+        assert!(store.select("   ").is_empty());
     }
 }
