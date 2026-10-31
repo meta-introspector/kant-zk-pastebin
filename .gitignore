@@ -47,3 +47,10 @@ node_modules
 # which is tracked. Without this the audit driver -- a generated file -- would
 # be swept up by the tree scan in scripts/lean-proofs.mjs.
 lean-gate/.gokujo/
+
+# The live server's TLS material. The deploy writes these into ssl/ on the
+# host; the certificate and the private key are not source and must never be
+# committed. main had them removed in 3e7fbef7, but feature/archive-select
+# still carried them, so merging PR #21 would have put the private key back
+# on origin. Keep the directory, keep the files on disk, keep them out of git.
+ssl/
