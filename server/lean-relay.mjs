@@ -124,7 +124,7 @@ class Room {
       const [client, server] = Object.values(pair);
 
       const envCtx = { env, roomId, cursor, server };
-      envCtx.server.acceptWebSocket(server, envCtx);
+      this.state.acceptWebSocket(server, ['room:' + roomId]);
 
       return new Response(null, { status: 101, webSocket: pair });
     }

@@ -326,7 +326,9 @@ export class Room {
     }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    server.accept();
+
+    const roomName = url.pathname.match(/^\/(?:room|ws)\/([^/]+)$/)[1];
+    this.state.acceptWebSocket(server, ['room:' + roomName]);
 
     const entry = { ws: server, cursor: Number(url.searchParams.get("cursor") ?? 0) || 0 };
     this.sockets.add(entry);
@@ -346,5 +348,20 @@ export class Room {
     server.addEventListener("error", drop);
 
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** Hibernation API handlers — called by workerd when a socket wakes */
+  webSocketMessage(ws, msg) {
+    const text = typeof msg === "string" ? msg : "";
+    const lines = text.split("\n").map((l) => l.trim())
+      .filter((l) => l.length > 0 && l.length <= MAX_LINE);
+    if (lines.length) { this.append(lines); this.persist(); }
+  }
+
+  webSocketClose(ws, code) {
+    // Clean up the socket from our in-memory set
+    for (const s of [...this.sockets]) {
+      if (s.ws === ws) { this.sockets.delete(s); break; }
+    }
   }
 }
