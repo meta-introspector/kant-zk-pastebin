@@ -1,8 +1,9 @@
 # Task: pastebin-pr5-pr1-superseded
 
-**Status:** open
+**Status:** resolved — both PRs closed/merged without this branch; branch deleted
 **Project:** meta-introspector/kant-zk-pastebin
 **Found:** 2026-10-02
+**Resolved:** 2026-11-01
 
 ## Problem
 
@@ -39,3 +40,21 @@ tests are on `feat/cli-fileshare`.
 PR #5 commits `src/handlers.rs.bak`, a 445-line copy of the file it edited,
 referenced by nothing. It is being dropped rather than merged; if PR #5 is
 closed as-is the file goes with it.
+
+## Resolution (2026-11-01)
+
+* **PR #5** (`fix/mesh-state-methods`) is **MERGED** — as PR #6, which took the
+  missing tests. `src/handlers.rs.bak` never reached `main`.
+* **PR #1** (`codex/fix-public-access-commands`) is **CLOSED**. Its finding
+  was fixed by PR #6 (`88257336`), and the public-access-URL feature it was
+  after landed instead as PR #19 (`5636f569`), which says so in its own commit
+  message.
+* The local branch `codex/fix-public-access-commands` is deleted. Its tree is
+  fully contained in `main` — every file it touched is present, and the one
+  commit that was not patch-equivalent is the one PR #19 superseded. It is
+  kept as a tag, `archive/2026-11-review/codex/fix-public-access-commands`.
+
+The registry row `PM1 pastebin-mesh-state-methods-fix` in `~/dotagents/TASKS.md`
+was meant to be updated too; `~/dotagents/` is outside this repository and was
+not touched here.
+

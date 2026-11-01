@@ -1,8 +1,9 @@
 # pastebin-invite-dead-relay
 
-**Status:** fixed on `feat/cli-fileshare` (`18896c83`, pushed) — **not yet deployed**
+**Status:** resolved — the fix is on `main` and `main` is what deploys
 **Date:** 2026-10-02
 **Related:** PB-17 (p2p relay discovery, fixed and deployed)
+**Resolved:** 2026-11-01
 
 ## The bug
 
@@ -129,3 +130,20 @@ started 19:41, with `src/handlers.rs` and `src/model.rs` both `UU` and
 conflict markers in the tree). The operator is resolving that first. The
 working copy there holds the same three files edited but uncommitted; they are
 backed up at `/tmp/settle-relay-web.patch` and as individual `.bak` copies.
+
+## Resolution (2026-11-01)
+
+The merge this task was blocked on is gone: `/home/mdupont/projects/pastebin`
+has no `MERGE_HEAD` and no conflict markers left in `src/handlers.rs`. That
+checkout is now on `feature/archive-select` and shares this repository's
+history.
+
+`KantNode.settleRelay` is on `main` — `web/kant-net.mjs:978` — along with
+`web/join-test.mjs`, the 29-check suite that proves it. The three silent
+failure variants listed above are all closed: `probeRelay` in
+`web/kant-diag.mjs` covers the first two, `settleRelay` the third.
+
+The branch the fix was recorded against, `feat/cli-fileshare`, is deleted; its
+tree is fully contained in `main`. The commit `18896c83` is not in `main` by
+name — it was folded in as part of the `merge/pr-1` line of work — but the
+behaviour it introduced is there, which is what `web/join-test.mjs` pins.

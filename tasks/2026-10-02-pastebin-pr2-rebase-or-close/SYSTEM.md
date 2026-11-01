@@ -1,8 +1,9 @@
 # Task: pastebin-pr2-rebase-or-close
 
-**Status:** open
+**Status:** resolved — PR #2 was merged; there was nothing left to close
 **Project:** meta-introspector/kant-zk-pastebin
 **Found:** 2026-10-02
+**Resolved:** 2026-11-01
 
 ## Problem
 
@@ -28,3 +29,19 @@ git diff --stat origin/feature/big-merge...origin/feature/wip
 
 Should be `1 file changed, 1 insertion(+)` — if it is not, there is unmerged
 work and this task is wrong.
+
+## Resolution (2026-11-01)
+
+PR #2 (`feature/wip`) is **MERGED** — it was closed by merge on 2026-10-01,
+not by the comment this task called for. The one line of substance, the
+`tags: ["v*"]` trigger on `.github/workflows/kant-cli.yml`, is on `main` via
+PR #6 (`4b40fbff`).
+
+There was no unmerged work to worry about: against `main` the branch's tree is
+contained in it, so `feature/wip` was deleted rather than closed.
+
+`feature/wip` no longer exists anywhere — not as a local branch, and not on
+`origin` (`git ls-remote --heads origin` lists no such ref). It was merged
+through PR #2 on 2026-10-01 and the ref was deleted upstream afterwards, so
+there is no tag to keep here.
+
