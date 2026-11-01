@@ -18,7 +18,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: meta-introspector/setup-buildx-action@v3
         
+      - name: Check for the Docker Hub token
+        id: dockerhub
+        env:
+          TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${TOKEN:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "DOCKER_HUB_TOKEN is not set — building the image, not pushing it."
+            echo "The build result is unaffected; only the push is skipped."
+          fi
+
       - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.available == 'true'
         uses: meta-introspector/login-action@v3
         with:
           username: h4ckermike
@@ -40,7 +55,7 @@ jobs:
         uses: meta-introspector/build-push-action@v5
         with:
           context: .
-          push: true
+          push: ${{ steps.dockerhub.outputs.available == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
