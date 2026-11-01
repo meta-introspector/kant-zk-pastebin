@@ -118,6 +118,16 @@ export const CORE = [
   // rather than hidden in --all because a delegation is code, and this one had
   // already silently diverged once.
   "scripts/net-test.mjs",
+  // The poll pacing suite. It is the proof that the relay's idle backoff
+  // actually backs off: a loop that looks right but polls flat fails here,
+  // because the test counts real calls through a fake relay rather than
+  // reading the code. 7s, most of it the suite waiting out its own idle
+  // windows.
+  "web/poll-pacing-test.mjs",
+  // The p2p page's DOM suite. It was never registered here, so the checker
+  // reported it as "a tracked suite in neither list" and nothing ran it.
+  // Hermetic: a hand-rolled DOM that records every markup sink, 0.1s.
+  "web/p2p-page-test.mjs",
 ];
 
 /**
@@ -142,6 +152,13 @@ export const EXCLUDED = {
   // no network, no daemon and no CDN". It was filed as "starts a relay", which
   // is a claim about a file nobody opened.
   "web/libp2p-test.mjs": "3.5s; hermetic but slow \u2014 the pubsub node is injected",
+  // Not hermetic. It proves the worker's IPFS routes against the real nginx
+  // and kubo behind them, and against the refusals that keep the RPC surface
+  // small, so it needs a live origin (IPFS_ORIGIN) and a deployed worker
+  // (WORKER_ORIGIN). A mocked kubo that always says 200 would pass while the
+  // real one 403s on a browser-shaped request, which is the failure this
+  // proxy exists to avoid — so there is nothing to mock it with.
+  "server/ipfs-store-test.mjs": "needs a live nginx + kubo and a deployed worker origin",
 
   // Broken, and deliberately visible rather than quietly skipped. Empty: every
   // suite that was here has been fixed. The reason each one was wrong is in
