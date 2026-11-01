@@ -13,6 +13,9 @@ mod svg_anim;
 mod gallery;
 mod handlers;
 mod ipfs;
+mod ipfs_daemon;
+mod task_attachments;
+mod ipfs_tile;
 mod mesh;
 mod model;
 mod plugin;
@@ -587,6 +590,11 @@ async fn main() -> std::io::Result<()> {
     registry.register(Box::new(plugins::screenshot::ScreenshotPlugin::new()));
     registry.register(Box::new(plugins::pipelight::PipelightPlugin::new()));
     registry.register(Box::new(plugins::git2nora::Git2NoraPlugin::new()));
+    registry.register(Box::new(plugins::nora::NoraPlugin::new()));
+    registry.register(Box::new(plugins::git::GitPlugin::new()));
+    registry.register(Box::new(plugins::forgejo::ForgejoPlugin::new()));
+    registry.register(Box::new(plugins::pipelite::PipelitePlugin::new()));
+    registry.register(Box::new(plugins::task::TaskPlugin::new()));
 
     // Discover and register tile plugins from TILES_DIR
     let tiles_dir = env::var("TILES_DIR").unwrap_or_default();
@@ -778,6 +786,23 @@ async fn main() -> std::io::Result<()> {
                 "/api/git-reindex",
                 web::post().to(handlers::api_git_reindex),
             )
+            // IPFS tile routes
+            .route("/tile/ipfs", web::get().to(handlers::ipfs_tile))
+            .route("/tile/ipfs/status", web::get().to(handlers::ipfs_tile_status))
+            .route("/tile/ipfs/start", web::get().to(handlers::ipfs_tile_start))
+            .route("/tile/ipfs/stop", web::get().to(handlers::ipfs_tile_stop))
+            .route("/tile/ipfs/restart", web::get().to(handlers::ipfs_tile_restart))
+            .route("/tile/ipfs/pin/{cid}", web::get().to(handlers::ipfs_tile_pin))
+            .route("/tile/ipfs/unpin/{cid}", web::get().to(handlers::ipfs_tile_unpin))
+            .route("/tile/ipfs/peers", web::get().to(handlers::ipfs_tile_peers))
+            .route("/tile/ipfs/peer/{peer_id}", web::get().to(handlers::ipfs_tile_peer_reputation))
+            // Task attachments tile routes
+            .route("/tile/task-attachments", web::get().to(handlers::task_attachments_tile))
+            .route("/tile/task-attachments/status", web::get().to(handlers::task_attachments_tile_status))
+            .route("/tile/task-attachments/add", web::post().to(handlers::task_attachments_add))
+            .route("/api/cid-search", web::get().to(handlers::cid_search))
+            .route("/api/ipld/cid/{cid}", web::get().to(handlers::ipld_cid))
+            .route("/api/ipld/resolve/{cid}", web::get().to(handlers::ipld_resolve))
             // Pages reference {BASE_PATH}/static/*.js; without this service those
             // requests fall through to the paste route and 404.
             .service(actix_files::Files::new("/static", "static"))

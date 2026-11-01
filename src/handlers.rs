@@ -9,7 +9,7 @@ use crate::model::{
 use crate::plugins;
 use crate::plugins::pipelight;
 use crate::storage::Storage;
-use crate::{ipfs, plugin, storage, tagging, view};
+use crate::{ipfs, ipfs_daemon, plugin, storage, tagging, task_attachments, view};
 use actix_web::{web, HttpRequest, HttpResponse, Result as ActixResult, Result};
 use chrono::Utc;
 use ciborium;
@@ -656,6 +656,7 @@ fn publish_cid_alias(ctx: &str, cid_file: &str, id: &str) {
 
 async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
     let content = paste.content.as_deref().unwrap_or("");
+    let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
 
     // Detect Wikidata QID — trigger enrichment pipeline
     let trimmed = content.trim();
@@ -670,15 +671,23 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
 
     // Auto-generate title and tags
     let auto_tags = tagging::auto_tag(content);
-    let html_title = tagging::extract_html_title(content);
-    let auto_desc = tagging::auto_describe(content);
+    let cid_links = tagging::auto_link_cids(content, &base_path);
+    let linked_content = cid_links;  // Use CID-linked content for storage
+    let html_title = tagging::extract_html_title(&linked_content);
+    let auto_desc = tagging::auto_describe(&linked_content);
+    // Extract CID keywords from linked content
+    let cid_keywords: Vec<String> = tagging::extract_cids(&linked_content)
+        .into_iter()
+        .map(|cid| format!("cid-{}", &cid[..cid.len().min(16)]))
+        .collect();
+    let all_tags: Vec<String> = auto_tags.into_iter().chain(cid_keywords).collect();
     let title_owned = paste
         .title
         .clone()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| {
             html_title.unwrap_or_else(|| {
-                if !auto_tags.is_empty() {
+                if !all_tags.is_empty() {
                     auto_desc.clone()
                 } else {
                     "untitled".to_string()
@@ -691,7 +700,18 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
         .clone()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| auto_desc.clone());
-    let keywords = paste.keywords.clone().unwrap_or_else(|| auto_tags);
+    let keywords = paste.keywords.clone().unwrap_or_else(|| {
+        let mut tags = all_tags;
+        // Also include original keywords
+        if let Some(orig_kw) = paste.keywords {
+            for kw in &orig_kw {
+                if !tags.iter().any(|t| t == kw) {
+                    tags.push(kw.clone());
+                }
+            }
+        }
+        tags
+    });
 
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
@@ -6496,5 +6516,229 @@ pub async fn list_plugins_handler() -> ActixResult<HttpResponse> {
 pub async fn run_plugin_handler(path: web::Path<(String, String)>) -> ActixResult<HttpResponse> {
     let (name, id) = path.into_inner();
     Ok(HttpResponse::Ok().json(serde_json::json!({"name": name, "id": id, "result": "ok"})))
+}
+
+/// GET /tile/ipfs — IPFS tile HTML
+pub async fn ipfs_tile() -> ActixResult<HttpResponse> {
+    let html = crate::ipfs_tile::render_tile();
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// GET /tile/ipfs/status — IPFS daemon status JSON
+pub async fn ipfs_tile_status() -> ActixResult<HttpResponse> {
+    let status = crate::ipfs_tile::status_json();
+    Ok(HttpResponse::Ok().json(status))
+}
+
+/// GET /tile/ipfs/start — Start IPFS daemon
+pub async fn ipfs_tile_start() -> ActixResult<HttpResponse> {
+    match crate::ipfs_daemon::start_daemon() {
+        Ok(started) => Ok(HttpResponse::Ok().json(serde_json::json!({"started": started}))),
+        Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e}))),
+    }
+}
+
+/// GET /tile/ipfs/stop — Stop IPFS daemon
+pub async fn ipfs_tile_stop() -> ActixResult<HttpResponse> {
+    match crate::ipfs_daemon::stop_daemon() {
+        Ok(stopped) => Ok(HttpResponse::Ok().json(serde_json::json!({"stopped": stopped}))),
+        Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e}))),
+    }
+}
+
+/// GET /tile/ipfs/restart — Restart IPFS daemon
+pub async fn ipfs_tile_restart() -> ActixResult<HttpResponse> {
+    match crate::ipfs_daemon::restart_daemon() {
+        Ok(restarted) => Ok(HttpResponse::Ok().json(serde_json::json!({"restarted": restarted}))),
+        Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e}))),
+    }
+}
+
+/// GET /tile/ipfs/pin/{cid} — Pin a CID
+pub async fn ipfs_tile_pin(path: web::Path<String>) -> ActixResult<HttpResponse> {
+    let cid = path.into_inner();
+    match crate::ipfs_daemon::pin_cid(&cid) {
+        Ok(pinned) => Ok(HttpResponse::Ok().json(serde_json::json!({"pinned": pinned}))),
+        Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e}))),
+    }
+}
+
+/// GET /tile/ipfs/unpin/{cid} — Unpin a CID
+pub async fn ipfs_tile_unpin(path: web::Path<String>) -> ActixResult<HttpResponse> {
+    let cid = path.into_inner();
+    // Note: unpin not implemented in ipfs_daemon yet
+    Ok(HttpResponse::Ok().json(serde_json::json!({"unpinned": false, "note": "unpin not implemented"})))
+}
+
+/// GET /tile/ipfs/peers — List connected IPFS peers
+pub async fn ipfs_tile_peers() -> ActixResult<HttpResponse> {
+    match crate::ipfs_daemon::list_peers() {
+        Ok(peers) => Ok(HttpResponse::Ok().json(serde_json::json!({"peers": peers}))),
+        Err(e) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e}))),
+    }
+}
+
+/// GET /tile/ipfs/peer/{peer_id} — Get peer reputation
+pub async fn ipfs_tile_peer_reputation(path: web::Path<String>) -> ActixResult<HttpResponse> {
+    let peer_id = path.into_inner();
+    let reputation = crate::ipfs_daemon::get_peer_reputation(&peer_id);
+    Ok(HttpResponse::Ok().json(serde_json::json!({"peer_id": peer_id, "reputation": reputation})))
+}
+
+/// GET /tile/task-attachments — Task attachments tile HTML
+pub async fn task_attachments_tile() -> ActixResult<HttpResponse> {
+    let html = crate::task_attachments::render_tile();
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// GET /tile/task-attachments/status — Task attachments JSON
+pub async fn task_attachments_tile_status() -> ActixResult<HttpResponse> {
+    let status = crate::task_attachments::attachments_json();
+    Ok(HttpResponse::Ok().json(status))
+}
+
+/// POST /tile/task-attachments/add — Add a task attachment
+/// Request body for adding a task attachment
+#[derive(Deserialize)]
+pub struct TaskAttachmentRequest {
+    task_id: String,
+    paste_id: Option<String>,
+    cid: Option<String>,
+    ipfs_cid: Option<String>,
+    title: String,
+    description: Option<String>,
+    tags: Vec<String>,
+}
+
+/// Create a task attachment from the request body and add it to the store.
+pub async fn task_attachments_add(
+    req: web::Json<TaskAttachmentRequest>,
+) -> ActixResult<HttpResponse> {
+    let raw = req.into_inner();
+    let attribution = crate::task_attachments::TaskAttachment {
+        task_id: raw.task_id,
+        paste_id: raw.paste_id,
+        cid: raw.cid,
+        ipfs_cid: raw.ipfs_cid,
+        title: raw.title,
+        description: raw.description,
+        tags: raw.tags,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    crate::task_attachments::add_attachment(attribution).await;
+    Ok(HttpResponse::Ok().json(serde_json::json!({"added": true})))
+}
+
+/// GET /api/cid-search?q={cid} — Search pastes by CID
+pub async fn cid_search(req: actix_web::HttpRequest) -> ActixResult<HttpResponse> {
+    let query = req.query_string();
+    let q = query.split('=').nth(1).unwrap_or("").to_string();
+
+    let uucp_dir = std::env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let index_file = format!("{}/index.jsonl", uucp_dir);
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+
+    if let Ok(contents) = std::fs::read_to_string(&index_file) {
+        for line in contents.lines() {
+            let entry: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let cid = entry.get("cid").and_then(|v| v.as_str()).unwrap_or("");
+            let ipfs_cid = entry.get("ipfs_cid").and_then(|v| v.as_str()).unwrap_or("");
+            let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let description = entry.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+            if cid.contains(&q) || ipfs_cid.contains(&q) || title.contains(&q) || description.contains(&q) {
+                results.push(serde_json::json!({
+                    "id": id,
+                    "cid": cid,
+                    "ipfs_cid": ipfs_cid,
+                    "title": title,
+                    "description": description,
+                }));
+            }
+        }
+    }
+
+    results.sort_by(|a, b| {
+        let a_id = a.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let b_id = b.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        b_id.cmp(a_id)
+    });
+
+    results.truncate(100);
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "query": q,
+        "count": results.len(),
+        "results": results,
+    })))
+}
+
+/// GET /api/ipld/cid/{cid} — Query IPLD CID metadata
+pub async fn ipld_cid(path: actix_web::web::Path<String>) -> ActixResult<HttpResponse> {
+    let cid = path.into_inner();
+    let uucp_dir = std::env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let cid_file = format!("{}/{}.cid", uucp_dir, cid);
+
+    if let Ok(paste_id) = std::fs::read_to_string(&cid_file) {
+        let paste_id = paste_id.trim();
+        let paste_path = format!("{}/{}.txt", uucp_dir, paste_id);
+        if let Ok(content) = std::fs::read_to_string(&paste_path) {
+            return Ok(HttpResponse::Ok().json(serde_json::json!({
+                "cid": cid,
+                "paste_id": paste_id,
+                "content_length": content.len(),
+                "content": content.get(..500).unwrap_or(&content),
+            })));
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "cid": cid,
+        "found": false,
+    })))
+}
+
+/// GET /api/ipld/resolve/{cid} — Recursively resolve IPLD CID
+pub async fn ipld_resolve(path: actix_web::web::Path<String>) -> ActixResult<HttpResponse> {
+    let cid = path.into_inner();
+    let mut chain = Vec::new();
+    let mut current = cid.clone();
+
+    for _ in 0..10 {
+        chain.push(current.clone());
+        let uucp_dir = std::env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
+        let cid_file = format!("{}/{}.cid", uucp_dir, current);
+
+        match std::fs::read_to_string(&cid_file) {
+            Ok(paste_id) => {
+                let paste_id = paste_id.trim();
+                let paste_path = format!("{}/{}.txt", uucp_dir, paste_id);
+                if let Ok(content) = std::fs::read_to_string(&paste_path) {
+                    // Look for CIDs referenced in this paste content
+                    let found: Vec<&str> = content
+                        .split_whitespace()
+                        .filter(|w| w.starts_with("bafk") || w.starts_with("Qm"))
+                        .collect();
+                    if let Some(next) = found.first() {
+                        current = next.to_string();
+                        continue;
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+        break;
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "start_cid": cid,
+        "chain": chain,
+        "resolved": chain.len(),
+    })))
 }
 

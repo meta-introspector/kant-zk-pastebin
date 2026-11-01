@@ -1,0 +1,13 @@
+name = "agent-fabric-board"
+main = "worker.mjs"
+compatibility_date = "2026-01-31"
+
+# One chat-like log per board. The fabric talks to /board/* and the Worker
+# forwards to the single "fabric" object.
+[[durable_objects.bindings]]
+name = "BOARD"
+class_name = "TaskBoard"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TaskBoard"]
