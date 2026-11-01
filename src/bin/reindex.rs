@@ -112,6 +112,7 @@ fn main() {
             reply_to: None,
             size,
             uucp_path: entry.path().to_string_lossy().to_string(),
+            envelope_witness: None,
             root: None,
         };
 
