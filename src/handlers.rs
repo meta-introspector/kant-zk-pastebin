@@ -353,6 +353,11 @@ button{{background:#0f0;color:#000;border:none;padding:10px 20px;cursor:pointer;
 <a href="{base_path}/git-browse">📁 Git</a>
 <a href="{base_path}/splitter/">✂️ Splitter</a>
 <a href="{base_path}/openapi.json">📖 API</a>
+<a href="{base_path}/tile/ipfs">📦 IPFS</a>
+<a href="{base_path}/tile/task-attachments">📋 Tasks</a>
+<a href="{base_path}/tile/sparql-query">🔍 SPARQL</a>
+<a href="{base_path}/tile/ipld-query">🔗 IPLD</a>
+<a href="{base_path}/tile/nginx-fronts">🌐 Fronts</a>
 </div>
 <h1>📋 Kant Pastebin</h1>
 <p>UUCP + zkTLS + IPFS</p>
@@ -1969,43 +1974,87 @@ pub async fn threads(
     get,
     path = concat!(env!("BASE_PATH"), "/browse"),
     params(
-        ("q" = Option<String>, Query, description = "Search query")
+        ("q" = Option<String>, Query, description = "Search query"),
+        ("filter" = Option<String>, Query, description = "Filter by date/name/tags/kw"),
+        ("sort" = Option<String>, Query, description = "Sort by date/name/tags/kw"),
     ),
     responses(
         (status = 200, description = "Browse HTML")
     )
-)]
-pub async fn browse(
+)]pub async fn browse(
     req: HttpRequest,
-    _query: web::Query<std::collections::HashMap<String, String>>,
+    query: web::Query<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponse> {
     let base_path = env::var("BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let q = query.get("q").map(|s| s.as_str()).unwrap_or("");
+    let filter = query.get("filter").map(|s| s.as_str()).unwrap_or("");
+    let sort = query.get("sort").map(|s| s.as_str()).unwrap_or("");
 
-    let items = match paste_search_results(&req, 200, true)? {
-        Some((_search_q, _mode, _scope, _limit, results)) => {
-            let items: String = results
-                .iter()
-                .map(|r| render_search_result_entry(r, &base_path))
-                .collect();
-            render_browse_page(&base_path, &_search_q, &items, "Full-text search", true)
-        }
-        None => {
-            let uucp_dir = env::var("UUCP_SPOOL")
-                .unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
-            let entries = read_index_entries(&uucp_dir);
-            let items: String = entries
-                .iter()
-                .rev()
-                .take(50)
-                .map(|e| render_paste_entry(e, &base_path))
-                .collect();
-            render_browse_page(&base_path, "", &items, "", false)
-        }
-    };
+    let uucp_dir = env::var("UUCP_SPOOL")
+        .unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    let mut entries = read_index_entries(&uucp_dir);
+
+    // ── FILTER ──
+    if !q.is_empty() {
+        entries.retain(|e| {
+            let title = e.title.to_lowercase();
+            let desc = e.description.as_deref().unwrap_or("").to_lowercase();
+            let keywords = e.keywords.join(" ").to_lowercase();
+            let id = e.id.to_lowercase();
+            title.contains(&q.to_lowercase())
+                || desc.contains(&q.to_lowercase())
+                || keywords.contains(&q.to_lowercase())
+                || id.contains(&q.to_lowercase())
+        });
+    }
+
+    if !filter.is_empty() {
+        let parts: Vec<&str> = filter.split('|').collect();
+        entries.retain(|e| {
+            parts.iter().any(|p| {
+                let kv: Vec<&str> = p.split(':').collect();
+                if kv.len() != 2 {
+                    return false;
+                }
+                let (field, val) = (kv[0].trim(), kv[1].trim());
+                match field {
+                    "date" => e.timestamp.contains(val),
+                    "name" => e.title.contains(val) || e.filename.contains(val),
+                    "tags" => e.keywords.iter().any(|t| t.contains(val)),
+                    "kw" => e.keywords.iter().any(|t| t.contains(val))
+                        || e.description.as_deref().unwrap_or("").contains(val),
+                    _ => false,
+                }
+            })
+        });
+    }
+
+    // ── SORT ──
+    entries.sort_by(|a, b| match sort {
+        "date" => b.timestamp.cmp(&a.timestamp),
+        "name" => b.title.cmp(&a.title),
+        "tags" => b.keywords.len().cmp(&a.keywords.len()),
+        "kw" => b.keywords.join(" ").cmp(&a.keywords.join(" ")),
+        _ => b.timestamp.cmp(&a.timestamp),
+    });
+
+    let items: String = entries
+        .iter()
+        .take(200)
+        .map(|e| render_paste_entry(e, &base_path))
+        .collect();
+
+    let note = format!(
+        "<p style=\"color:#666\">{} pastes — filter:{} sort:{} q:{}</p>",
+        entries.len(),
+        if filter.is_empty() { "none" } else { filter },
+        if sort.is_empty() { "none" } else { sort },
+        if q.is_empty() { "none" } else { q }
+    );
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(items))
+        .body(render_browse_page(&base_path, q, &items, &note, true)))
 }
 
 pub fn read_index_entries(uucp_dir: &str) -> Vec<PasteIndex> {
@@ -2663,7 +2712,7 @@ fn render_browse_page(
     export_visible: bool,
 ) -> String {
     let search_box = format!(
-        r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#,
+        r#"<form method="get"><input type="text" name="q" value="{}" placeholder="Search pastes..." style="padding:5px;width:300px"><button type="submit">🔍</button></form>"#,
         html_escape(q)
     );
     let title_json = serde_json::to_string(q).unwrap_or_else(|_| "\"browse results\"".to_string());
@@ -2683,73 +2732,150 @@ fn render_browse_page(
     format!(
         r#"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Browse Pastes</title>
-<style>body{{font-family:monospace;max-width:800px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
-a{{color:#0ff;text-decoration:none}}.excerpt{{color:#0a0;white-space:pre-wrap}}</style>
+<style>
+body{{font-family:monospace;max-width:1400px;margin:20px auto;padding:20px;background:#0a0a0a;color:#0f0}}
+a{{color:#0ff;text-decoration:none}}.excerpt{{color:#0a0;white-space:pre-wrap}}
+.filter-bar{{background:#111;padding:15px;margin-bottom:20px;border:1px solid #0f0;border-radius:8px}}
+.filter-row{{margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}}
+.filter-label{{color:#0ff;font-weight:bold;min-width:100px}}
+input[type="text"],select{{padding:6px;margin:0 5px;font-family:monospace;background:#0a0a0a;color:#0f0;border:1px solid #0f0}}
+button{{background:#0f0;color:#000;border:none;padding:6px 14px;cursor:pointer;font-weight:bold}}
+button.secondary{{background:#6c757d;color:#fff}}
+button.sparql{{background:#4cc9f0;color:#000}}
+button.ipld{{background:#ff6b6b;color:#fff}}
+</style>
 </head><body>
-<div><a href="{}/">🏠 Home</a></div>
+<div><a href="{base_path}/">🏠 Home</a> <a href="{base_path}/tile/ipfs">📦 IPFS</a> <a href="{base_path}/tile/task-attachments">📋 Tasks</a> <a href="{base_path}/tile/sparql-query">🔍 SPARQL</a> <a href="{base_path}/tile/ipld-query">🔗 IPLD</a>
+<a href="{base_path}/tile/nginx-fronts">🌐 Fronts</a></div>
 <h1>Browse Pastes</h1>
+{search_box}
 {}
 {}
-{}
+
+<div class="filter-bar">
+<div class="filter-row">
+<div class="filter-label">FILTER:</div>
+<button type="button" onclick="setFilter('date:')">date:YYYYMMDD</button>
+<button type="button" onclick="setFilter('name:')">name:</button>
+<button type="button" onclick="setFilter('tags:')">tags:</button>
+<button type="button" onclick="setFilter('kw:')">kw:</button>
+<button type="button" onclick="clearFilter()">clear</button>
+</div>
+<div class="filter-row">
+<div class="filter-label">SORT:</div>
+<button type="button" onclick="setSort('date')">date ↓</button>
+<button type="button" onclick="setSort('name')">name</button>
+<button type="button" onclick="setSort('tags')">tags</button>
+<button type="button" onclick="setSort('kw')">keyword</button>
+</div>
+</div>
+
+<div class="filter-bar">
+<h3>🔍 SPARQL CID Search</h3>
+<div class="filter-row">
+<input type="text" id="sparql-cid" placeholder="Enter CID (bafk..., Qm...)" style="width:300px" />
+<button class="sparql" onclick="searchCID()">Search CID</button>
+<button class="secondary" onclick="resolveRecursive()">Resolve Chain</button>
+</div>
+<div id="sparql-results" style="margin-top:10px"></div>
+
+<h3>🔗 IPLD CID Query</h3>
+<div class="filter-row">
+<input type="text" id="ipld-cid" placeholder="Enter CID (bafk..., Qm...)" style="width:300px" />
+<button class="ipld" onclick="queryIPLD()">Query IPLD</button>
+</div>
+<div id="ipld-results" style="margin-top:10px"></div>
+</div>
+
 <div id="exportStatus" style="color:#0f0;margin:10px 0"></div>
 <div id="results" style="margin-top:20px">{}</div>
 <script>
-async function exportVisible() {{
-  const ids = Array.from(document.querySelectorAll('#results a[href*="/paste/"]')).map(a => a.getAttribute('href').split('/').pop()).filter(Boolean);
-  if (!ids.length) {{ alert('No visible results'); return; }}
-  const btn = document.getElementById('exportVisible');
-  const status = document.getElementById('exportStatus');
-  btn.disabled = true;
-  status.textContent = 'Exporting...';
-  const res = await fetch('{}/api/search-results-bundle', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{ results: ids.map(id => ({{ id: id }})), title: {} }})
-  }});
-  const data = await res.json();
-  if (!res.ok || data.error) {{ status.textContent = 'Export failed: ' + (data.error || 'unknown'); btn.disabled = false; btn.textContent = '📤 Export visible as paste'; return; }}
-  status.textContent = 'Opening paste...';
-  const url = (data.url && data.url.startsWith('/paste/')) ? '{}/' + data.url.slice(1) : (data.url || '{}/paste/' + data.id);
-  window.location = url;
+const basePath = '{base_path}';
+
+function setFilter(field) {{
+    const val = prompt('Enter {{field}} filter value:');
+    if (val !== null) {{
+        const params = new URLSearchParams(window.location.search);
+        if (val === '') {{ params.delete('filter'); }} else {{ params.set('filter', field + val); }}
+        window.location.search = params.toString();
+    }}
 }}
-async function exportChunkedVisible() {{
-  const ids = Array.from(document.querySelectorAll('#results a[href*="/paste/"]')).map(a => a.getAttribute('href').split('/').pop()).filter(Boolean);
-  if (!ids.length) {{ alert('No visible results'); return; }}
-  const btn = document.getElementById('exportChunkedVisible');
-  const status = document.getElementById('exportStatus');
-  const chunkSize = Number(prompt('Chunk bytes per paste', '250000'));
-  btn.disabled = true;
-  status.textContent = 'Deduplicating lines and chunking...';
-  const res = await fetch('{}/api/search-results-chunks', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{ results: ids.map(id => ({{ id: id }})), title: {}, chunk_size: Number.isFinite(chunkSize) && chunkSize > 0 ? chunkSize : 250000, overlap: 0 }})
-  }});
-  const data = await res.json();
-  if (!res.ok || data.error) {{ status.textContent = 'Chunk export failed: ' + (data.error || 'unknown'); btn.disabled = false; btn.textContent = '🧩 Export chunked'; return; }}
-  status.textContent = 'Opening chunk manifest...';
-  const url = (data.url && data.url.startsWith('/paste/')) ? '{}/' + data.url.slice(1) : (data.url || '{}/paste/' + data.id);
-  window.location = url;
+
+function clearFilter() {{
+    const params = new URLSearchParams(window.location.search);
+    params.delete('filter');
+    params.delete('q');
+    window.location.search = params.toString();
 }}
-const exportBtn = document.getElementById('exportVisible');
-const exportChunkedBtn = document.getElementById('exportChunkedVisible');
-if (exportBtn) exportBtn.onclick = exportVisible;
-if (exportChunkedBtn) exportChunkedBtn.onclick = exportChunkedVisible;
+
+function setSort(field) {{
+    const params = new URLSearchParams(window.location.search);
+    params.set('sort', field);
+    window.location.search = params.toString();
+}}
+
+async function searchCID() {{
+    const q = document.getElementById('sparql-cid').value.trim();
+    if (!q) return;
+    const res = await fetch(basePath + '/api/cid-search?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    const el = document.getElementById('sparql-results');
+    if (data.results && data.results.length > 0) {{
+        el.innerHTML = '<strong>' + data.count + ' SPARQL results:</strong><br>' +
+            data.results.map(r => `
+                <div class="cid-result">
+                    ID: <span style="font-family:monospace">${{r.id}}</span><br>
+                    CID: <a href="{{basePath}}/ipfs/${{r.cid}}" target="_blank">${{r.cid}}</a><br>
+                    ${{r.ipfs_cid ? '<br>IPFS CID: <a href="{{basePath}}/ipfs/${{r.ipfs_cid}}" target="_blank">${{r.ipfs_cid}}</a>' : ''}}
+                    Title: ${{r.title}}<br>
+                    <a href="{{basePath}}/paste/${{r.id}}" target="_blank">View Paste</a>
+                </div>
+            `).join('');
+    }} else {{
+        el.innerHTML = '<span style="color:#6c757d">No SPARQL results for "' + q + '"</span>';
+    }}
+}}
+
+async function resolveRecursive() {{
+    const q = document.getElementById('sparql-cid').value.trim();
+    if (!q) return;
+    const res = await fetch(basePath + '/api/ipld/resolve/' + encodeURIComponent(q));
+    const data = await res.json();
+    const el = document.getElementById('sparql-results');
+    el.innerHTML = '<strong>Recursive chain (' + data.resolved + ' steps):</strong><br>' +
+        data.chain.map((c, i) => `
+            Step ${{i + 1}}: <a href="{{basePath}}/ipfs/${{c}}" target="_blank">${{c}}</a>
+            <a href="{{basePath}}/paste/${{c}}" target="_blank">[Paste]</a><br>
+        `).join('');
+}}
+
+async function queryIPLD() {{
+    const cid = document.getElementById('ipld-cid').value.trim();
+    if (!cid) return;
+    const res = await fetch(basePath + '/api/ipld/cid/' + encodeURIComponent(cid));
+    const data = await res.json();
+    const el = document.getElementById('ipld-results');
+    if (data.found === false) {{
+        el.innerHTML = '<span style="color:#ff6b6b">IPLD CID not found: ' + cid + '</span>';
+    }} else {{
+        el.innerHTML = '<strong>IPLD:</strong> ' + data.cid + '<br>' +
+            '<strong>Paste:</strong> ' + data.paste_id + '<br>' +
+            '<strong>Length:</strong> ' + data.content_length + '<br>' +
+            '<strong>Preview:</strong> ' + data.content;
+    }}
+}}
+
+document.getElementById('sparql-cid').addEventListener('keypress', function(e) {{
+    if (e.key === 'Enter') searchCID();
+}});
+document.getElementById('ipld-cid').addEventListener('keypress', function(e) {{
+    if (e.key === 'Enter') queryIPLD();
+}});
 </script>
 </body></html>"#,
-        base_path,
         search_box,
         note,
-        export_button,
-        items,
-        base_path,
-        title,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path
+        items
     )
 }
 
@@ -3306,12 +3432,15 @@ pre{{background:#111;padding:15px;border:1px solid #333;overflow-x:auto;white-sp
 code{{font-family:monospace}}
 .meta{{color:#888;font-size:0.9em}}
 </style></head><body>
-<div class="nav"><a href="{}/">🏠 Home</a> <a href="{}/browse">📚 Browse</a> <a href="{}/api/search">🔍 Search</a></div>
+<div class="nav"><a href="{base_path}/">🏠 Home</a> <a href="{base_path}/browse">📚 Browse</a> <a href="{base_path}/api/search">🔍 Search</a> <a href="{base_path}/tile/ipfs">📦 IPFS</a> <a href="{base_path}/tile/task-attachments">📋 Tasks</a> <a href="{base_path}/tile/sparql-query">🔍 SPARQL</a> <a href="{base_path}/tile/ipld-query">🔗 IPLD</a>
+<a href="{base_path}/tile/nginx-fronts">🌐 Fronts</a></div>
 <h1>📄 {}</h1>
 <p class="meta">📁 {} <span style="float:right">{}</span></p>
 <hr><pre><code>{}</code></pre>
 </body></html>"#,
-                base_path, base_path, base_path, fname, fname, path, ext, content
+                // `{base_path}` is captured implicitly; only the positional
+                // placeholders take arguments, in string order.
+                fname, fname, path, ext, content
             );
             Ok(HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
@@ -6740,5 +6869,335 @@ pub async fn ipld_resolve(path: actix_web::web::Path<String>) -> ActixResult<Htt
         "chain": chain,
         "resolved": chain.len(),
     })))
+}
+
+/// GET /tile/sparql-query — SPARQL query tile HTML
+pub async fn sparql_query_tile() -> ActixResult<HttpResponse> {
+    let html = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPARQL CID Query</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #e0e0e0; }}
+  h1 {{ color: #4cc9f0; border-bottom: 2px solid #4cc9f0; padding-bottom: 10px; }}
+  .query-box {{ background: #16213e; border-radius: 8px; padding: 15px; margin: 15px 0; }}
+  textarea {{ width: 100%; height: 200px; font-family: monospace; background: #0a0a0a; color: #0f0; border: 1px solid #0f0; padding: 10px; box-sizing: border-box; }}
+  input[type="text"] {{ width: 70%; padding: 8px; margin: 10px 0; font-family: monospace; background: #0a0a0a; color: #0f0; border: 1px solid #0f0; }}
+  button {{ padding: 10px 20px; background: #4cc9f0; color: #000; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }}
+  button:hover {{ background: #3aa8d0; }}
+  button.secondary {{ background: #6c757d; color: #fff; }}
+  #results {{ background: #111; padding: 15px; margin: 15px 0; border-radius: 8px; max-height: 500px; overflow: auto; font-family: monospace; font-size: 0.9em; white-space: pre-wrap; }}
+  .cid-result {{ margin: 8px 0; padding: 8px; background: #16213e; border-radius: 4px; border-left: 3px solid #4cc9f0; }}
+  .cid-link {{ color: #4cc9f0; text-decoration: none; }}
+  .cid-link:hover {{ text-decoration: underline; }}
+  .empty {{ text-align: center; color: #6c757d; padding: 40px; }}
+</style>
+</head>
+<body>
+  <h1>🔍 SPARQL CID Search</h1>
+  <p>Search recent pastes by CID or content. Results show paste metadata with links to full content.</p>
+
+  <div class="query-box">
+    <h3>CID / Content Search</h3>
+    <input type="text" id="cid-input" placeholder="Enter CID (bafk..., Qm...) or keyword" />
+    <button onclick="searchCID()">Search</button>
+    <button class="secondary" onclick="clearResults()">Clear</button>
+  </div>
+
+  <div id="results"></div>
+
+  <script>
+  async function searchCID() {{
+    const q = document.getElementById('cid-input').value.trim();
+    if (!q) return;
+    const res = await fetch('/api/cid-search?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    const results = document.getElementById('results');
+    if (data.results && data.results.length > 0) {{
+      results.innerHTML = '<strong>' + data.count + ' results for "' + data.query + '":</strong><br><br>' +
+        data.results.map(r => `
+          <div class="cid-result">
+            <strong>ID:</strong> <span style="font-family:monospace">${r.id}</span><br>
+            <strong>CID:</strong> <a class="cid-link" href="/ipfs/${r.cid}" target="_blank">${r.cid}</a><br>
+            ${r.ipfs_cid ? '<strong>IPFS CID:</strong> <a class="cid-link" href="/ipfs/${r.ipfs_cid}" target="_blank">${r.ipfs_cid}</a><br>' : ''}
+            <strong>Title:</strong> ${r.title}<br>
+            <strong>Description:</strong> ${r.description}<br>
+            <strong><a href="/paste/${r.id}" target="_blank">View Paste</a></strong>
+          </div>
+        `).join('');
+    }} else {{
+      results.innerHTML = '<div class="empty">No results found for "' + q + '"</div>';
+    }}
+  }}
+
+  function clearResults() {{
+    document.getElementById('cid-input').value = '';
+    document.getElementById('results').innerHTML = '';
+  }}
+
+  document.getElementById('cid-input').addEventListener('keypress', function(e) {{
+    if (e.key === 'Enter') searchCID();
+  }});
+  </script>
+</body>
+</html>"#;
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// GET /tile/ipld-query — IPLD query tile HTML
+pub async fn ipld_query_tile() -> ActixResult<HttpResponse> {
+    let html = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPLD CID Query</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #e0e0e0; }}
+  h1 {{ color: #4cc9f0; border-bottom: 2px solid #4cc9f0; padding-bottom: 10px; }}
+  .query-box {{ background: #16213e; border-radius: 8px; padding: 15px; margin: 15px 0; }}
+  input[type="text"] {{ width: 70%; padding: 8px; margin: 10px 0; font-family: monospace; background: #0a0a0a; color: #0f0; border: 1px solid #0f0; }}
+  button {{ padding: 10px 20px; background: #4cc9f0; color: #000; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }}
+  button:hover {{ background: #3aa8d0; }}
+  button.secondary {{ background: #6c757d; color: #fff; }}
+  #results {{ background: #111; padding: 15px; margin: 15px 0; border-radius: 8px; max-height: 500px; overflow: auto; font-family: monospace; font-size: 0.9em; white-space: pre-wrap; }}
+  .chain-step {{ margin: 8px 0; padding: 8px; background: #16213e; border-radius: 4px; }}
+  .chain-link {{ color: #4cc9f0; text-decoration: none; }}
+  .chain-link:hover {{ text-decoration: underline; }}
+  .empty {{ text-align: center; color: #6c757d; padding: 40px; }}
+</style>
+</head>
+<body>
+  <h1>🔗 IPLD CID Query</h1>
+  <p>Query IPFS CIDs from the IPLD CAR store with recursive resolution and metadata.</p>
+
+  <div class="query-box">
+    <h3>CID Query</h3>
+    <input type="text" id="cid-input" placeholder="Enter CID (bafk..., Qm...)" value="bafk26ced9e439f678632689aeae842da24c" />
+    <button onclick="queryCID()">Query CID</button>
+    <button onclick="resolveRecursive()">Resolve Recursive</button>
+    <button class="secondary" onclick="clearResults()">Clear</button>
+  </div>
+
+  <div id="results"></div>
+
+  <script>
+  async function queryCID() {{
+    const cid = document.getElementById('cid-input').value.trim();
+    if (!cid) return;
+    const res = await fetch('/api/ipld/cid/' + encodeURIComponent(cid));
+    const data = await res.json();
+    const results = document.getElementById('results');
+    if (data.found === false) {{
+      results.innerHTML = '<div class="empty">CID not found: ' + cid + '</div>';
+    }} else {{
+      results.innerHTML = '<strong>CID:</strong> ' + data.cid + '<br>' +
+        '<strong>Paste ID:</strong> ' + data.paste_id + '<br>' +
+        '<strong>Content Length:</strong> ' + data.content_length + '<br>' +
+        '<strong>Content Preview:</strong><br>' + data.content;
+    }}
+  }}
+
+  async function resolveRecursive() {{
+    const cid = document.getElementById('cid-input').value.trim();
+    if (!cid) return;
+    const res = await fetch('/api/ipld/resolve/' + encodeURIComponent(cid));
+    const data = await res.json();
+    const results = document.getElementById('results');
+    results.innerHTML = '<strong>Start CID:</strong> ' + data.start_cid + '<br>' +
+      '<strong>Resolved Chain (' + data.resolved + ' steps):</strong><br><br>' +
+      data.chain.map((c, i) => `
+        <div class="chain-step">
+          Step ${i + 1}: <a class="chain-link" href="/ipfs/${c}" target="_blank">${c}</a><br>
+          <a href="/paste/${c}" target="_blank">View as Paste</a>
+        </div>
+      `).join('');
+  }}
+
+  function clearResults() {{
+    document.getElementById('cid-input').value = '';
+    document.getElementById('results').innerHTML = '';
+  }}
+
+  document.getElementById('cid-input').addEventListener('keypress', function(e) {{
+    if (e.key === 'Enter') queryCID();
+  }});
+  </script>
+</body>
+</html>"#;
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
+}
+
+/// Fetch a text resource from the nginx-fronts service, `None` on any failure.
+async fn nginx_fronts_get(client: &reqwest::Client, url: &str) -> Option<String> {
+    let response = client.get(url).send().await.ok()?.error_for_status().ok()?;
+    response.text().await.ok()
+}
+
+/// Last path segment, for the config-file grouping below.
+fn config_basename(path: &str) -> String {
+    path.rsplit('/').next().unwrap_or(path).to_string()
+}
+
+/// GET /tile/nginx-fronts — every live nginx front, from nginx-fronts.service.
+///
+/// The model lives in `planning/nginx-fronts` of the task-runner repo: one RDF
+/// graph of every proxying `location` in the *live* merged nginx tree, with a
+/// probe state per front, a SPARQL endpoint, and two SVG graphs. Everything here
+/// is fetched server-side, so the tile shows real counts and a real graph with
+/// JavaScript disabled. It is a window, not a second copy: nothing is cached and
+/// there is no second inventory to resynchronise.
+pub async fn nginx_fronts_tile() -> ActixResult<HttpResponse> {
+    let base_path = env::var("BASE_PATH").unwrap_or_default();
+    let source = env::var("NGINX_FRONTS_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:18161".to_string())
+        .trim_end_matches('/')
+        .to_string();
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    let inventory_text = nginx_fronts_get(&client, &format!("{source}/fronts.json")).await;
+    let topology_svg = nginx_fronts_get(&client, &format!("{source}/fronts.svg")).await;
+    let health_svg = nginx_fronts_get(&client, &format!("{source}/health.svg")).await;
+
+    let inventory: Option<serde_json::Value> = inventory_text
+        .as_deref()
+        .and_then(|text| serde_json::from_str(text).ok());
+
+    let page_style = r#"
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
+  h1 { color: #4cc9f0; border-bottom: 2px solid #4cc9f0; padding-bottom: 10px; }
+  h3 { color: #4cc9f0; margin-top: 1.6rem; }
+  a { color: #4cc9f0; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .stats { display: flex; gap: .8rem; flex-wrap: wrap; margin: 1rem 0; }
+  .stat { background: #16213e; border-radius: 8px; padding: .8rem 1.1rem; min-width: 8rem; }
+  .stat b { display: block; font-size: 1.6rem; }
+  .stat span { color: #94a3b8; font-size: .8rem; }
+  .up b { color: #22c55e; } .tcp b { color: #f59e0b; } .down b { color: #ef4444; } .total b { color: #4cc9f0; }
+  .links { margin: .6rem 0 1rem; } .links a { margin-right: 1rem; }
+  table { border-collapse: collapse; font-size: .85rem; }
+  th, td { text-align: left; padding: .25rem .9rem .25rem 0; border-bottom: 1px solid #23304a; }
+  th { color: #94a3b8; font-weight: 500; }
+  .graph { max-height: 520px; overflow: auto; background: #0f172a; border: 1px solid #23304a; border-radius: 8px; padding: 8px; }
+  .graph svg { max-width: 100%; height: auto; display: block; }
+  .panel { background: #16213e; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .muted { color: #94a3b8; font-size: .85rem; }
+  code { color: #bfdbfe; }"#;
+
+    let mut body = String::new();
+    body.push_str(&format!(
+        "<div class=\"links\"><a href=\"{base_path}/\">🏠 Home</a>
+         <a href=\"/nginx-fronts/\">inventory index</a>
+         <a href=\"/nginx-fronts/fronts.svg\">topology.svg</a>
+         <a href=\"/nginx-fronts/fronts.svg?state=down\">down only</a>
+         <a href=\"/nginx-fronts/health.svg\">health.svg</a>
+         <a href=\"/nginx-fronts/sparql\">SPARQL</a></div>"
+    ));
+
+    match inventory.as_ref() {
+        Some(doc) => {
+            let meta = doc.get("meta").cloned().unwrap_or_default();
+            let fronts = doc["fronts"].as_array().cloned().unwrap_or_default();
+            let health = meta.get("health").cloned().unwrap_or_default();
+            let count = |key: &str| health.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+            let total = fronts.len();
+            let scanned = meta.get("scanned_at").and_then(|v| v.as_str()).unwrap_or("");
+            let upstreams = meta.get("upstreams").and_then(|v| v.as_u64()).unwrap_or(0);
+            let triples = meta.get("triples").and_then(|v| v.as_u64()).unwrap_or(0);
+
+            body.push_str(&format!(
+                "<div class=\"stats\">
+                   <div class=\"stat total\"><b>{total}</b><span>fronts</span></div>
+                   <div class=\"stat up\"><b>{}</b><span>up</span></div>
+                   <div class=\"stat tcp\"><b>{}</b><span>tcp only</span></div>
+                   <div class=\"stat down\"><b>{}</b><span>down</span></div>
+                   <div class=\"stat\"><b>{upstreams}</b><span>upstreams</span></div>
+                 </div>
+                 <p class=\"muted\">scanned {scanned} · {triples} triples · model: <code>{source}</code></p>",
+                count("up"),
+                count("tcp"),
+                count("down"),
+                scanned = html_escape(scanned),
+                source = html_escape(&source),
+            ));
+
+            // Dead fronts grouped by the config file that owns them: the view that
+            // turns dozens of red rows into the handful of files worth editing.
+            let mut dead: HashMap<String, usize> = HashMap::new();
+            for front in &fronts {
+                if front.get("state").and_then(|v| v.as_str()) != Some("down") {
+                    continue;
+                }
+                let file = front
+                    .get("config_file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                *dead.entry(config_basename(file)).or_insert(0) += 1;
+            }
+            let mut dead_rows: Vec<(String, usize)> = dead.into_iter().collect();
+            dead_rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            dead_rows.truncate(12);
+
+            if dead_rows.is_empty() {
+                body.push_str(
+                    "<h3>Down, grouped by config file</h3><p class=\"muted\">every upstream answered</p>",
+                );
+            } else {
+                body.push_str("<h3>Down, grouped by config file</h3><table><thead><tr><th>config file</th><th>dead fronts</th><th>graph</th></tr></thead><tbody>");
+                for (file, n) in &dead_rows {
+                    body.push_str(&format!(
+                        "<tr><td><code>{}</code></td><td>{}</td><td><a href=\"/nginx-fronts/fronts.svg?config={}\">graph</a></td></tr>",
+                        html_escape(file),
+                        n,
+                        html_escape(file),
+                    ));
+                }
+                body.push_str("</tbody></table>");
+            }
+
+            body.push_str("<h3>Topology</h3><p class=\"muted\">server_name → location → upstream, edge colour = probe state</p>");
+            body.push_str(&format!(
+                "<div class=\"graph\">{}</div>",
+                topology_svg
+                    .as_deref()
+                    .unwrap_or("<p class=\"muted\">topology graph unavailable</p>")
+            ));
+            body.push_str("<h3>Health by config file</h3>");
+            body.push_str(&format!(
+                "<div class=\"graph\">{}</div>",
+                health_svg
+                    .as_deref()
+                    .unwrap_or("<p class=\"muted\">health graph unavailable</p>")
+            ));
+        }
+        None => {
+            body.push_str(&format!(
+                "<div class=\"panel\"><h3>nginx-fronts service not reachable</h3>
+                 <p>Could not read <code>{}/fronts.json</code>.</p>
+                 <p class=\"muted\">Start it with <code>systemctl start nginx-fronts.service</code>
+                 (code: <code>planning/nginx-fronts</code> in the task-runner repo).
+                 Override the address with <code>NGINX_FRONTS_URL</code>.</p></div>",
+                html_escape(&source)
+            ));
+        }
+    }
+
+    let html = format!(
+        "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"UTF-8\">
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+<title>nginx fronts</title><style>{page_style}</style></head><body>
+<h1>🌐 nginx fronts</h1>
+<p>Every proxying <code>location</code> in the live nginx tree, as one RDF model:
+ probe state, owning config line, one tile per front.</p>
+{body}
+</body></html>"
+    );
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html))
 }
 

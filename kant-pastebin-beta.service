@@ -1,5 +1,5 @@
 [Unit]
-Description=Kant Pastebin Beta (commit 172b27eb144c11ea3a645a92fb0276bc5dfc8081)
+Description=Kant Pastebin Beta (commit 552c16cd22443c4d7dbf969579c6909e9b6ca70f)
 After=network.target
 
 [Service]
@@ -14,8 +14,8 @@ Environment="PORT=8085"
 Environment="BASE_PATH=/pastebin/beta"
 Environment="BASE_URL=https://solana.solfunmeme.com"
 Environment="RUST_LOG=info"
-Environment="GIT_COMMIT=172b27eb144c11ea3a645a92fb0276bc5dfc8081"
-Environment="BUILD_TIME=2026-10-28T14:04:05Z"
+Environment="GIT_COMMIT=552c16cd22443c4d7dbf969579c6909e9b6ca70f"
+Environment="BUILD_TIME=2026-11-02T01:18:01Z"
 TimeoutStartSec=0
 TimeoutStopSec=0
 NoNewPrivileges=true

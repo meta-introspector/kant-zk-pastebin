@@ -803,6 +803,10 @@ async fn main() -> std::io::Result<()> {
             .route("/api/cid-search", web::get().to(handlers::cid_search))
             .route("/api/ipld/cid/{cid}", web::get().to(handlers::ipld_cid))
             .route("/api/ipld/resolve/{cid}", web::get().to(handlers::ipld_resolve))
+            .route("/tile/sparql-query", web::get().to(handlers::sparql_query_tile))
+            .route("/tile/ipld-query", web::get().to(handlers::ipld_query_tile))
+            // nginx-fronts tile: every live front from nginx-fronts.service
+            .route("/tile/nginx-fronts", web::get().to(handlers::nginx_fronts_tile))
             // Pages reference {BASE_PATH}/static/*.js; without this service those
             // requests fall through to the paste route and 404.
             .service(actix_files::Files::new("/static", "static"))
