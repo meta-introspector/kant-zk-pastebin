@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: Rust Tests & IPFS Verification
+    name: Rust Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -24,15 +24,6 @@ jobs:
       - name: Fetch dependencies (required for offline mode)
         run: cargo fetch --locked
 
-      - name: Setup IPFS
-        uses: ibnesayeed/setup-ipfs@master
-        with:
-          ipfs_version: 'latest'
-          run_daemon: false
-
-      - name: Initialize IPFS
-        run: ipfs init
-
       - name: Run C13-2 specific tests
         run: cargo test --offline --lib c13_binding_ -- --test-threads=1
 
@@ -41,10 +32,3 @@ jobs:
 
       - name: Run BIN test suite
         run: cargo test --offline --bin kant-pastebin -- --test-threads=1
-
-      - name: Generate and Publish IPFS Snapshot (Dry Run)
-        run: |
-          mkdir -p c13-snapshot
-          cp src/handlers.rs src/upload_handler.rs src/ipfs.rs c13-snapshot/ || true
-          ipfs add -r -Q c13-snapshot > cid.txt
-          echo "Generated IPFS CID for snapshot: $(cat cid.txt)"
