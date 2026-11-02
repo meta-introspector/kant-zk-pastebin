@@ -997,6 +997,29 @@ pub(crate) fn publish_cid_alias(ctx: &str, cid_file: &str, id: &str) {
     }
 }
 
+
+/// C13-RUST-19: checked CID alias publication for /upload.
+/// Never overwrites or removes a preexisting alias.
+/// This is not an atomic transaction or an authenticated ownership proof.
+pub(crate) fn publish_cid_alias_checked(
+    cid_file: &str,
+    id: &str,
+) -> std::io::Result<()> {
+    match claim_cid_alias(cid_file, id)? {
+        AliasClaim::Created | AliasClaim::Existing => {
+            let actual = fs::read_to_string(cid_file)?;
+            if actual == id {
+                Ok(())
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "CID alias does not match requested id",
+                ))
+            }
+        }
+    }
+}
+
 async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
     let content = paste.content.as_deref().unwrap_or("");
 
@@ -1158,6 +1181,394 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
 /// POST /upload - Upload file (multipart)
 /// Save-first: write file to disk immediately, then return.
 /// No NLP, no HTML extraction, no blocking calls in this handler.
+
+// C13-RUST-08: experimental fail-closed read gate for indexed uploads.
+// Not a transactional commit protocol.
+
+// C13-RUST-31: transaction visibility gate.
+// Experimental consistency marker, NOT authentication.
+fn c13_commit_payload(
+    id: &str, filename: &str, witness: &str, cid: &str
+) -> String {
+    format!("C13-1\n{}\n{}\n{}\n{}\n", id, filename, witness, cid)
+}
+
+
+// C13-RUST-38: process-local read authorization.
+// Volatile by design: absent after restart, until recovery is implemented.
+// This is NOT multi-process coordination or cryptographic authentication.
+static C13_READ_PERMITS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashSet<(String, String)>>
+> = std::sync::OnceLock::new();
+
+fn c13_permits() -> &'static std::sync::Mutex<
+    std::collections::HashSet<(String, String)>
+> {
+    C13_READ_PERMITS.get_or_init(|| {
+        std::sync::Mutex::new(std::collections::HashSet::new())
+    })
+}
+
+fn c13_read_permitted(spool: &str, id: &str) -> bool {
+    c13_permits()
+        .lock()
+        .map(|permits| permits.contains(&(spool.to_owned(), id.to_owned())))
+        .unwrap_or(false)
+}
+
+fn c13_grant_read_permit(spool: &str, id: &str)
+    -> std::io::Result<()>
+{
+    let mut permits = c13_permits().lock().map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "read authorization registry unavailable"
+        )
+    })?;
+
+    permits.insert((spool.to_owned(), id.to_owned()));
+    Ok(())
+}
+
+
+// C13-RUST-47: persistent SQLite authorization.
+// Experimental; not a complete filesystem/IPFS transaction.
+fn c13_db_path(spool: &str) -> std::path::PathBuf {
+    Path::new(spool).join(".c13-transactions.sqlite")
+}
+
+fn c13_sqlite_authorized(spool: &str, entry: &PasteIndex) -> bool {
+    use rusqlite::{Connection, OpenFlags, params, OptionalExtension};
+
+    let conn = match Connection::open_with_flags(
+        c13_db_path(spool),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    conn.query_row(
+        "SELECT state FROM c13_transactions
+         WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4",
+        params![entry.id, entry.filename, entry.witness, entry.cid],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map(|state| state.as_deref() == Some("COMMITTED"))
+    .unwrap_or(false)
+}
+
+
+// C13-RUST-55: prepare before spool publication.
+// PREPARED never grants HTTP read authorization.
+pub(crate) fn c13_sqlite_prepare(
+    spool: &str, id: &str, filename: &str,
+    witness: &str, cid: &str,
+) -> std::io::Result<()> {
+    use rusqlite::{Connection, params};
+
+    if !is_safe_paste_id(id)
+        || Path::new(filename).file_name()
+            .and_then(|n| n.to_str()) != Some(filename)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput, "unsafe transaction identity"
+        ));
+    }
+
+    let convert = |e: rusqlite::Error| {
+        std::io::Error::new(std::io::ErrorKind::Other, e)
+    };
+
+    let conn = Connection::open(c13_db_path(spool))
+        .map_err(convert)?;
+
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(convert)?;
+
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA synchronous=FULL;
+         CREATE TABLE IF NOT EXISTS c13_transactions (
+             id TEXT PRIMARY KEY,
+             filename TEXT NOT NULL,
+             witness TEXT NOT NULL,
+             cid TEXT NOT NULL,
+             state TEXT NOT NULL
+                 CHECK(state IN ('PREPARED','COMMITTED','UNCERTAIN'))
+         );"
+    ).map_err(convert)?;
+
+    conn.execute(
+        "INSERT INTO c13_transactions
+         (id,filename,witness,cid,state)
+         VALUES (?1,?2,?3,?4,'PREPARED')",
+        params![id, filename, witness, cid],
+    ).map_err(convert)?;
+
+    Ok(())
+}
+
+fn c13_sqlite_commit(
+    spool: &str, id: &str, filename: &str,
+    witness: &str, cid: &str,
+) -> std::io::Result<()> {
+    use rusqlite::{Connection, params};
+
+    let convert = |e: rusqlite::Error| {
+        std::io::Error::new(std::io::ErrorKind::Other, e)
+    };
+
+
+    // C13-RUST-57: halt after sealed publication, before SQLite commit.
+    #[cfg(test)]
+    if let Ok(ready_file) =
+        std::env::var("C13_RUST57_READY_FILE")
+    {
+        std::fs::write(&ready_file, spool.as_bytes())?;
+        loop {
+            std::thread::park();
+        }
+    }
+
+    let conn = Connection::open(c13_db_path(spool))
+        .map_err(convert)?;
+
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(convert)?;
+
+    conn.execute_batch(
+        "PRAGMA synchronous=FULL;
+         PRAGMA journal_mode=WAL;
+         CREATE TABLE IF NOT EXISTS c13_transactions (
+             id TEXT PRIMARY KEY,
+             filename TEXT NOT NULL,
+             witness TEXT NOT NULL,
+             cid TEXT NOT NULL,
+             state TEXT NOT NULL
+                 CHECK(state IN ('PREPARED','COMMITTED','UNCERTAIN'))
+         );"
+    ).map_err(convert)?;
+
+    // C13-RUST-55: exclusive PREPARED -> COMMITTED transition.
+    let updated = conn.execute(
+        "UPDATE c13_transactions SET state='COMMITTED'
+         WHERE id=?1 AND filename=?2 AND witness=?3
+           AND cid=?4 AND state='PREPARED'",
+        params![id, filename, witness, cid],
+    ).map_err(convert)?;
+
+    if updated != 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "C13 commit requires exactly one matching PREPARED record"
+        ));
+    }
+
+    // C13-RUST-49: simulate lost SQLite commit acknowledgement.
+    #[cfg(test)]
+    if c13_sqlite_commit_fault_probe::take() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "C13 injected error after SQLite commit"
+        ));
+    }
+
+    Ok(())
+}
+
+fn c13_commit_matches(spool: &str, entry: &PasteIndex) -> bool {
+    if !is_safe_paste_id(&entry.id)
+        || Path::new(&entry.filename).file_name()
+            .and_then(|n| n.to_str()) != Some(entry.filename.as_str())
+    {
+        return false;
+    }
+    let marker = Path::new(spool)
+        .join(format!("{}.c13-committed", entry.id));
+    let expected = c13_commit_payload(
+        &entry.id, &entry.filename, &entry.witness, &entry.cid
+    );
+    // C13-RUST-36: visibility seal required in addition to commit.
+    let seal = Path::new(spool)
+        .join(format!("{}.c13-visible", entry.id));
+
+    let commit_ok = fs::read(&marker)
+        .map(|actual| actual == expected.as_bytes())
+        .unwrap_or(false);
+
+    let seal_ok = fs::read(&seal)
+        .map(|actual| actual == expected.as_bytes())
+        .unwrap_or(false);
+
+    commit_ok && seal_ok && c13_sqlite_authorized(spool, entry)
+}
+
+
+#[derive(Debug)]
+pub(crate) enum C13CommitOutcome {
+    NotPublished(std::io::Error),
+    PublishedDurable,
+    DurabilityUncertain(std::io::Error),
+}
+
+pub(crate) fn c13_publish_upload_commit(
+    spool: &str, id: &str, filename: &str,
+    witness: &str, cid: &str
+) -> C13CommitOutcome {
+    if !is_safe_paste_id(id)
+        || Path::new(filename).file_name()
+            .and_then(|n| n.to_str()) != Some(filename)
+    {
+        return C13CommitOutcome::NotPublished(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput, "unsafe commit identity"
+        ));
+    }
+
+
+    let payload = c13_commit_payload(id, filename, witness, cid);
+
+    let preparation = (|| -> std::io::Result<tempfile::NamedTempFile> {
+        let mut staged = tempfile::NamedTempFile::new_in(spool)?;
+        std::io::Write::write_all(
+            staged.as_file_mut(), payload.as_bytes()
+        )?;
+        staged.as_file().sync_all()?;
+        Ok(staged)
+    })();
+
+    let staged = match preparation {
+        Ok(staged) => staged,
+        Err(e) => return C13CommitOutcome::NotPublished(e),
+    };
+
+    let marker = Path::new(spool)
+        .join(format!("{}.c13-committed", id));
+
+    if let Err(e) = staged.persist_noclobber(&marker) {
+        return C13CommitOutcome::NotPublished(e.error);
+    }
+
+    #[cfg(test)]
+    if c13_commit_fault_probe::take() {
+        return C13CommitOutcome::DurabilityUncertain(
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "C13 injected post-marker publication failure"
+            )
+        );
+    }
+
+    // C13-RUST-36: first make the commit marker durable.
+    if let Err(e) = std::fs::File::open(spool)
+        .and_then(|d| d.sync_all())
+    {
+        return C13CommitOutcome::DurabilityUncertain(e);
+    }
+
+    // Publish a separate visibility seal only after the first sync.
+    let seal = Path::new(spool)
+        .join(format!("{}.c13-visible", id));
+
+    let result = (|| -> std::io::Result<()> {
+        let mut pending = tempfile::NamedTempFile::new_in(spool)?;
+        std::io::Write::write_all(
+            pending.as_file_mut(), payload.as_bytes()
+        )?;
+        pending.as_file().sync_all()?;
+        pending.persist_noclobber(&seal).map_err(|e| e.error)?;
+
+        // C13-RUST-37: simulate failure after visibility-seal publication.
+        #[cfg(test)]
+        if c13_seal_fault_probe::take() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "C13 injected post-seal synchronization failure",
+            ));
+        }
+
+        // A failed sync here still has ambiguous durability.
+        std::fs::File::open(spool)?.sync_all()
+    })();
+
+    match result {
+        Ok(()) => match c13_sqlite_commit(
+            spool, id, filename, witness, cid
+        ) {
+            Ok(()) => C13CommitOutcome::PublishedDurable,
+            Err(e) => {
+                // C13-RUST-50: reconcile lost SQLite acknowledgement.
+                // Read back the exact committed identity from persistent storage.
+                let confirmed = (|| -> rusqlite::Result<bool> {
+                    use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+                    let conn = Connection::open_with_flags(
+                        c13_db_path(spool),
+                        OpenFlags::SQLITE_OPEN_READ_ONLY,
+                    )?;
+                    let state: Option<String> = conn.query_row(
+                        "SELECT state FROM c13_transactions
+                         WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4",
+                        params![id, filename, witness, cid],
+                        |row| row.get(0),
+                    ).optional()?;
+                    Ok(state.as_deref() == Some("COMMITTED"))
+                })().unwrap_or(false);
+
+                if confirmed {
+                    C13CommitOutcome::PublishedDurable
+                } else {
+                    C13CommitOutcome::DurabilityUncertain(e)
+                }
+            }
+        },
+        Err(e) => C13CommitOutcome::DurabilityUncertain(e),
+    }
+}
+
+fn c13_index_authorizes_upload(
+    spool: &str,
+    id: &str,
+    path: &Path,
+    data: &[u8],
+) -> bool {
+    let Some(filename) = path.file_name().and_then(|v| v.to_str()) else {
+        return false;
+    };
+
+    let Ok(index) = fs::read_to_string(
+        Path::new(spool).join("index.jsonl")
+    ) else {
+        return false;
+    };
+
+    if !index.ends_with('\n') {
+        return false;
+    }
+
+    let witness = hex::encode(Sha256::digest(data));
+    let mut authorized = false;
+
+    for line in index.lines() {
+        let entry: PasteIndex = match serde_json::from_str(line) {
+            Ok(entry) => entry,
+            Err(_) => return false,
+        };
+
+        if entry.id == id
+            && entry.filename == filename
+            && entry.size == data.len()
+            && entry.witness.eq_ignore_ascii_case(&witness)
+            && entry.keywords.iter().any(|v| v == "upload")
+            && c13_commit_matches(spool, &entry)
+        {
+            authorized = true;
+        }
+    }
+
+    authorized
+}
+
 fn find_file_in_dir(dir: &str, id: &str, requested_ext: &str) -> Option<std::path::PathBuf> {
     let entries: Vec<std::path::PathBuf> = fs::read_dir(dir)
         .ok()?
@@ -1229,6 +1640,17 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
         Some(entry) => {
             let data = fs::read(&entry)
                 .map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
+
+            // Fail closed for direct spool files without a matching
+            // indexed upload and content witness.
+            if entry.parent() == Some(Path::new(&uucp_dir))
+                && !c13_index_authorizes_upload(
+                    &uucp_dir, &id, &entry, &data
+                )
+            {
+                return Ok(HttpResponse::NotFound().body("File not found"));
+            }
+
             let ext = entry
                 .extension()
                 .and_then(|e| e.to_str())
@@ -1295,6 +1717,67 @@ pub async fn get_paste(
         .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
         .collect();
 
+    // C13-RUST-12: fail closed for absent or ambiguous index entries.
+    // This is an interim visibility gate, not a transaction proof.
+    let matches: Vec<_> = entries.iter()
+        .filter(|entry| entry.id == id)
+        .collect();
+
+    if matches.len() != 1 {
+        return Ok(HttpResponse::NotFound().body("Paste not found"));
+    }
+
+    // C13-RUST-15: retain verified upload bytes for rendering.
+    // A pathname replacement after verification cannot change these bytes.
+    let selected = matches[0];
+    let mut verified_upload_text: Option<String> = None;
+    if selected.keywords.iter().any(|k| k == "upload")
+        && !c13_commit_matches(&uucp_dir, selected)
+    {
+        return Ok(HttpResponse::NotFound().body("Paste not found"));
+    }
+
+
+    if selected.keywords.iter().any(|k| k == "upload") {
+        let name = Path::new(&selected.filename);
+
+        if name.file_name().and_then(|n| n.to_str())
+            != Some(selected.filename.as_str())
+            || name.file_stem().and_then(|n| n.to_str())
+                != Some(id.as_str())
+        {
+            return Ok(HttpResponse::NotFound().body("Paste not found"));
+        }
+
+        let upload_path = Path::new(&uucp_dir).join(&selected.filename);
+
+        let bytes = match fs::read(&upload_path) {
+            Ok(bytes) => bytes,
+            Err(_) => return Ok(HttpResponse::NotFound().body("Paste not found")),
+        };
+
+        if !c13_index_authorizes_upload(
+            &uucp_dir, &id, &upload_path, &bytes
+        ) {
+            return Ok(HttpResponse::NotFound().body("Paste not found"));
+        }
+
+        if selected.filename.ends_with(".txt") {
+            verified_upload_text = match String::from_utf8(bytes) {
+                Ok(content) => Some(content),
+                Err(_) => return Ok(HttpResponse::NotFound().body("Paste not found")),
+            };
+        }
+    }
+
+    // C13-RUST-16: controlled substitution after verification.
+    #[cfg(test)]
+    if selected.keywords.iter().any(|k| k == "upload") {
+        c13_read_race_probe::run(
+            &Path::new(&uucp_dir).join(&selected.filename)
+        );
+    }
+
     let current_idx = entries.iter().position(|e| e.id == id);
     let prev_id = current_idx.and_then(|i| {
         if i > 0 {
@@ -1307,7 +1790,13 @@ pub async fn get_paste(
 
     // Exact lookup: a text paste is stored as `<id>.txt`. Never select a
     // file by substring or by directory enumeration order.
-    let content = fs::read_to_string(std::path::Path::new(&uucp_dir).join(format!("{}.txt", id))).ok();
+    let content = if selected.keywords.iter().any(|k| k == "upload") {
+        verified_upload_text
+    } else {
+        fs::read_to_string(
+            Path::new(&uucp_dir).join(format!("{}.txt", id))
+        ).ok()
+    };
 
     // Check for uploaded file with .meta sidecar
     let is_file = content.is_none();
@@ -2037,7 +2526,11 @@ pub async fn preview_paste(path: web::Path<String>) -> Result<HttpResponse> {
 /// GET /raw/{id} - Raw text
 pub async fn get_raw(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
-    let content = read_paste_content_by_id(&id).unwrap_or_else(|| "Paste not found".to_string());
+    let Some(content) = read_paste_content_by_id(&id) else {
+        return Ok(HttpResponse::NotFound()
+            .content_type("text/plain")
+            .body("Paste not found"));
+    };
     Ok(HttpResponse::Ok().content_type("text/plain").body(content))
 }
 
@@ -3088,8 +3581,22 @@ fn read_paste_content_by_id(paste_id: &str) -> Option<String> {
     read_index_entries(&uucp_dir)
         .into_iter()
         .find(|e| e.id == resolved)
-        .and_then(|e| read_paste_content(&e.uucp_path))
-        .or_else(|| read_paste_content(&format!("{}/{}.txt", uucp_dir, resolved)))
+        .and_then(|e| {
+            if e.keywords.iter().any(|k| k == "upload") {
+                if !c13_commit_matches(&uucp_dir, &e) {
+                    return None;
+                }
+                let path = Path::new(&uucp_dir).join(&e.filename);
+                let bytes = fs::read(&path).ok()?;
+                if !c13_index_authorizes_upload(
+                    &uucp_dir, &resolved, &path, &bytes
+                ) {
+                    return None;
+                }
+                return String::from_utf8(bytes).ok();
+            }
+            read_paste_content(&e.uucp_path)
+        })
 }
 
 /// A paste's CID permalink names a .cid file whose content is the paste id
@@ -6863,3 +7370,69 @@ pub async fn run_plugin_handler(path: web::Path<(String, String)>) -> ActixResul
     Ok(HttpResponse::Ok().json(serde_json::json!({"name": name, "id": id, "result": "ok"})))
 }
 
+
+#[cfg(test)]
+pub(crate) mod c13_read_race_probe {
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    static HOOK: Mutex<Option<fn(&Path)>> = Mutex::new(None);
+
+    pub fn set(callback: Option<fn(&Path)>) {
+        *HOOK.lock().unwrap() = callback;
+    }
+
+    pub fn run(path: &Path) {
+        let callback = *HOOK.lock().unwrap();
+        if let Some(f) = callback {
+            f(path);
+        }
+    }
+}
+
+
+#[cfg(test)]
+pub(crate) mod c13_commit_fault_probe {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static FAIL_AFTER_MARKER: AtomicBool = AtomicBool::new(false);
+
+    pub fn enable() {
+        FAIL_AFTER_MARKER.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take() -> bool {
+        FAIL_AFTER_MARKER.swap(false, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod c13_seal_fault_probe {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static FAIL_AFTER_SEAL: AtomicBool = AtomicBool::new(false);
+
+    pub fn enable() {
+        FAIL_AFTER_SEAL.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take() -> bool {
+        FAIL_AFTER_SEAL.swap(false, Ordering::SeqCst)
+    }
+}
+
+
+#[cfg(test)]
+pub(crate) mod c13_sqlite_commit_fault_probe {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static FAIL_AFTER_COMMIT: AtomicBool = AtomicBool::new(false);
+
+    pub fn enable() {
+        FAIL_AFTER_COMMIT.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take() -> bool {
+        FAIL_AFTER_COMMIT.swap(false, Ordering::SeqCst)
+    }
+}

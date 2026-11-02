@@ -577,6 +577,20 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
+    // C13-RUST-68: restrictive server startup umask.
+    // Set once before server storage initialization and worker startup.
+    // CLI commands above retain their existing umask.
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn umask(mask: u32) -> u32;
+        }
+
+        unsafe {
+            umask(0o077);
+        }
+    }
+
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
     let bind = env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8090".to_string());
