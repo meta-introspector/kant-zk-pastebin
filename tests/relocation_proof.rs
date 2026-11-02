@@ -291,6 +291,7 @@ fn check_page_links(html: &str, page_name: &str, bp: &str) -> Vec<String> {
     errors
 }
 
+#[ignore = "requires running server on BASE_URL (default 127.0.0.1:8090)"]
 #[tokio::test]
 async fn test_relocation_home_page() -> Result<(), Box<dyn std::error::Error>> {
     let base = base_url();
@@ -314,6 +315,7 @@ async fn test_relocation_home_page() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[ignore = "requires running server on BASE_URL (default 127.0.0.1:8090)"]
 #[tokio::test]
 async fn test_relocation_paste_page() -> Result<(), Box<dyn std::error::Error>> {
     let base = base_url();
@@ -352,6 +354,7 @@ async fn test_relocation_paste_page() -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+#[ignore = "requires running server on BASE_URL (default 127.0.0.1:8090)"]
 #[tokio::test]
 async fn test_relocation_splitter_page() -> Result<(), Box<dyn std::error::Error>> {
     let base = base_url();
@@ -378,6 +381,7 @@ async fn test_relocation_splitter_page() -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
+#[ignore = "requires running server on BASE_URL (default 127.0.0.1:8090)"]
 #[tokio::test]
 async fn test_relocation_browse_page() -> Result<(), Box<dyn std::error::Error>> {
     let base = base_url();
@@ -401,6 +405,7 @@ async fn test_relocation_browse_page() -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+#[ignore = "requires running server on BASE_URL (default 127.0.0.1:8090)"]
 #[tokio::test]
 async fn test_relocation_gallery_page() -> Result<(), Box<dyn std::error::Error>> {
     let base = base_url();
@@ -426,6 +431,7 @@ async fn test_relocation_gallery_page() -> Result<(), Box<dyn std::error::Error>
 
 /// Comprehensive test: fetch ALL HTML pages and verify every internal link
 /// is correctly base_path-prefixed and resolves to a registered route.
+#[ignore = "requires running server on BASE_URL (default 127.0.0.1:8090)"]
 #[tokio::test]
 async fn test_relocation_all_pages() -> Result<(), Box<dyn std::error::Error>> {
     let base = base_url();
@@ -522,6 +528,7 @@ async fn test_relocation_all_pages() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Regression test: verify that the specific bugs we fixed don't come back.
 /// These are the exact paths that were hardcoded and broke behind nginx.
+#[ignore = "requires running server on BASE_URL (default 127.0.0.1:8090)"]
 #[tokio::test]
 async fn test_relocation_regression_hardcoded_paths() -> Result<(), Box<dyn std::error::Error>> {
     let base = base_url();

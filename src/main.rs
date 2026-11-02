@@ -257,6 +257,8 @@ fn run_rename_allm_pastes_cli(args: RenameAllmPastesArgs) -> Result<(), String> 
         apply: args.apply,
         rename_files: args.rename_files,
         limit: args.limit,
+        #[cfg(test)]
+        skip_c13_check: false,
     };
     let report = rename::rename_allm_pastes(&options)?;
 
@@ -559,6 +561,14 @@ fn read_input(path: Option<&str>) -> Result<String, String> {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn configure_integrity_route(cfg: &mut web::ServiceConfig) {
+    cfg.route("/integrity/{id}", web::get().to(handlers::get_integrity));
+}
+
+#[cfg(not(target_os = "linux"))]
+fn configure_integrity_route(_cfg: &mut web::ServiceConfig) {}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
@@ -567,6 +577,20 @@ async fn main() -> std::io::Result<()> {
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?
     {
         return Ok(());
+    }
+
+    // C13-RUST-68: restrictive server startup umask.
+    // Set once before server storage initialization and worker startup.
+    // CLI commands above retain their existing umask.
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn umask(mask: u32) -> u32;
+        }
+
+        unsafe {
+            umask(0o077);
+        }
     }
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
@@ -656,6 +680,7 @@ async fn main() -> std::io::Result<()> {
             )
             .route("/preview/{id}", web::get().to(handlers::preview_paste))
             .route("/raw/{id}", web::get().to(handlers::get_raw))
+            .configure(configure_integrity_route)
             .route("/upgrade", web::post().to(handlers::upgrade_pastes))
             .route(
                 "/thread/{id}/export",

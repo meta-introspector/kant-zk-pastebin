@@ -216,6 +216,7 @@ fn main() {
                 reply_to: None,
                 size: content.len(),
                 uucp_path: path_str.to_string(),
+                envelope_witness: None,
                 root: Some(root.label.clone()),
             };
 

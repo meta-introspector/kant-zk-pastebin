@@ -237,7 +237,7 @@ pub fn write_index_entry(
     ipfs_cid: Option<String>,
     reply_to: Option<String>,
     root: Option<String>,
-) {
+) -> std::io::Result<()> {
     let ngrams = tagging::extract_ngrams(&format!("{} {}", title, keywords.join(" ")), 3, 10);
     let entry = PasteIndex {
         id: id.to_string(),
@@ -254,6 +254,7 @@ pub fn write_index_entry(
         size,
         uucp_path: format!("{}/{}", uucp_dir, filename),
         root,
+        envelope_witness: None,
     };
     let index_file = format!("{}/index.jsonl", uucp_dir);
     let line = format!("{}\n", serde_json::to_string(&entry).unwrap());
@@ -262,7 +263,6 @@ pub fn write_index_entry(
         .append(true)
         .open(&index_file)
         .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()))
-        .ok();
 }
 
 pub fn clean_field(value: &str) -> String {
@@ -577,6 +577,348 @@ fn write_new_file(path: &str, data: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Read a regular spool file without following the final symlink.
+/// The spool directory itself must also not be a symlink.
+/// Linux-specific; does not establish independent authenticity.
+#[cfg(target_os = "linux")]
+fn read_integrity_file(
+    spool: &Path,
+    filename: &str,
+    max_bytes: usize,
+) -> std::io::Result<Vec<u8>> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    let invalid = || std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "invalid integrity filename",
+    );
+
+    if filename.is_empty()
+        || filename == "."
+        || filename == ".."
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.as_bytes().contains(&0)
+    {
+        return Err(invalid());
+    }
+
+    let dir_name = CString::new(spool.as_os_str().as_bytes())
+        .map_err(|_| invalid())?;
+    let file_name = CString::new(filename).map_err(|_| invalid())?;
+
+    let dir_fd = unsafe {
+        libc::open(
+            dir_name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if dir_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let dir = unsafe { OwnedFd::from_raw_fd(dir_fd) };
+
+    let fd = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            file_name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let file = fs::File::from(fd);
+
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > max_bytes as u64 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "not a regular file or size limit exceeded",
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    file.take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "integrity file exceeds size limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Hash a regular envelope in bounded memory.
+/// Reuses the secure descriptor-opening rules of the integrity reader.
+#[cfg(target_os = "linux")]
+fn hash_integrity_envelope(
+    spool: &Path,
+    filename: &str,
+    max_bytes: usize,
+) -> std::io::Result<String> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    if filename.is_empty()
+        || filename == "."
+        || filename == ".."
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.as_bytes().contains(&0)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid envelope filename",
+        ));
+    }
+
+    let dir_name = CString::new(spool.as_os_str().as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid spool path")
+    })?;
+    let file_name = CString::new(filename).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid filename")
+    })?;
+
+    let dir_fd = unsafe {
+        libc::open(
+            dir_name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if dir_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let dir = unsafe { OwnedFd::from_raw_fd(dir_fd) };
+
+    let file_fd = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            file_name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
+    if file_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let file_fd = unsafe { OwnedFd::from_raw_fd(file_fd) };
+    let mut file = fs::File::from(file_fd);
+
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > max_bytes as u64 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid envelope size or type",
+        ));
+    }
+
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total = 0usize;
+
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        total = total.checked_add(n).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "size overflow")
+        })?;
+        if total > max_bytes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "envelope exceeds size limit",
+            ));
+        }
+        hasher.update(&buffer[..n]);
+    }
+
+    if u64::try_from(total).ok() != Some(metadata.len()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "envelope length changed during hashing",
+        ));
+    }
+
+    use std::os::unix::fs::MetadataExt;
+
+    let after = file.metadata()?;
+    if !after.is_file()
+        || after.dev() != metadata.dev()
+        || after.ino() != metadata.ino()
+        || after.len() != metadata.len()
+        || after.mtime() != metadata.mtime()
+        || after.mtime_nsec() != metadata.mtime_nsec()
+        || after.ctime() != metadata.ctime()
+        || after.ctime_nsec() != metadata.ctime_nsec()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "envelope changed during hashing",
+        ));
+    }
+
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Strict index lookup for local integrity checks.
+/// Rejects malformed lines and duplicate identifiers.
+#[cfg(target_os = "linux")]
+fn read_integrity_index_entry(
+    spool: &Path,
+    id: &str,
+) -> std::io::Result<Option<PasteIndex>> {
+    const MAX_INDEX_BYTES: usize = 64 * 1024 * 1024;
+
+    let bytes = read_integrity_file(spool, "index.jsonl", MAX_INDEX_BYTES)?;
+    let content = std::str::from_utf8(&bytes).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "index is not UTF-8")
+    })?;
+
+    let mut found = None;
+    let mut seen = std::collections::HashSet::new();
+
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "empty index record",
+            ));
+        }
+
+        let entry: PasteIndex = serde_json::from_str(line).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "malformed index record",
+            )
+        })?;
+
+        if !seen.insert(entry.id.clone()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "duplicate index id",
+            ));
+        }
+
+        if entry.id == id {
+            found = Some(entry);
+        }
+    }
+
+    Ok(found)
+}
+
+/// Validate a canonical text-paste ID for the integrity endpoint.
+#[cfg(target_os = "linux")]
+fn is_safe_integrity_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_FILENAME_BYTES - ".txt".len()
+        && !id.starts_with('.')
+        && !id.ends_with('.')
+        && !id.chars().any(|c| {
+            c == '/' || c == '\\' || c.is_control()
+        })
+}
+
+/// GET /integrity/{id} — verify local persisted envelope bytes.
+/// MATCH is local consistency only, not independent authenticity.
+#[cfg(target_os = "linux")]
+pub async fn get_integrity(path: web::Path<String>) -> Result<HttpResponse> {
+    let id = path.into_inner();
+    let (status, body) = web::block(move || get_integrity_blocking(id))
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    let status = actix_web::http::StatusCode::from_u16(status)
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    Ok(HttpResponse::build(status).json(body))
+}
+
+#[cfg(target_os = "linux")]
+fn get_integrity_blocking(id: String) -> (u16, serde_json::Value) {
+    if !is_safe_integrity_id(&id) {
+        return (400, serde_json::json!({
+            "status": "ERROR",
+            "reason": "invalid_id"
+        }));
+    }
+
+    let spool = env::var("UUCP_SPOOL")
+        .unwrap_or_else(|_| "/var/spool/uucp".to_string());
+    let spool = Path::new(&spool);
+
+    let entry = match read_integrity_index_entry(spool, &id) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => return (404, serde_json::json!({
+            "status": "UNVERIFIABLE",
+            "reason": "not_indexed"
+        })),
+        Err(_) => return (500, serde_json::json!({
+            "status": "ERROR",
+            "reason": "index_unavailable_or_invalid"
+        })),
+    };
+
+    let filename = format!("{}.txt", id);
+    if entry.filename != filename {
+        return (409, serde_json::json!({
+            "status": "ERROR",
+            "reason": "filename_mismatch"
+        }));
+    }
+
+    let expected = match entry.envelope_witness.as_deref() {
+        Some(value) => value,
+        None => return (200, serde_json::json!({
+            "status": "UNVERIFIABLE",
+            "reason": "missing_envelope_witness"
+        })),
+    };
+
+    if expected.len() != 64
+        || !expected.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return (200, serde_json::json!({
+            "status": "UNVERIFIABLE",
+            "reason": "invalid_envelope_witness"
+        }));
+    }
+
+    // Provisional cap; review before deployment.
+    const MAX_ENVELOPE_BYTES: usize = 512 * 1024 * 1024;
+
+    let actual = match hash_integrity_envelope(
+        spool,
+        &filename,
+        MAX_ENVELOPE_BYTES,
+    ) {
+        Ok(actual) => actual,
+        Err(_) => return (500, serde_json::json!({
+            "status": "ERROR",
+            "reason": "envelope_unavailable_or_invalid"
+        })),
+    };
+
+    let status = if actual.eq_ignore_ascii_case(expected) {
+        "MATCH"
+    } else {
+        "MISMATCH"
+    };
+
+    (200, serde_json::json!({
+        "id": id,
+        "status": status,
+        "algorithm": "sha256",
+        "scope": "local_stored_envelope"
+    }))
+}
+
 /// Whether the current request created the CID alias or found one in place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AliasClaim {
@@ -614,11 +956,11 @@ fn persist_failed() -> HttpResponse {
 /// request's file. If the file already exists it is accepted only when it
 /// holds exactly `data` (the same record stored by an identical request in
 /// the same second); any other existing file is a collision and an error.
-fn store_spool_file(path: &str, data: &[u8]) -> std::io::Result<()> {
+pub(crate) fn store_spool_file(path: &str, data: &[u8]) -> std::io::Result<bool> {
     for _ in 0..50 {
         match write_new_file(path, data) {
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => match fs::read(path) {
-                Ok(existing) if existing == data => return Ok(()),
+                Ok(existing) if existing == data => return Ok(false),
                 // An identical request is still writing the file: wait briefly.
                 Ok(existing) if data.starts_with(&existing) => {
                     std::thread::sleep(std::time::Duration::from_millis(2))
@@ -627,7 +969,8 @@ fn store_spool_file(path: &str, data: &[u8]) -> std::io::Result<()> {
                 Err(r) if r.kind() == std::io::ErrorKind::NotFound => {}
                 _ => return Err(e),
             },
-            other => return other,
+            Ok(_) => return Ok(true),
+            Err(e) => return Err(e),
         }
     }
     Err(std::io::Error::new(
@@ -638,7 +981,7 @@ fn store_spool_file(path: &str, data: &[u8]) -> std::io::Result<()> {
 
 /// Publish `cid_file -> id` for a record that is already stored, with the
 /// rule of `create_paste_inner`: an existing alias is never overwritten.
-fn publish_cid_alias(ctx: &str, cid_file: &str, id: &str) {
+pub(crate) fn publish_cid_alias(ctx: &str, cid_file: &str, id: &str) {
     match claim_cid_alias(cid_file, id) {
         Ok(AliasClaim::Created) => {}
         Ok(AliasClaim::Existing) => {
@@ -651,6 +994,29 @@ fn publish_cid_alias(ctx: &str, cid_file: &str, id: &str) {
             "[{}] {} stored, but CID alias {} not created: {}",
             ctx, id, cid_file, e
         ),
+    }
+}
+
+
+/// C13-RUST-19: checked CID alias publication for /upload.
+/// Never overwrites or removes a preexisting alias.
+/// This is not an atomic transaction or an authenticated ownership proof.
+pub(crate) fn publish_cid_alias_checked(
+    cid_file: &str,
+    id: &str,
+) -> std::io::Result<()> {
+    match claim_cid_alias(cid_file, id)? {
+        AliasClaim::Created | AliasClaim::Existing => {
+            let actual = fs::read_to_string(cid_file)?;
+            if actual == id {
+                Ok(())
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "CID alias does not match requested id",
+                ))
+            }
+        }
     }
 }
 
@@ -750,6 +1116,7 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
         content, section.to_rdfa());
     // Persist the paste first. `create_new` refuses to overwrite another
     // paste with the same filename (same-second collision).
+    let envelope_witness = hex::encode(Sha256::digest(paste_content.as_bytes()));
     if let Err(e) = write_new_file(&uucp, paste_content.as_bytes()) {
         error!("[create_paste] failed to write paste {}: {}", uucp, e);
         return Ok(persist_failed());
@@ -775,6 +1142,7 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
         reply_to: paste.reply_to.clone(),
         size: content.len(),
         uucp_path: uucp.clone(),
+        envelope_witness: Some(envelope_witness),
         root: None,
     };
 
@@ -813,6 +1181,608 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
 /// POST /upload - Upload file (multipart)
 /// Save-first: write file to disk immediately, then return.
 /// No NLP, no HTML extraction, no blocking calls in this handler.
+
+// C13-RUST-08: experimental fail-closed read gate for indexed uploads.
+// Not a transactional commit protocol.
+
+// C13-RUST-31: transaction visibility gate.
+// Experimental consistency marker, NOT authentication.
+fn c13_valid_root_cid(root: &str) -> bool {
+    use ipld_core::cid::Cid;
+
+    match root.parse::<Cid>() {
+        Ok(cid) => {
+            cid.to_string() == root
+                // STEP977B_R11C: rust-unixfs::FileAdder emits a raw leaf
+                // (codec 0x55) for files <= 256KB and a DAG-PB root
+                // (codec 0x70) for larger files. Both are legitimate
+                // writer outputs. Content binding (SHA-256 over the
+                // reconstructed bytes) — not the codec — is the sole
+                // authority for what a root identifies.
+                && (cid.codec() == 0x55 || cid.codec() == 0x70)
+                && cid.hash().code() == 0x12
+                && cid.hash().size() == 32
+        }
+        Err(_) => false,
+    }
+}
+
+fn c13_commit_payload(
+    id: &str,
+    filename: &str,
+    witness: &str,
+    cid: &str,
+    ipfs_root_cid: &str,
+) -> String {
+    format!(
+        "C13-2\n{}\n{}\n{}\n{}\n{}\n",
+        id, filename, witness, cid, ipfs_root_cid
+    )
+}
+
+
+// C13-RUST-38: process-local read authorization.
+// Volatile by design: absent after restart, until recovery is implemented.
+// This is NOT multi-process coordination or cryptographic authentication.
+static C13_READ_PERMITS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashSet<(String, String)>>
+> = std::sync::OnceLock::new();
+
+fn c13_permits() -> &'static std::sync::Mutex<
+    std::collections::HashSet<(String, String)>
+> {
+    C13_READ_PERMITS.get_or_init(|| {
+        std::sync::Mutex::new(std::collections::HashSet::new())
+    })
+}
+
+fn c13_read_permitted(spool: &str, id: &str) -> bool {
+    c13_permits()
+        .lock()
+        .map(|permits| permits.contains(&(spool.to_owned(), id.to_owned())))
+        .unwrap_or(false)
+}
+
+fn c13_grant_read_permit(spool: &str, id: &str)
+    -> std::io::Result<()>
+{
+    let mut permits = c13_permits().lock().map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "read authorization registry unavailable"
+        )
+    })?;
+
+    permits.insert((spool.to_owned(), id.to_owned()));
+    Ok(())
+}
+
+
+// C13-RUST-47: persistent SQLite authorization.
+// Experimental; not a complete filesystem/IPFS transaction.
+fn c13_db_path(spool: &str) -> std::path::PathBuf {
+    Path::new(spool).join(".c13-transactions.sqlite")
+}
+
+// F5-DS12 P1: serialized backward-compatible C13 schema migration.
+// Historical transactions retain NULL root CID and remain unauthorized by C13-2.
+pub(crate) fn c13_ensure_schema(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<()> {
+    // Serialize migration check and ALTER TABLE across concurrent processes.
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+
+    let migration = (|| -> rusqlite::Result<()> {
+        let has_root_cid = {
+            let mut stmt =
+                conn.prepare("PRAGMA table_info(c13_transactions)")?;
+            let rows =
+                stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+            let mut found = false;
+            for row in rows {
+                if row? == "ipfs_root_cid" {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+
+        if !has_root_cid {
+            conn.execute(
+                "ALTER TABLE c13_transactions ADD COLUMN ipfs_root_cid TEXT",
+                [],
+            )?;
+        }
+
+        Ok(())
+    })();
+
+    match migration {
+        Ok(()) => conn.execute_batch("COMMIT"),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+fn c13_sqlite_authorized(spool: &str, entry: &PasteIndex) -> bool {
+    use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+
+    let Some(root) = entry.ipfs_cid.as_deref() else {
+        return false;
+    };
+
+    if !c13_valid_root_cid(root) {
+        return false;
+    }
+
+    let conn = match Connection::open_with_flags(
+        c13_db_path(spool),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) {
+        Ok(conn) => conn,
+        Err(_) => return false,
+    };
+
+    let identity: rusqlite::Result<Option<(String, Option<String>)>> =
+        conn.query_row(
+            "SELECT state, ipfs_root_cid
+             FROM c13_transactions
+             WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4",
+            params![entry.id, entry.filename, entry.witness, entry.cid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional();
+
+    matches!(
+        identity,
+        Ok(Some((state, Some(stored_root))))
+            if state == "COMMITTED" && stored_root == root
+    )
+}
+
+
+// C13-RUST-55: prepare before spool publication.
+// PREPARED never grants HTTP read authorization.
+pub(crate) fn c13_sqlite_prepare(
+    spool: &str, id: &str, filename: &str,
+    witness: &str, cid: &str,
+) -> std::io::Result<()> {
+    use rusqlite::{Connection, params};
+
+    if !is_safe_paste_id(id)
+        || Path::new(filename).file_name()
+            .and_then(|n| n.to_str()) != Some(filename)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput, "unsafe transaction identity"
+        ));
+    }
+
+    let convert = |e: rusqlite::Error| {
+        std::io::Error::new(std::io::ErrorKind::Other, e)
+    };
+
+    let conn = Connection::open(c13_db_path(spool))
+        .map_err(convert)?;
+
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(convert)?;
+
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA synchronous=FULL;
+         CREATE TABLE IF NOT EXISTS c13_transactions (
+             id TEXT PRIMARY KEY,
+             filename TEXT NOT NULL,
+             witness TEXT NOT NULL,
+             cid TEXT NOT NULL,
+             ipfs_root_cid TEXT,
+             state TEXT NOT NULL
+                 CHECK(state IN ('PREPARED','COMMITTED','UNCERTAIN'))
+         );"
+    ).map_err(convert)?;
+
+    c13_ensure_schema(&conn).map_err(convert)?;
+
+    conn.execute(
+        "INSERT INTO c13_transactions
+         (id,filename,witness,cid,state)
+         VALUES (?1,?2,?3,?4,'PREPARED')",
+        params![id, filename, witness, cid],
+    ).map_err(convert)?;
+
+    Ok(())
+}
+
+
+// C13-2: bind exactly one IPFS root to an existing PREPARED transaction.
+pub(crate) fn c13_sqlite_bind_root(
+    spool: &str,
+    id: &str,
+    filename: &str,
+    witness: &str,
+    cid: &str,
+    ipfs_root_cid: &str,
+) -> std::io::Result<()> {
+    use rusqlite::{params, Connection};
+
+    if !is_safe_paste_id(id)
+        || Path::new(filename).file_name()
+            .and_then(|n| n.to_str()) != Some(filename)
+        || !c13_valid_root_cid(ipfs_root_cid)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid C13 root binding identity",
+        ));
+    }
+
+    // F5_DS12_STEP977B_R8_CONTENT_WITNESS_BINDING
+    // Bind not only the shape of the root CID, but the exact content.
+    // The UnixFS DAG under `ipfs_root_cid` must reconstruct to bytes
+    // whose SHA-256 equals `witness`. This is fail-closed and happens
+    // before any SQLite write, so no PREPARED transaction can be
+    // completed with a root that identifies different content.
+    //
+    // Root shape (DAG-PB 0x70, SHA2-256 / 32B, canonical) is already
+    // enforced by `c13_valid_root_cid` above; `verify_c13_content_binding`
+    // re-verifies those invariants and additionally walks the DAG.
+    if let Err(reason) = crate::ipfs::verify_c13_content_binding(ipfs_root_cid, witness) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("C13 content binding rejected: {}", reason),
+        ));
+    }
+
+    let convert = |e: rusqlite::Error| {
+        std::io::Error::new(std::io::ErrorKind::Other, e)
+    };
+
+    let conn = Connection::open(c13_db_path(spool)).map_err(convert)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(convert)?;
+    c13_ensure_schema(&conn).map_err(convert)?;
+
+    let changed = conn.execute(
+        "UPDATE c13_transactions
+         SET ipfs_root_cid=?5
+         WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4
+           AND state='PREPARED' AND ipfs_root_cid IS NULL",
+        params![id, filename, witness, cid, ipfs_root_cid],
+    ).map_err(convert)?;
+
+    if changed != 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "root binding requires exactly one unbound PREPARED transaction",
+        ));
+    }
+
+    Ok(())
+}
+
+fn c13_sqlite_commit(
+    spool: &str,
+    id: &str,
+    filename: &str,
+    witness: &str,
+    cid: &str,
+    ipfs_root_cid: &str,
+) -> std::io::Result<()> {
+    use rusqlite::{Connection, params};
+
+    if !c13_valid_root_cid(ipfs_root_cid) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid IPFS root CID at SQLite commit",
+        ));
+    }
+
+    let convert = |e: rusqlite::Error| {
+        std::io::Error::new(std::io::ErrorKind::Other, e)
+    };
+
+
+    // C13-RUST-57: halt after sealed publication, before SQLite commit.
+    #[cfg(test)]
+    if let Ok(ready_file) =
+        std::env::var("C13_RUST57_READY_FILE")
+    {
+        std::fs::write(&ready_file, spool.as_bytes())?;
+        loop {
+            std::thread::park();
+        }
+    }
+
+    let conn = Connection::open(c13_db_path(spool))
+        .map_err(convert)?;
+
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(convert)?;
+
+    conn.execute_batch(
+        "PRAGMA synchronous=FULL;
+         PRAGMA journal_mode=WAL;
+         CREATE TABLE IF NOT EXISTS c13_transactions (
+             id TEXT PRIMARY KEY,
+             filename TEXT NOT NULL,
+             witness TEXT NOT NULL,
+             cid TEXT NOT NULL,
+             ipfs_root_cid TEXT,
+             state TEXT NOT NULL
+                 CHECK(state IN ('PREPARED','COMMITTED','UNCERTAIN'))
+         );"
+    ).map_err(convert)?;
+
+    c13_ensure_schema(&conn).map_err(convert)?;
+
+    // STEP977B_R18H: precommit probe fires BEFORE the UPDATE so DB
+    // state remains PREPARED. This exercises the "uncertain commit"
+    // path where the client cannot know whether SQLite was updated.
+    #[cfg(test)]
+    if c13_sqlite_precommit_fault_probe::take() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "C13 injected error before SQLite commit"
+        ));
+    }
+
+    // C13-RUST-55: exclusive PREPARED -> COMMITTED transition.
+    let updated = conn.execute(
+        "UPDATE c13_transactions SET state='COMMITTED'
+         WHERE id=?1 AND filename=?2 AND witness=?3
+           AND cid=?4 AND ipfs_root_cid=?5
+           AND state='PREPARED'",
+        params![id, filename, witness, cid, ipfs_root_cid],
+    ).map_err(convert)?;
+
+    if updated != 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "C13 commit requires exactly one matching PREPARED record"
+        ));
+    }
+
+    // C13-RUST-49: simulate lost SQLite commit acknowledgement.
+    #[cfg(test)]
+    if c13_sqlite_commit_fault_probe::take() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "C13 injected error after SQLite commit"
+        ));
+    }
+
+    Ok(())
+}
+
+pub(crate) fn c13_commit_matches(spool: &str, entry: &PasteIndex) -> bool {
+    if !is_safe_paste_id(&entry.id)
+        || Path::new(&entry.filename).file_name()
+            .and_then(|n| n.to_str()) != Some(entry.filename.as_str())
+    {
+        return false;
+    }
+
+    let Some(root) = entry.ipfs_cid.as_deref() else {
+        return false;
+    };
+    if !c13_valid_root_cid(root) {
+        return false;
+    }
+
+    let expected = c13_commit_payload(
+        &entry.id, &entry.filename, &entry.witness, &entry.cid, root
+    );
+
+    let marker = Path::new(spool)
+        .join(format!("{}.c13-committed", entry.id));
+    let seal = Path::new(spool)
+        .join(format!("{}.c13-visible", entry.id));
+
+    let commit_ok = fs::read(&marker)
+        .map(|actual| actual == expected.as_bytes())
+        .unwrap_or(false);
+
+    let seal_ok = fs::read(&seal)
+        .map(|actual| actual == expected.as_bytes())
+        .unwrap_or(false);
+
+    commit_ok && seal_ok && c13_sqlite_authorized(spool, entry)
+}
+
+
+#[derive(Debug)]
+pub(crate) enum C13CommitOutcome {
+    NotPublished(std::io::Error),
+    PublishedDurable,
+    DurabilityUncertain(std::io::Error),
+}
+
+pub(crate) fn c13_publish_upload_commit(
+    spool: &str,
+    id: &str,
+    filename: &str,
+    witness: &str,
+    cid: &str,
+    ipfs_root_cid: &str,
+) -> C13CommitOutcome {
+    if !is_safe_paste_id(id)
+        || Path::new(filename).file_name()
+            .and_then(|n| n.to_str()) != Some(filename)
+    {
+        return C13CommitOutcome::NotPublished(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput, "unsafe commit identity"
+        ));
+    }
+
+
+    if !c13_valid_root_cid(ipfs_root_cid) {
+        return C13CommitOutcome::NotPublished(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid C13-2 root CID",
+        ));
+    }
+
+    let payload = c13_commit_payload(
+        id, filename, witness, cid, ipfs_root_cid
+    );
+
+    let preparation = (|| -> std::io::Result<tempfile::NamedTempFile> {
+        let mut staged = tempfile::NamedTempFile::new_in(spool)?;
+        std::io::Write::write_all(
+            staged.as_file_mut(), payload.as_bytes()
+        )?;
+        staged.as_file().sync_all()?;
+        Ok(staged)
+    })();
+
+    let staged = match preparation {
+        Ok(staged) => staged,
+        Err(e) => return C13CommitOutcome::NotPublished(e),
+    };
+
+    let marker = Path::new(spool)
+        .join(format!("{}.c13-committed", id));
+
+    if let Err(e) = staged.persist_noclobber(&marker) {
+        return C13CommitOutcome::NotPublished(e.error);
+    }
+
+    #[cfg(test)]
+    if c13_commit_fault_probe::take() {
+        // STEP977B_R18F: revert of R18D.1. A failure here occurs after
+        // the marker is durable but before the seal is published. The
+        // marker is the durable commit signal; the seal is visibility
+        // plumbing. From the client's perspective the outcome is
+        // DurabilityUncertain (202) — content may or may not be readable
+        // later, do not retry blindly. `c13_commit_matches` still
+        // requires marker + seal + SQLite-COMMITTED, so HTTP will not
+        // serve the content while the seal is missing.
+        return C13CommitOutcome::DurabilityUncertain(
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "C13 injected post-marker publication failure"
+            )
+        );
+    }
+
+    // C13-RUST-36: first make the commit marker durable.
+    if let Err(e) = std::fs::File::open(spool)
+        .and_then(|d| d.sync_all())
+    {
+        return C13CommitOutcome::DurabilityUncertain(e);
+    }
+
+    // Publish a separate visibility seal only after the first sync.
+    let seal = Path::new(spool)
+        .join(format!("{}.c13-visible", id));
+
+    let result = (|| -> std::io::Result<()> {
+        let mut pending = tempfile::NamedTempFile::new_in(spool)?;
+        std::io::Write::write_all(
+            pending.as_file_mut(), payload.as_bytes()
+        )?;
+        pending.as_file().sync_all()?;
+        pending.persist_noclobber(&seal).map_err(|e| e.error)?;
+
+        // C13-RUST-37: simulate failure after visibility-seal publication.
+        #[cfg(test)]
+        if c13_seal_fault_probe::take() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "C13 injected post-seal synchronization failure",
+            ));
+        }
+
+        // A failed sync here still has ambiguous durability.
+        std::fs::File::open(spool)?.sync_all()
+    })();
+
+    match result {
+        Ok(()) => match c13_sqlite_commit(
+            spool, id, filename, witness, cid, ipfs_root_cid
+        ) {
+            Ok(()) => C13CommitOutcome::PublishedDurable,
+            Err(e) => {
+                // C13-RUST-50: reconcile lost SQLite acknowledgement.
+                // Read back the exact committed identity from persistent storage.
+                let confirmed = (|| -> rusqlite::Result<bool> {
+                    use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+                    let conn = Connection::open_with_flags(
+                        c13_db_path(spool),
+                        OpenFlags::SQLITE_OPEN_READ_ONLY,
+                    )?;
+                    let identity: Option<(String, Option<String>)> =
+                        conn.query_row(
+                            "SELECT state, ipfs_root_cid FROM c13_transactions
+                             WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4",
+                            params![id, filename, witness, cid],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        ).optional()?;
+                    Ok(matches!(
+                        identity,
+                        Some((state, Some(root)))
+                            if state == "COMMITTED" && root == ipfs_root_cid
+                    ))
+                })().unwrap_or(false);
+
+                if confirmed {
+                    C13CommitOutcome::PublishedDurable
+                } else {
+                    C13CommitOutcome::DurabilityUncertain(e)
+                }
+            }
+        },
+        Err(e) => C13CommitOutcome::DurabilityUncertain(e),
+    }
+}
+
+fn c13_index_authorizes_upload(
+    spool: &str,
+    id: &str,
+    path: &Path,
+    data: &[u8],
+) -> bool {
+    let Some(filename) = path.file_name().and_then(|v| v.to_str()) else {
+        return false;
+    };
+
+    let Ok(index) = fs::read_to_string(
+        Path::new(spool).join("index.jsonl")
+    ) else {
+        return false;
+    };
+
+    if !index.ends_with('\n') {
+        return false;
+    }
+
+    let witness = hex::encode(Sha256::digest(data));
+    let mut authorized = false;
+
+    for line in index.lines() {
+        let entry: PasteIndex = match serde_json::from_str(line) {
+            Ok(entry) => entry,
+            Err(_) => return false,
+        };
+
+        if entry.id == id
+            && entry.filename == filename
+            && entry.size == data.len()
+            && entry.witness.eq_ignore_ascii_case(&witness)
+            && entry.keywords.iter().any(|v| v == "upload")
+            && c13_commit_matches(spool, &entry)
+        {
+            authorized = true;
+        }
+    }
+
+    authorized
+}
+
 fn find_file_in_dir(dir: &str, id: &str, requested_ext: &str) -> Option<std::path::PathBuf> {
     let entries: Vec<std::path::PathBuf> = fs::read_dir(dir)
         .ok()?
@@ -884,6 +1854,17 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
         Some(entry) => {
             let data = fs::read(&entry)
                 .map_err(|_| actix_web::error::ErrorNotFound("read error"))?;
+
+            // Fail closed for direct spool files without a matching
+            // indexed upload and content witness.
+            if entry.parent() == Some(Path::new(&uucp_dir))
+                && !c13_index_authorizes_upload(
+                    &uucp_dir, &id, &entry, &data
+                )
+            {
+                return Ok(HttpResponse::NotFound().body("File not found"));
+            }
+
             let ext = entry
                 .extension()
                 .and_then(|e| e.to_str())
@@ -950,6 +1931,67 @@ pub async fn get_paste(
         .filter_map(|line| serde_json::from_str::<PasteIndex>(line).ok())
         .collect();
 
+    // C13-RUST-12: fail closed for absent or ambiguous index entries.
+    // This is an interim visibility gate, not a transaction proof.
+    let matches: Vec<_> = entries.iter()
+        .filter(|entry| entry.id == id)
+        .collect();
+
+    if matches.len() != 1 {
+        return Ok(HttpResponse::NotFound().body("Paste not found"));
+    }
+
+    // C13-RUST-15: retain verified upload bytes for rendering.
+    // A pathname replacement after verification cannot change these bytes.
+    let selected = matches[0];
+    let mut verified_upload_text: Option<String> = None;
+    if selected.keywords.iter().any(|k| k == "upload")
+        && !c13_commit_matches(&uucp_dir, selected)
+    {
+        return Ok(HttpResponse::NotFound().body("Paste not found"));
+    }
+
+
+    if selected.keywords.iter().any(|k| k == "upload") {
+        let name = Path::new(&selected.filename);
+
+        if name.file_name().and_then(|n| n.to_str())
+            != Some(selected.filename.as_str())
+            || name.file_stem().and_then(|n| n.to_str())
+                != Some(id.as_str())
+        {
+            return Ok(HttpResponse::NotFound().body("Paste not found"));
+        }
+
+        let upload_path = Path::new(&uucp_dir).join(&selected.filename);
+
+        let bytes = match fs::read(&upload_path) {
+            Ok(bytes) => bytes,
+            Err(_) => return Ok(HttpResponse::NotFound().body("Paste not found")),
+        };
+
+        if !c13_index_authorizes_upload(
+            &uucp_dir, &id, &upload_path, &bytes
+        ) {
+            return Ok(HttpResponse::NotFound().body("Paste not found"));
+        }
+
+        if selected.filename.ends_with(".txt") {
+            verified_upload_text = match String::from_utf8(bytes) {
+                Ok(content) => Some(content),
+                Err(_) => return Ok(HttpResponse::NotFound().body("Paste not found")),
+            };
+        }
+    }
+
+    // C13-RUST-16: controlled substitution after verification.
+    #[cfg(test)]
+    if selected.keywords.iter().any(|k| k == "upload") {
+        c13_read_race_probe::run(
+            &Path::new(&uucp_dir).join(&selected.filename)
+        );
+    }
+
     let current_idx = entries.iter().position(|e| e.id == id);
     let prev_id = current_idx.and_then(|i| {
         if i > 0 {
@@ -962,7 +2004,13 @@ pub async fn get_paste(
 
     // Exact lookup: a text paste is stored as `<id>.txt`. Never select a
     // file by substring or by directory enumeration order.
-    let content = fs::read_to_string(std::path::Path::new(&uucp_dir).join(format!("{}.txt", id))).ok();
+    let content = if selected.keywords.iter().any(|k| k == "upload") {
+        verified_upload_text
+    } else {
+        fs::read_to_string(
+            Path::new(&uucp_dir).join(format!("{}.txt", id))
+        ).ok()
+    };
 
     // Check for uploaded file with .meta sidecar
     let is_file = content.is_none();
@@ -1692,7 +2740,11 @@ pub async fn preview_paste(path: web::Path<String>) -> Result<HttpResponse> {
 /// GET /raw/{id} - Raw text
 pub async fn get_raw(path: web::Path<String>) -> Result<HttpResponse> {
     let id = path.into_inner();
-    let content = read_paste_content_by_id(&id).unwrap_or_else(|| "Paste not found".to_string());
+    let Some(content) = read_paste_content_by_id(&id) else {
+        return Ok(HttpResponse::NotFound()
+            .content_type("text/plain")
+            .body("Paste not found"));
+    };
     Ok(HttpResponse::Ok().content_type("text/plain").body(content))
 }
 
@@ -2743,8 +3795,22 @@ fn read_paste_content_by_id(paste_id: &str) -> Option<String> {
     read_index_entries(&uucp_dir)
         .into_iter()
         .find(|e| e.id == resolved)
-        .and_then(|e| read_paste_content(&e.uucp_path))
-        .or_else(|| read_paste_content(&format!("{}/{}.txt", uucp_dir, resolved)))
+        .and_then(|e| {
+            if e.keywords.iter().any(|k| k == "upload") {
+                if !c13_commit_matches(&uucp_dir, &e) {
+                    return None;
+                }
+                let path = Path::new(&uucp_dir).join(&e.filename);
+                let bytes = fs::read(&path).ok()?;
+                if !c13_index_authorizes_upload(
+                    &uucp_dir, &resolved, &path, &bytes
+                ) {
+                    return None;
+                }
+                return String::from_utf8(bytes).ok();
+            }
+            read_paste_content(&e.uucp_path)
+        })
 }
 
 /// A paste's CID permalink names a .cid file whose content is the paste id
@@ -3644,6 +4710,7 @@ pub async fn api_bundle(body: web::Json<serde_json::Value>) -> Result<HttpRespon
         reply_to: None,
         size: cbor_bytes.len(),
         uucp_path: uucp.clone(),
+        envelope_witness: None,
         root: None,
     };
     let index_file = format!("{}/index.jsonl", uucp_dir);
@@ -3664,7 +4731,7 @@ pub async fn api_bundle(body: web::Json<serde_json::Value>) -> Result<HttpRespon
         "format": "dag-cbor",
         "cbor_size": cbor_bytes.len(),
         "url": format!("/paste/{}", id),
-        "download_url": format!("/file/{}", id),
+        "download_url": format!("/file/{}.cbor", id),
     })))
 }
 
@@ -3845,6 +4912,7 @@ async fn create_chunked_paste(
         reply_to: None,
         size: content.len(),
         uucp_path: uucp.clone(),
+        envelope_witness: None,
         root: None,
     };
     let index_line = format!("{}\n", serde_json::to_string(&index_entry).unwrap());
@@ -4116,23 +5184,55 @@ async fn create_chunk_line_store(title: &str, lines: &[String]) -> Result<Stored
 
 /// GET /ipfs/{cid} - Proxy IPFS content (local flatfs only, no shell-out)
 pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
-    let cid = path.into_inner();
+    use ipld_core::cid::Cid;
 
-    if let Some(block) = ipfs::ipfs_cat(&cid) {
-        let ct = match &block[..4.min(block.len())] {
-            [0x89, 0x50, 0x4E, 0x47] => "image/png",
-            [0xFF, 0xD8, ..] => "image/jpeg",
-            [0x3C, ..] => "text/html; charset=utf-8",
-            [0x7B, ..] => "application/json",
-            _ if block.starts_with(b"<!") || block.starts_with(b"<html") => {
-                "text/html; charset=utf-8"
+    let cid_str = path.into_inner();
+
+    // STEP977B_R18A: DAG-PB roots do not identify the file content directly.
+    // The root block is a protobuf that references leaves; the original
+    // bytes must be reconstructed by traversing the DAG. Serving the root
+    // block through this handler (as it used to) returns protobuf, not the
+    // uploaded file, for every file larger than the UnixFS chunk size.
+    let parsed: Cid = match cid_str.parse() {
+        Ok(c) => c,
+        Err(_) => {
+            return Ok(HttpResponse::NotFound()
+                .body(format!("IPFS CID not found: {}", cid_str)))
+        }
+    };
+
+    let content = if parsed.codec() == 0x70 {
+        // DAG-PB: reconstruct full content. Fail closed on any traversal
+        // or integrity error; do not fall back to the root block.
+        match ipfs::reconstruct_verified_unixfs(&cid_str) {
+            Some((bytes, _visited)) => bytes,
+            None => {
+                return Ok(HttpResponse::NotFound()
+                    .body(format!("IPFS CID not reconstructable: {}", cid_str)))
             }
-            _ => "application/octet-stream",
-        };
-        return Ok(HttpResponse::Ok().content_type(ct).body(block));
-    }
+        }
+    } else {
+        // Raw (0x55): block bytes are the content.
+        match ipfs::ipfs_cat(&cid_str) {
+            Some(bytes) => bytes,
+            None => {
+                return Ok(HttpResponse::NotFound()
+                    .body(format!("IPFS CID not found: {}", cid_str)))
+            }
+        }
+    };
 
-    Ok(HttpResponse::NotFound().body(format!("IPFS CID not found: {}", cid)))
+    let ct = match &content[..4.min(content.len())] {
+        [0x89, 0x50, 0x4E, 0x47] => "image/png",
+        [0xFF, 0xD8, ..] => "image/jpeg",
+        [0x3C, ..] => "text/html; charset=utf-8",
+        [0x7B, ..] => "application/json",
+        _ if content.starts_with(b"<!") || content.starts_with(b"<html") => {
+            "text/html; charset=utf-8"
+        }
+        _ => "application/octet-stream",
+    };
+    Ok(HttpResponse::Ok().content_type(ct).body(content))
 }
 
 /// GET /gallery - NFT gallery from enriched directory
@@ -4306,12 +5406,16 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
     // Write the raw archive file and its sidecar to spool. The archive is
     // served through the sidecar, so both must be stored before the CID
     // alias is published.
-    let stored = store_spool_file(&uucp, &file_data)
-        .and_then(|_| store_spool_file(&format!("{}.meta", uucp), meta.as_bytes()));
-    if let Err(e) = stored {
-        error!("[upload_archive] failed to write archive {}: {}", uucp, e);
-        return Ok(HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": "failed to persist archive"})));
+let is_new_file = match store_spool_file(&uucp, &file_data) {
+        Ok(created) => created,
+        Err(e) => {
+            error!("[upload_archive] failed to write archive {}: {}", uucp, e);
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": "failed to persist archive"})));
+        }
+    };
+    if let Err(e) = store_spool_file(&format!("{}.meta", uucp), meta.as_bytes()) {
+        error!("[upload_archive] failed to write meta {}: {}", uucp, e);
+        return Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": "failed to persist archive"})));
     }
     // Store for later access
     ARCHIVE_STORE
@@ -4320,9 +5424,7 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
         .insert(session_id.clone(), result);
     // CID dedup file
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
-    publish_cid_alias("upload_archive", &cid_file, &steam_id);
-    // Index entry
-    write_index_entry(
+    if let Err(e) = write_index_entry(
         &uucp_dir,
         &steam_id,
         &title,
@@ -4335,7 +5437,12 @@ pub async fn upload_archive(mut payload: actix_multipart::Multipart) -> Result<H
         ipfs_cid,
         None,
         Some(session_id.clone()),
-    );
+    ) {
+        error!("[archive_upload] index failed; rolling back: {}", uucp);
+        if is_new_file { let _ = fs::remove_file(&uucp); }
+        return Ok(persist_failed());
+    }
+    publish_cid_alias("upload_archive", &cid_file, &steam_id);
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "session_id": session_id,
@@ -4678,14 +5785,15 @@ pub async fn archive_generate(
     let paste_content = format!("--- {} ---\nTitle: {}\nDescription: {}\nKeywords: allm, archive, {}\nCID: {}\nWitness: {}\nIPFS: {}\n\n{}\n",
         id, post_title, post_description, result.filename, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), allm);
 
-    if let Err(e) = store_spool_file(&uucp, paste_content.as_bytes()) {
-        error!("[archive_generate] failed to write paste {}: {}", uucp, e);
-        return Ok(persist_failed());
-    }
+let is_new_file = match store_spool_file(&uucp, paste_content.as_bytes()) {
+        Ok(created) => created,
+        Err(e) => {
+            error!("[archive_generate] failed to write paste {}: {}", uucp, e);
+            return Ok(persist_failed());
+        }
+    };
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
-    publish_cid_alias("archive_generate", &cid_file, &id);
-    // Index entry so the allm appears in browse
-    write_index_entry(
+    if let Err(e) = write_index_entry(
         &uucp_dir,
         &id,
         &post_title,
@@ -4698,7 +5806,12 @@ pub async fn archive_generate(
         ipfs_cid,
         None,
         None,
-    );
+    ) {
+        error!("[archive_generate] index failed; rolling back: {}", uucp);
+        if is_new_file { let _ = fs::remove_file(&uucp); }
+        return Ok(persist_failed());
+    }
+    publish_cid_alias("archive_generate", &cid_file, &id);
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "id": id,
@@ -4880,15 +5993,15 @@ pub async fn archive_post_file(path: web::Path<(String, usize)>) -> Result<HttpR
     let paste_content = format!("--- {} ---\nTitle: {}\nDescription: {}\nKeywords: archive, {}\nCID: {}\nWitness: {}\nIPFS: {}\n\n--- From archive: {} ---\n\n{}\n",
         id, entry.path, post_description, result.title, local_cid, witness, ipfs_cid.as_deref().unwrap_or(""), result.filename, content);
 
-    if let Err(e) = store_spool_file(&uucp, paste_content.as_bytes()) {
-        error!("[archive_post_file] failed to write paste {}: {}", uucp, e);
-        return Ok(persist_failed());
-    }
+let is_new_file = match store_spool_file(&uucp, paste_content.as_bytes()) {
+        Ok(created) => created,
+        Err(e) => {
+            error!("[archive_post_file] failed to write paste {}: {}", uucp, e);
+            return Ok(persist_failed());
+        }
+    };
     let cid_file = format!("{}/{}.cid", uucp_dir, local_cid);
-    publish_cid_alias("archive_post_file", &cid_file, &id);
-
-    // Index entry
-    write_index_entry(
+    if let Err(e) = write_index_entry(
         &uucp_dir,
         &id,
         &entry.path,
@@ -4901,7 +6014,12 @@ pub async fn archive_post_file(path: web::Path<(String, usize)>) -> Result<HttpR
         ipfs_cid,
         None,
         None,
-    );
+    ) {
+        error!("[archive_post_file] index failed; rolling back: {}", uucp);
+        if is_new_file { let _ = fs::remove_file(&uucp); }
+        return Ok(persist_failed());
+    }
+    publish_cid_alias("archive_post_file", &cid_file, &id);
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "id": id,
@@ -5416,7 +6534,13 @@ pub async fn api_split_upload(body: web::Json<serde_json::Value>) -> Result<Http
         let paste_content = format!("--- {} ---\nTitle: {} (chunk {}/{})\nKeywords: split, chunk\nCID: {}\nWitness: {}\n\n{}\n",
             id, title, i + 1, overlapped.len(), local_cid, witness, chunk);
 
-        fs::write(&uucp, &paste_content).ok();
+        // Never overwrite an existing split fragment on an ID collision.
+        if let Err(e) = write_new_file(&uucp, paste_content.as_bytes()) {
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("write failed: {}", e)})));
+        }
+        if let Err(e) = append_index_line(&format!("{}/index.jsonl", uucp_dir), &format!("{{\"id\":\"{}\"}}\n", id)) {
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("index failed: {}", e)})));
+        }
         chunk_ids.push(id);
     }
 
@@ -6089,6 +7213,107 @@ pub async fn api_git_reindex() -> Result<HttpResponse> {
     })))
 }
 
+#[cfg(all(test, target_os = "linux"))]
+mod integrity_tests {
+    use super::*;
+
+    #[test]
+    fn envelope_hash_matches_reference() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("sample.txt"), b"hello").unwrap();
+
+        let result = hash_integrity_envelope(&dir, "sample.txt", 1024).unwrap();
+
+        assert_eq!(
+            result,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+
+    }
+    #[test]
+    fn envelope_hash_rejects_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("real.txt"), b"hello").unwrap();
+        symlink("real.txt", dir.join("link.txt")).unwrap();
+
+        assert!(
+            hash_integrity_envelope(&dir, "link.txt", 1024).is_err()
+        );
+
+    }
+
+    #[test]
+    fn envelope_hash_rejects_oversized_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("large.txt"), b"1234567890").unwrap();
+
+        assert!(
+            hash_integrity_envelope(&dir, "large.txt", 5).is_err()
+        );
+
+    }
+
+    fn sample_index(id: &str) -> PasteIndex {
+        PasteIndex {
+            id: id.to_string(),
+            filename: format!("{}.txt", id),
+            envelope_witness: Some(
+                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
+            ),
+            ..PasteIndex::default()
+        }
+    }
+
+    #[test]
+    fn integrity_index_accepts_valid_record() {
+        let temp = tempfile::tempdir().unwrap();
+        let record = sample_index("sample");
+        let json = serde_json::to_string(&record).unwrap();
+        fs::write(temp.path().join("index.jsonl"), format!("{json}\n")).unwrap();
+
+        let result = read_integrity_index_entry(temp.path(), "sample")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.id, "sample");
+        assert_eq!(result.filename, "sample.txt");
+        assert_eq!(result.envelope_witness, record.envelope_witness);
+    }
+
+    #[test]
+    fn integrity_index_rejects_malformed_jsonl() {
+        let temp = tempfile::tempdir().unwrap();
+        let record = serde_json::to_string(&sample_index("sample")).unwrap();
+
+        fs::write(
+            temp.path().join("index.jsonl"),
+            format!("{record}\n{{invalid-json\n"),
+        ).unwrap();
+
+        assert!(read_integrity_index_entry(temp.path(), "sample").is_err());
+    }
+
+    #[test]
+    fn integrity_index_rejects_duplicate_ids() {
+        let temp = tempfile::tempdir().unwrap();
+        let record = serde_json::to_string(&sample_index("sample")).unwrap();
+
+        fs::write(
+            temp.path().join("index.jsonl"),
+            format!("{record}\n{record}\n"),
+        ).unwrap();
+
+        assert!(read_integrity_index_entry(temp.path(), "sample").is_err());
+    }
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6193,7 +7418,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn similarity_score_prefers_shared_keywords_and_content_terms() {
         let source_terms = vec!["rust".to_string(), "nix".to_string(), "flake".to_string()];
         let source_keywords = vec!["rust".to_string(), "nix".to_string()];
@@ -6236,7 +7461,7 @@ mod tests {
         assert!(shared_score > unrelated_score);
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn split_export_text_respects_max_bytes_on_line_boundaries() {
         let content = "alpha\nbeta\ngamma\n";
         let parts = split_export_text("abc/123", content, 8);
@@ -6248,7 +7473,7 @@ mod tests {
         assert_eq!(parts[2].1, "gamma\n");
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn percent_decode_handles_plus_and_all_escapes() {
         // the old fixed table missed these
         assert_eq!(percent_decode("a+b"), "a b");
@@ -6262,7 +7487,7 @@ mod tests {
         assert_eq!(percent_decode("caf%C3%A9"), "café");
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn parse_query_param_decodes_colons_and_plus() {
         let uri = "/api/search?q=2026-09-10T11%3A14%3A16&limit=5";
         assert_eq!(parse_query_param(uri, "q").as_deref(), Some("2026-09-10T11:14:16"));
@@ -6271,7 +7496,7 @@ mod tests {
         assert_eq!(parse_query_param(plus, "q").as_deref(), Some("kant invite"));
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn read_paste_content_strips_escaped_rdfa_footer_and_keeps_html_content() {
         let dir = std::env::temp_dir().join("kant-paste-test");
         let _ = std::fs::create_dir_all(&dir);
@@ -6289,12 +7514,12 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn bound_filename_leaves_short_names_alone() {
         assert_eq!(bound_filename("20261003_120000_probe.txt".to_string()), "20261003_120000_probe.txt");
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn bound_filename_keeps_the_title_prefix_when_keywords_blow_up() {
         // Regression: auto_tag emits a repo:... tag per line mentioning github.com, so a
         // real 40MB paste produced a 1412-byte slug. That overran ext4's 255-byte
@@ -6311,7 +7536,7 @@ mod tests {
         assert!(bounded.starts_with("20261003_120000_my_title_"), "title prefix preserved");
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn bound_filename_never_splits_a_multibyte_char() {
         // slugify keeps alphanumeric Unicode letters, so the cut point can land mid-char.
         let bounded = bound_filename(format!("20261003_120000_{}.txt", "\u{4e2d}".repeat(200)));
@@ -6321,7 +7546,7 @@ mod tests {
         assert!(std::str::from_utf8(bounded.as_bytes()).is_ok());
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn bounded_filename_survives_a_real_filesystem_write() {
         let dir = std::env::temp_dir().join("kant-paste-test-bound");
         let _ = std::fs::create_dir_all(&dir);
@@ -6391,3 +7616,143 @@ pub async fn run_plugin_handler(path: web::Path<(String, String)>) -> ActixResul
     Ok(HttpResponse::Ok().json(serde_json::json!({"name": name, "id": id, "result": "ok"})))
 }
 
+
+#[cfg(test)]
+pub(crate) mod c13_read_race_probe {
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    static HOOK: Mutex<Option<fn(&Path)>> = Mutex::new(None);
+
+    pub fn set(callback: Option<fn(&Path)>) {
+        *HOOK.lock().unwrap() = callback;
+    }
+
+    pub fn run(path: &Path) {
+        let callback = *HOOK.lock().unwrap();
+        if let Some(f) = callback {
+            f(path);
+        }
+    }
+}
+
+
+#[cfg(test)]
+pub(crate) mod c13_commit_fault_probe {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static FAIL_AFTER_MARKER: AtomicBool = AtomicBool::new(false);
+
+    pub fn enable() {
+        FAIL_AFTER_MARKER.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take() -> bool {
+        FAIL_AFTER_MARKER.swap(false, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod c13_seal_fault_probe {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static FAIL_AFTER_SEAL: AtomicBool = AtomicBool::new(false);
+
+    pub fn enable() {
+        FAIL_AFTER_SEAL.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take() -> bool {
+        FAIL_AFTER_SEAL.swap(false, Ordering::SeqCst)
+    }
+}
+
+
+#[cfg(test)]
+pub(crate) mod c13_sqlite_commit_fault_probe {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static FAIL_AFTER_COMMIT: AtomicBool = AtomicBool::new(false);
+
+    pub fn enable() {
+        FAIL_AFTER_COMMIT.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take() -> bool {
+        FAIL_AFTER_COMMIT.swap(false, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod c13_sqlite_precommit_fault_probe {
+    // STEP977B_R18H: fires BEFORE the PREPARED -> COMMITTED UPDATE.
+    // DB state remains PREPARED, which exercises the "uncertain after
+    // crash before SQLite commit" recovery path. Distinct from
+    // c13_sqlite_commit_fault_probe which fires AFTER the UPDATE (the
+    // "lost acknowledgement" path).
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static FAIL_BEFORE_UPDATE: AtomicBool = AtomicBool::new(false);
+
+    pub fn enable() {
+        FAIL_BEFORE_UPDATE.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take() -> bool {
+        FAIL_BEFORE_UPDATE.swap(false, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod c13_historical_migration_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    #[test]
+    fn historical_migration_adds_column_and_keeps_data_safe() {
+        let temp = tempfile::tempdir().unwrap();
+        let spool = temp.path().to_str().unwrap();
+        let db_path = c13_db_path(spool);
+        
+        // 1. Create an OLD schema database (simulating historical data)
+        // Notice it lacks the `ipfs_root_cid` column.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE c13_transactions (
+                    id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    witness TEXT NOT NULL,
+                    cid TEXT NOT NULL,
+                    state TEXT NOT NULL
+                        CHECK(state IN ('PREPARED','COMMITTED','UNCERTAIN'))
+                );
+                INSERT INTO c13_transactions (id, filename, witness, cid, state)
+                VALUES ('old_id_123', 'old_file.txt', 'deadbeef', 'bafk123', 'PREPARED');"
+            ).unwrap();
+        }
+
+        // 2. Run the migration
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            c13_ensure_schema(&conn).expect("migration should succeed");
+            
+            // Verify column exists
+            let mut stmt = conn.prepare("PRAGMA table_info(c13_transactions)").unwrap();
+            let columns: Vec<String> = stmt.query_map([], |row| row.get(1)).unwrap().map(|r| r.unwrap()).collect();
+            assert!(columns.contains(&"ipfs_root_cid".to_string()), "migration must add ipfs_root_cid column");
+
+            // Verify old data is preserved, state is PREPARED, and root is NULL
+            let (state, root): (String, Option<String>) = conn.query_row(
+                "SELECT state, ipfs_root_cid FROM c13_transactions WHERE id='old_id_123'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?))
+            ).unwrap();
+            
+            assert_eq!(state, "PREPARED", "Historical state should remain PREPARED");
+            assert_eq!(root, None, "Historical ipfs_root_cid should be NULL");
+        }
+        
+        eprintln!("STEP977B_HISTORICAL_MIGRATION_PASS");
+    }
+}
