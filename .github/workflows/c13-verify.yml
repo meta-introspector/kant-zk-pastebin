@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: Rust Tests & IPFS Verification
+    name: Rust Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -21,13 +21,8 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install IPFS (Kubo)
-        uses: ipfs/setup-ipfs@master
-        with:
-          ipfs-version: 'latest'
-      
-      - name: Initialize IPFS
-        run: ipfs init
+      - name: Fetch dependencies (required for offline mode)
+        run: cargo fetch --locked
 
       - name: Run C13-2 specific tests
         run: cargo test --offline --lib c13_binding_ -- --test-threads=1
@@ -37,10 +32,3 @@ jobs:
 
       - name: Run BIN test suite
         run: cargo test --offline --bin kant-pastebin -- --test-threads=1
-
-      - name: Generate and Publish IPFS Snapshot (Dry Run)
-        run: |
-          mkdir -p c13-snapshot
-          cp src/handlers.rs src/upload_handler.rs src/ipfs.rs c13-snapshot/ || true
-          ipfs add -r -Q c13-snapshot > cid.txt
-          echo "Generated IPFS CID for snapshot: $(cat cid.txt)"
