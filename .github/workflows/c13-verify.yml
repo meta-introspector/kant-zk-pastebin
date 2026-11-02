@@ -21,11 +21,14 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install IPFS (Kubo)
-        uses: ipfs/setup-ipfs@master
+      - name: Fetch dependencies (required for offline mode)
+        run: cargo fetch --locked
+
+      - name: Setup IPFS
+        uses: ibnesayeed/setup-ipfs@master
         with:
           ipfs-version: 'latest'
-      
+
       - name: Initialize IPFS
         run: ipfs init
 
