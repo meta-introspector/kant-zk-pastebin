@@ -1,0 +1,46 @@
+name: C13-2 Security Verification
+
+on:
+  push:
+    branches: [ main, "fix/*" ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Rust Tests & IPFS Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install IPFS (Kubo)
+        uses: ipfs/setup-ipfs@master
+        with:
+          ipfs-version: 'latest'
+      
+      - name: Initialize IPFS
+        run: ipfs init
+
+      - name: Run C13-2 specific tests
+        run: cargo test --offline --lib c13_binding_ -- --test-threads=1
+
+      - name: Run full LIB test suite
+        run: cargo test --offline --lib -- --test-threads=1
+
+      - name: Run BIN test suite
+        run: cargo test --offline --bin kant-pastebin -- --test-threads=1
+
+      - name: Generate and Publish IPFS Snapshot (Dry Run)
+        run: |
+          mkdir -p c13-snapshot
+          cp src/handlers.rs src/upload_handler.rs src/ipfs.rs c13-snapshot/ || true
+          ipfs add -r -Q c13-snapshot > cid.txt
+          echo "Generated IPFS CID for snapshot: $(cat cid.txt)"
