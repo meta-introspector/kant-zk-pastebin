@@ -17,6 +17,7 @@ chrono = "0.4"
 sha2 = "0.10"
 hex = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+urlencoding = "2"
 data-encoding = "2"
 ciborium = "0.2"
 serde_bytes = "0.11"
@@ -68,6 +69,8 @@ tantivy = "0.22"
 # build, including the wasm one in pastebin-wasm/ that walks up to this file.
 # The dependency is kept, the table is not.
 futures = "0.3"
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4"] }
+deadpool-postgres = { version = "0.12" }
 
 [dev-dependencies]
 chromiumoxide = "0.7"

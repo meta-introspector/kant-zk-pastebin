@@ -15,12 +15,14 @@ use chrono::Utc;
 use ciborium;
 use futures_util::StreamExt;
 use log::{debug, error, warn};
+use reqwest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::{collections::HashMap, env, fs, sync::Mutex};
+use urlencoding::encode;
 
 use once_cell::sync::Lazy;
 
@@ -3160,23 +3162,84 @@ fn best_excerpt(content: &str, terms: &[String], context: usize) -> String {
 /// Optional: &scope=all|metadata|content
 /// Optional: &limit=N to control result count (default: 50)
 pub async fn api_search(req: HttpRequest) -> Result<HttpResponse> {
-    let Some((search_q, mode, scope, limit, results)) = paste_search_results(&req, 50, true)?
-    else {
+    let uri = req.uri().to_string();
+    let q = parse_query_param(&uri, "q").unwrap_or_default();
+    if q.is_empty() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Missing query parameter: q",
             "usage": "curl 'http://localhost:8090/api/search?q=<query>'"
         })));
+    }
+
+    let limit = parse_query_param(&uri, "limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50);
+
+    let search_service_url = env::var("SEARCH_SERVICE_URL")
+        .unwrap_or_else(|_| "http://localhost:8086".to_string());
+
+    let url = format!("{}/search?q={}&limit={}", search_service_url, urlencoding::encode(&q), limit);
+
+    let client = reqwest::Client::new();
+    let response = match client.get(&url).send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            log::error!("Failed to call search service: {}", e);
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Search service unavailable",
+                "detail": e.to_string()
+            })));
+        }
     };
-    let terms = search_terms(&search_q);
+
+    let json: serde_json::Value = match response.json().await {
+        Ok(j) => j,
+        Err(e) => {
+            log::error!("Failed to parse search service response: {}", e);
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Invalid search service response",
+                "detail": e.to_string()
+            })));
+        }
+    };
+
+    let results = json.get("results")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&Vec::new());
+
+    let mut search_results: Vec<SearchResult> = Vec::new();
+    for result in results {
+        let id = result.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let title = result.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let description = result.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let timestamp = result.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let size = result.get("size").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+        search_results.push(SearchResult {
+            id,
+            title,
+            description,
+            keywords: Vec::new(),
+            match_type: "postgres-fts".to_string(),
+            excerpt: String::new(),
+            url: format!("/paste/{}", id),
+            timestamp,
+            size,
+            source: Some("postgres".to_string()),
+            file_path: None,
+        });
+    }
+
+    let mode = parse_query_param(&uri, "mode").unwrap_or_else(|| "phrase".to_string());
+    let scope = parse_query_param(&uri, "scope").unwrap_or_else(|| "all".to_string());
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
-        "query": &search_q,
-        "terms": terms,
+        "query": &q,
         "mode": mode,
         "scope": scope,
-        "total": results.len(),
+        "total": search_results.len(),
         "limit": limit,
-        "results": results,
+        "results": search_results,
     })))
 }
 
@@ -6759,46 +6822,58 @@ pub async fn task_attachments_add(
 }
 
 /// GET /api/cid-search?q={cid} — Search pastes by CID
-pub async fn cid_search(req: actix_web::HttpRequest) -> ActixResult<HttpResponse> {
+pub async fn cid_search(pool: web::Data<deadpool_postgres::Pool>, req: actix_web::HttpRequest) -> ActixResult<HttpResponse> {
     let query = req.query_string();
     let q = query.split('=').nth(1).unwrap_or("").to_string();
 
-    let uucp_dir = std::env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
-    let index_file = format!("{}/index.jsonl", uucp_dir);
-
-    let mut results: Vec<serde_json::Value> = Vec::new();
-
-    if let Ok(contents) = std::fs::read_to_string(&index_file) {
-        for line in contents.lines() {
-            let entry: serde_json::Value = match serde_json::from_str(line) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let cid = entry.get("cid").and_then(|v| v.as_str()).unwrap_or("");
-            let ipfs_cid = entry.get("ipfs_cid").and_then(|v| v.as_str()).unwrap_or("");
-            let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            let description = entry.get("description").and_then(|v| v.as_str()).unwrap_or("");
-            let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or("");
-
-            if cid.contains(&q) || ipfs_cid.contains(&q) || title.contains(&q) || description.contains(&q) {
-                results.push(serde_json::json!({
-                    "id": id,
-                    "cid": cid,
-                    "ipfs_cid": ipfs_cid,
-                    "title": title,
-                    "description": description,
-                }));
-            }
-        }
+    if q.is_empty() {
+        return Ok(HttpResponse::Ok().json(serde_json::json!({
+            "query": q,
+            "count": 0,
+            "results": Vec::<serde_json::Value>::new(),
+        })));
     }
 
-    results.sort_by(|a, b| {
-        let a_id = a.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let b_id = b.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        b_id.cmp(a_id)
-    });
+    let client = match pool.get().await {
+        Ok(c) => c,
+        Err(e) => return Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()}))),
+    };
 
-    results.truncate(100);
+    // Search by CID (cid_v0, cid_v1, ipfs_cid) or title/description match
+    let rows = match client
+        .query(
+            r#"
+            SELECT id, title, description, cid_v0, cid_v1, witness, ipfs_cid,
+                   timestamp, size, uucp_path
+            FROM pastes
+            WHERE cid_v0 ILIKE $1 OR cid_v1 ILIKE $1 OR ipfs_cid ILIKE $1
+               OR title ILIKE $2 OR description ILIKE $2
+            ORDER BY timestamp DESC
+            LIMIT 100
+            "#,
+            &[&format!("%{}%", q), &format!("%{}%", q)],
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => return Ok(HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()}))),
+        };
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    for row in rows {
+        results.push(serde_json::json!({
+            "id": row.get::<_, Option<String>>(0).unwrap_or_default(),
+            "title": row.get::<_, Option<String>>(1).unwrap_or_default(),
+            "description": row.get::<_, Option<String>>(2).unwrap_or_default(),
+            "cid": row.get::<_, Option<String>>(3).unwrap_or_default(),
+            "cid_v1": row.get::<_, Option<String>>(4).unwrap_or_default(),
+            "witness": row.get::<_, Option<String>>(5).unwrap_or_default(),
+            "ipfs_cid": row.get::<_, Option<String>>(6).unwrap_or_default(),
+            "timestamp": row.get::<_, Option<String>>(7).unwrap_or_default(),
+            "size": row.get::<_, i64>(8).unwrap_or(0),
+            "uucp_path": row.get::<_, Option<String>>(9).unwrap_or_default(),
+        }));
+    }
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "query": q,

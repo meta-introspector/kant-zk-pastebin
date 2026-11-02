@@ -28,6 +28,7 @@ mod summary;
 mod tagging;
 mod tiles;
 mod view;
+mod db;
 
 mod archive;
 mod archive_store;
@@ -636,6 +637,20 @@ async fn main() -> std::io::Result<()> {
         env::var("MESH_RELAY_ID").unwrap_or_else(|_| "relay-local".to_string())
     );
 
+    // Initialize Postgres connection pool
+    let pg_config = deadpool_postgres::Config::new()
+        .host(env::var("PG_HOST").unwrap_or_else(|_| "localhost".to_string()))
+        .port(env::var("PG_PORT").unwrap_or_else(|_| "5432".to_string()))
+        .user(env::var("PG_USER").unwrap_or_else(|_| "mdupont".to_string()))
+        .dbname(env::var("PG_DB").unwrap_or_else(|_| "postgres".to_string()))
+        .manager(deadpool_postgres::ManagerConfig {
+            recycling_method: deadpool_postgres::RecyclingMethod::Fast,
+        });
+    let pg_pool = pg_config.create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
+        .expect("Failed to create postgres pool");
+    let pg_pool = web::Data::new(pg_pool);
+    log::info!("Postgres pool initialized");
+
     let openapi = ApiDoc::openapi();
 
     HttpServer::new(move || {
@@ -649,6 +664,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(cors)
             .app_data(registry.clone())
             .app_data(mesh_state.clone())
+            .app_data(pg_pool.clone())
             .app_data(web::PayloadConfig::new(256 * 1024 * 1024)) // 256MB max upload
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url("/openapi.json", openapi.clone()))
             .route("/", web::get().to(handlers::index))
