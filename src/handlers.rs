@@ -7702,3 +7702,57 @@ pub(crate) mod c13_sqlite_precommit_fault_probe {
         FAIL_BEFORE_UPDATE.swap(false, Ordering::SeqCst)
     }
 }
+
+#[cfg(test)]
+mod c13_historical_migration_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    #[test]
+    fn historical_migration_adds_column_and_keeps_data_safe() {
+        let temp = tempfile::tempdir().unwrap();
+        let spool = temp.path().to_str().unwrap();
+        let db_path = c13_db_path(spool);
+        
+        // 1. Create an OLD schema database (simulating historical data)
+        // Notice it lacks the `ipfs_root_cid` column.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE c13_transactions (
+                    id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    witness TEXT NOT NULL,
+                    cid TEXT NOT NULL,
+                    state TEXT NOT NULL
+                        CHECK(state IN ('PREPARED','COMMITTED','UNCERTAIN'))
+                );
+                INSERT INTO c13_transactions (id, filename, witness, cid, state)
+                VALUES ('old_id_123', 'old_file.txt', 'deadbeef', 'bafk123', 'PREPARED');"
+            ).unwrap();
+        }
+
+        // 2. Run the migration
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            c13_ensure_schema(&conn).expect("migration should succeed");
+            
+            // Verify column exists
+            let mut stmt = conn.prepare("PRAGMA table_info(c13_transactions)").unwrap();
+            let columns: Vec<String> = stmt.query_map([], |row| row.get(1)).unwrap().map(|r| r.unwrap()).collect();
+            assert!(columns.contains(&"ipfs_root_cid".to_string()), "migration must add ipfs_root_cid column");
+
+            // Verify old data is preserved, state is PREPARED, and root is NULL
+            let (state, root): (String, Option<String>) = conn.query_row(
+                "SELECT state, ipfs_root_cid FROM c13_transactions WHERE id='old_id_123'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?))
+            ).unwrap();
+            
+            assert_eq!(state, "PREPARED", "Historical state should remain PREPARED");
+            assert_eq!(root, None, "Historical ipfs_root_cid should be NULL");
+        }
+        
+        eprintln!("STEP977B_HISTORICAL_MIGRATION_PASS");
+    }
+}
