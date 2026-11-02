@@ -78,6 +78,7 @@ async fn screenshot_page(
 // ─── Test: Split profiles API ──────────────────────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_split_profiles_api() -> Result<(), Box<dyn std::error::Error>> {
     let base = base_url();
     let client = reqwest::Client::new();
@@ -148,6 +149,7 @@ async fn test_split_profiles_api() -> Result<(), Box<dyn std::error::Error>> {
 // ─── Test: Split with profile parameter ────────────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_split_with_profile() -> Result<(), Box<dyn std::error::Error>> {
     let base = base_url();
     let client = reqwest::Client::new();
@@ -222,6 +224,7 @@ async fn test_split_with_profile() -> Result<(), Box<dyn std::error::Error>> {
 // ─── Test: Splitter page has profile selector ──────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_splitter_profile_selector() -> Result<(), Box<dyn std::error::Error>> {
     let (mut browser, handle) = launch_browser().await?;
     let base = base_url();
@@ -420,6 +423,7 @@ async fn last_opened_url(page: &chromiumoxide::Page) -> Result<String, Box<dyn s
 // ─── Test: Splitter page loads and has key elements ────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_splitter_page_loads() -> Result<(), Box<dyn std::error::Error>> {
     let (mut browser, handle) = launch_browser().await?;
     let base = base_url();
@@ -469,6 +473,7 @@ async fn test_splitter_page_loads() -> Result<(), Box<dyn std::error::Error>> {
 // ─── Test: Split API works via headless browser ────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_split_api() -> Result<(), Box<dyn std::error::Error>> {
     // Test the split API directly (the browser JS uses BASE_PATH prefix
     // which may not route correctly when testing against the direct server)
@@ -530,6 +535,7 @@ async fn test_split_api() -> Result<(), Box<dyn std::error::Error>> {
 // ─── Test: Paste creation and view page ────────────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_paste_create_and_view() -> Result<(), Box<dyn std::error::Error>> {
     let (mut browser, handle) = launch_browser().await?;
     let base = base_url();
@@ -587,6 +593,7 @@ async fn test_paste_create_and_view() -> Result<(), Box<dyn std::error::Error>> 
 // ─── Test: Reply button on paste page ──────────────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_reply_button() -> Result<(), Box<dyn std::error::Error>> {
     let (mut browser, handle) = launch_browser().await?;
     let base = base_url();
@@ -647,6 +654,7 @@ async fn test_reply_button() -> Result<(), Box<dyn std::error::Error>> {
 // ─── Test: Copy button on paste page ──────────────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_copy_button() -> Result<(), Box<dyn std::error::Error>> {
     let (mut browser, handle) = launch_browser().await?;
     let base = base_url();
@@ -717,6 +725,7 @@ async fn test_copy_button() -> Result<(), Box<dyn std::error::Error>> {
 // ─── Test: Share button on paste page ──────────────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_share_button() -> Result<(), Box<dyn std::error::Error>> {
     let (mut browser, handle) = launch_browser().await?;
     let base = base_url();
@@ -772,6 +781,7 @@ async fn test_share_button() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_share_menu_destinations() -> Result<(), Box<dyn std::error::Error>> {
     let (mut browser, handle) = launch_browser().await?;
     let base = base_url();
@@ -906,6 +916,7 @@ async fn test_share_menu_destinations() -> Result<(), Box<dyn std::error::Error>
 // ─── Test: Split button on paste page ──────────────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_split_button_on_paste_page() -> Result<(), Box<dyn std::error::Error>> {
     let (mut browser, handle) = launch_browser().await?;
     let base = base_url();
@@ -956,6 +967,7 @@ async fn test_split_button_on_paste_page() -> Result<(), Box<dyn std::error::Err
 // ─── Test: All buttons present on paste page ───────────────────────────
 
 #[tokio::test]
+#[ignore = "requires Chromium binary (install or use nix develop) and a running server on BASE_URL (default 127.0.0.1:8090)"]
 async fn test_all_buttons_present() -> Result<(), Box<dyn std::error::Error>> {
     let (mut browser, handle) = launch_browser().await?;
     let base = base_url();

@@ -1187,10 +1187,37 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
 
 // C13-RUST-31: transaction visibility gate.
 // Experimental consistency marker, NOT authentication.
+fn c13_valid_root_cid(root: &str) -> bool {
+    use ipld_core::cid::Cid;
+
+    match root.parse::<Cid>() {
+        Ok(cid) => {
+            cid.to_string() == root
+                // STEP977B_R11C: rust-unixfs::FileAdder emits a raw leaf
+                // (codec 0x55) for files <= 256KB and a DAG-PB root
+                // (codec 0x70) for larger files. Both are legitimate
+                // writer outputs. Content binding (SHA-256 over the
+                // reconstructed bytes) — not the codec — is the sole
+                // authority for what a root identifies.
+                && (cid.codec() == 0x55 || cid.codec() == 0x70)
+                && cid.hash().code() == 0x12
+                && cid.hash().size() == 32
+        }
+        Err(_) => false,
+    }
+}
+
 fn c13_commit_payload(
-    id: &str, filename: &str, witness: &str, cid: &str
+    id: &str,
+    filename: &str,
+    witness: &str,
+    cid: &str,
+    ipfs_root_cid: &str,
 ) -> String {
-    format!("C13-1\n{}\n{}\n{}\n{}\n", id, filename, witness, cid)
+    format!(
+        "C13-2\n{}\n{}\n{}\n{}\n{}\n",
+        id, filename, witness, cid, ipfs_root_cid
+    )
 }
 
 
@@ -1237,26 +1264,83 @@ fn c13_db_path(spool: &str) -> std::path::PathBuf {
     Path::new(spool).join(".c13-transactions.sqlite")
 }
 
+// F5-DS12 P1: serialized backward-compatible C13 schema migration.
+// Historical transactions retain NULL root CID and remain unauthorized by C13-2.
+pub(crate) fn c13_ensure_schema(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<()> {
+    // Serialize migration check and ALTER TABLE across concurrent processes.
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+
+    let migration = (|| -> rusqlite::Result<()> {
+        let has_root_cid = {
+            let mut stmt =
+                conn.prepare("PRAGMA table_info(c13_transactions)")?;
+            let rows =
+                stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+            let mut found = false;
+            for row in rows {
+                if row? == "ipfs_root_cid" {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+
+        if !has_root_cid {
+            conn.execute(
+                "ALTER TABLE c13_transactions ADD COLUMN ipfs_root_cid TEXT",
+                [],
+            )?;
+        }
+
+        Ok(())
+    })();
+
+    match migration {
+        Ok(()) => conn.execute_batch("COMMIT"),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
 fn c13_sqlite_authorized(spool: &str, entry: &PasteIndex) -> bool {
-    use rusqlite::{Connection, OpenFlags, params, OptionalExtension};
+    use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+
+    let Some(root) = entry.ipfs_cid.as_deref() else {
+        return false;
+    };
+
+    if !c13_valid_root_cid(root) {
+        return false;
+    }
 
     let conn = match Connection::open_with_flags(
         c13_db_path(spool),
         OpenFlags::SQLITE_OPEN_READ_ONLY,
     ) {
-        Ok(c) => c,
+        Ok(conn) => conn,
         Err(_) => return false,
     };
 
-    conn.query_row(
-        "SELECT state FROM c13_transactions
-         WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4",
-        params![entry.id, entry.filename, entry.witness, entry.cid],
-        |row| row.get::<_, String>(0),
+    let identity: rusqlite::Result<Option<(String, Option<String>)>> =
+        conn.query_row(
+            "SELECT state, ipfs_root_cid
+             FROM c13_transactions
+             WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4",
+            params![entry.id, entry.filename, entry.witness, entry.cid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional();
+
+    matches!(
+        identity,
+        Ok(Some((state, Some(stored_root))))
+            if state == "COMMITTED" && stored_root == root
     )
-    .optional()
-    .map(|state| state.as_deref() == Some("COMMITTED"))
-    .unwrap_or(false)
 }
 
 
@@ -1295,10 +1379,13 @@ pub(crate) fn c13_sqlite_prepare(
              filename TEXT NOT NULL,
              witness TEXT NOT NULL,
              cid TEXT NOT NULL,
+             ipfs_root_cid TEXT,
              state TEXT NOT NULL
                  CHECK(state IN ('PREPARED','COMMITTED','UNCERTAIN'))
          );"
     ).map_err(convert)?;
+
+    c13_ensure_schema(&conn).map_err(convert)?;
 
     conn.execute(
         "INSERT INTO c13_transactions
@@ -1310,11 +1397,89 @@ pub(crate) fn c13_sqlite_prepare(
     Ok(())
 }
 
+
+// C13-2: bind exactly one IPFS root to an existing PREPARED transaction.
+pub(crate) fn c13_sqlite_bind_root(
+    spool: &str,
+    id: &str,
+    filename: &str,
+    witness: &str,
+    cid: &str,
+    ipfs_root_cid: &str,
+) -> std::io::Result<()> {
+    use rusqlite::{params, Connection};
+
+    if !is_safe_paste_id(id)
+        || Path::new(filename).file_name()
+            .and_then(|n| n.to_str()) != Some(filename)
+        || !c13_valid_root_cid(ipfs_root_cid)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid C13 root binding identity",
+        ));
+    }
+
+    // F5_DS12_STEP977B_R8_CONTENT_WITNESS_BINDING
+    // Bind not only the shape of the root CID, but the exact content.
+    // The UnixFS DAG under `ipfs_root_cid` must reconstruct to bytes
+    // whose SHA-256 equals `witness`. This is fail-closed and happens
+    // before any SQLite write, so no PREPARED transaction can be
+    // completed with a root that identifies different content.
+    //
+    // Root shape (DAG-PB 0x70, SHA2-256 / 32B, canonical) is already
+    // enforced by `c13_valid_root_cid` above; `verify_c13_content_binding`
+    // re-verifies those invariants and additionally walks the DAG.
+    if let Err(reason) = crate::ipfs::verify_c13_content_binding(ipfs_root_cid, witness) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("C13 content binding rejected: {}", reason),
+        ));
+    }
+
+    let convert = |e: rusqlite::Error| {
+        std::io::Error::new(std::io::ErrorKind::Other, e)
+    };
+
+    let conn = Connection::open(c13_db_path(spool)).map_err(convert)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(convert)?;
+    c13_ensure_schema(&conn).map_err(convert)?;
+
+    let changed = conn.execute(
+        "UPDATE c13_transactions
+         SET ipfs_root_cid=?5
+         WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4
+           AND state='PREPARED' AND ipfs_root_cid IS NULL",
+        params![id, filename, witness, cid, ipfs_root_cid],
+    ).map_err(convert)?;
+
+    if changed != 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "root binding requires exactly one unbound PREPARED transaction",
+        ));
+    }
+
+    Ok(())
+}
+
 fn c13_sqlite_commit(
-    spool: &str, id: &str, filename: &str,
-    witness: &str, cid: &str,
+    spool: &str,
+    id: &str,
+    filename: &str,
+    witness: &str,
+    cid: &str,
+    ipfs_root_cid: &str,
 ) -> std::io::Result<()> {
     use rusqlite::{Connection, params};
+
+    if !c13_valid_root_cid(ipfs_root_cid) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid IPFS root CID at SQLite commit",
+        ));
+    }
 
     let convert = |e: rusqlite::Error| {
         std::io::Error::new(std::io::ErrorKind::Other, e)
@@ -1346,17 +1511,32 @@ fn c13_sqlite_commit(
              filename TEXT NOT NULL,
              witness TEXT NOT NULL,
              cid TEXT NOT NULL,
+             ipfs_root_cid TEXT,
              state TEXT NOT NULL
                  CHECK(state IN ('PREPARED','COMMITTED','UNCERTAIN'))
          );"
     ).map_err(convert)?;
 
+    c13_ensure_schema(&conn).map_err(convert)?;
+
+    // STEP977B_R18H: precommit probe fires BEFORE the UPDATE so DB
+    // state remains PREPARED. This exercises the "uncertain commit"
+    // path where the client cannot know whether SQLite was updated.
+    #[cfg(test)]
+    if c13_sqlite_precommit_fault_probe::take() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "C13 injected error before SQLite commit"
+        ));
+    }
+
     // C13-RUST-55: exclusive PREPARED -> COMMITTED transition.
     let updated = conn.execute(
         "UPDATE c13_transactions SET state='COMMITTED'
          WHERE id=?1 AND filename=?2 AND witness=?3
-           AND cid=?4 AND state='PREPARED'",
-        params![id, filename, witness, cid],
+           AND cid=?4 AND ipfs_root_cid=?5
+           AND state='PREPARED'",
+        params![id, filename, witness, cid, ipfs_root_cid],
     ).map_err(convert)?;
 
     if updated != 1 {
@@ -1385,12 +1565,20 @@ fn c13_commit_matches(spool: &str, entry: &PasteIndex) -> bool {
     {
         return false;
     }
+
+    let Some(root) = entry.ipfs_cid.as_deref() else {
+        return false;
+    };
+    if !c13_valid_root_cid(root) {
+        return false;
+    }
+
+    let expected = c13_commit_payload(
+        &entry.id, &entry.filename, &entry.witness, &entry.cid, root
+    );
+
     let marker = Path::new(spool)
         .join(format!("{}.c13-committed", entry.id));
-    let expected = c13_commit_payload(
-        &entry.id, &entry.filename, &entry.witness, &entry.cid
-    );
-    // C13-RUST-36: visibility seal required in addition to commit.
     let seal = Path::new(spool)
         .join(format!("{}.c13-visible", entry.id));
 
@@ -1414,8 +1602,12 @@ pub(crate) enum C13CommitOutcome {
 }
 
 pub(crate) fn c13_publish_upload_commit(
-    spool: &str, id: &str, filename: &str,
-    witness: &str, cid: &str
+    spool: &str,
+    id: &str,
+    filename: &str,
+    witness: &str,
+    cid: &str,
+    ipfs_root_cid: &str,
 ) -> C13CommitOutcome {
     if !is_safe_paste_id(id)
         || Path::new(filename).file_name()
@@ -1427,7 +1619,16 @@ pub(crate) fn c13_publish_upload_commit(
     }
 
 
-    let payload = c13_commit_payload(id, filename, witness, cid);
+    if !c13_valid_root_cid(ipfs_root_cid) {
+        return C13CommitOutcome::NotPublished(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid C13-2 root CID",
+        ));
+    }
+
+    let payload = c13_commit_payload(
+        id, filename, witness, cid, ipfs_root_cid
+    );
 
     let preparation = (|| -> std::io::Result<tempfile::NamedTempFile> {
         let mut staged = tempfile::NamedTempFile::new_in(spool)?;
@@ -1452,6 +1653,14 @@ pub(crate) fn c13_publish_upload_commit(
 
     #[cfg(test)]
     if c13_commit_fault_probe::take() {
+        // STEP977B_R18F: revert of R18D.1. A failure here occurs after
+        // the marker is durable but before the seal is published. The
+        // marker is the durable commit signal; the seal is visibility
+        // plumbing. From the client's perspective the outcome is
+        // DurabilityUncertain (202) — content may or may not be readable
+        // later, do not retry blindly. `c13_commit_matches` still
+        // requires marker + seal + SQLite-COMMITTED, so HTTP will not
+        // serve the content while the seal is missing.
         return C13CommitOutcome::DurabilityUncertain(
             std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -1494,7 +1703,7 @@ pub(crate) fn c13_publish_upload_commit(
 
     match result {
         Ok(()) => match c13_sqlite_commit(
-            spool, id, filename, witness, cid
+            spool, id, filename, witness, cid, ipfs_root_cid
         ) {
             Ok(()) => C13CommitOutcome::PublishedDurable,
             Err(e) => {
@@ -1506,13 +1715,18 @@ pub(crate) fn c13_publish_upload_commit(
                         c13_db_path(spool),
                         OpenFlags::SQLITE_OPEN_READ_ONLY,
                     )?;
-                    let state: Option<String> = conn.query_row(
-                        "SELECT state FROM c13_transactions
-                         WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4",
-                        params![id, filename, witness, cid],
-                        |row| row.get(0),
-                    ).optional()?;
-                    Ok(state.as_deref() == Some("COMMITTED"))
+                    let identity: Option<(String, Option<String>)> =
+                        conn.query_row(
+                            "SELECT state, ipfs_root_cid FROM c13_transactions
+                             WHERE id=?1 AND filename=?2 AND witness=?3 AND cid=?4",
+                            params![id, filename, witness, cid],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        ).optional()?;
+                    Ok(matches!(
+                        identity,
+                        Some((state, Some(root)))
+                            if state == "COMMITTED" && root == ipfs_root_cid
+                    ))
                 })().unwrap_or(false);
 
                 if confirmed {
@@ -4970,23 +5184,55 @@ async fn create_chunk_line_store(title: &str, lines: &[String]) -> Result<Stored
 
 /// GET /ipfs/{cid} - Proxy IPFS content (local flatfs only, no shell-out)
 pub async fn ipfs_proxy(path: web::Path<String>) -> Result<HttpResponse> {
-    let cid = path.into_inner();
+    use ipld_core::cid::Cid;
 
-    if let Some(block) = ipfs::ipfs_cat(&cid) {
-        let ct = match &block[..4.min(block.len())] {
-            [0x89, 0x50, 0x4E, 0x47] => "image/png",
-            [0xFF, 0xD8, ..] => "image/jpeg",
-            [0x3C, ..] => "text/html; charset=utf-8",
-            [0x7B, ..] => "application/json",
-            _ if block.starts_with(b"<!") || block.starts_with(b"<html") => {
-                "text/html; charset=utf-8"
+    let cid_str = path.into_inner();
+
+    // STEP977B_R18A: DAG-PB roots do not identify the file content directly.
+    // The root block is a protobuf that references leaves; the original
+    // bytes must be reconstructed by traversing the DAG. Serving the root
+    // block through this handler (as it used to) returns protobuf, not the
+    // uploaded file, for every file larger than the UnixFS chunk size.
+    let parsed: Cid = match cid_str.parse() {
+        Ok(c) => c,
+        Err(_) => {
+            return Ok(HttpResponse::NotFound()
+                .body(format!("IPFS CID not found: {}", cid_str)))
+        }
+    };
+
+    let content = if parsed.codec() == 0x70 {
+        // DAG-PB: reconstruct full content. Fail closed on any traversal
+        // or integrity error; do not fall back to the root block.
+        match ipfs::reconstruct_verified_unixfs(&cid_str) {
+            Some((bytes, _visited)) => bytes,
+            None => {
+                return Ok(HttpResponse::NotFound()
+                    .body(format!("IPFS CID not reconstructable: {}", cid_str)))
             }
-            _ => "application/octet-stream",
-        };
-        return Ok(HttpResponse::Ok().content_type(ct).body(block));
-    }
+        }
+    } else {
+        // Raw (0x55): block bytes are the content.
+        match ipfs::ipfs_cat(&cid_str) {
+            Some(bytes) => bytes,
+            None => {
+                return Ok(HttpResponse::NotFound()
+                    .body(format!("IPFS CID not found: {}", cid_str)))
+            }
+        }
+    };
 
-    Ok(HttpResponse::NotFound().body(format!("IPFS CID not found: {}", cid)))
+    let ct = match &content[..4.min(content.len())] {
+        [0x89, 0x50, 0x4E, 0x47] => "image/png",
+        [0xFF, 0xD8, ..] => "image/jpeg",
+        [0x3C, ..] => "text/html; charset=utf-8",
+        [0x7B, ..] => "application/json",
+        _ if content.starts_with(b"<!") || content.starts_with(b"<html") => {
+            "text/html; charset=utf-8"
+        }
+        _ => "application/octet-stream",
+    };
+    Ok(HttpResponse::Ok().content_type(ct).body(content))
 }
 
 /// GET /gallery - NFT gallery from enriched directory
@@ -7434,5 +7680,25 @@ pub(crate) mod c13_sqlite_commit_fault_probe {
 
     pub fn take() -> bool {
         FAIL_AFTER_COMMIT.swap(false, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod c13_sqlite_precommit_fault_probe {
+    // STEP977B_R18H: fires BEFORE the PREPARED -> COMMITTED UPDATE.
+    // DB state remains PREPARED, which exercises the "uncertain after
+    // crash before SQLite commit" recovery path. Distinct from
+    // c13_sqlite_commit_fault_probe which fires AFTER the UPDATE (the
+    // "lost acknowledgement" path).
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static FAIL_BEFORE_UPDATE: AtomicBool = AtomicBool::new(false);
+
+    pub fn enable() {
+        FAIL_BEFORE_UPDATE.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take() -> bool {
+        FAIL_BEFORE_UPDATE.swap(false, Ordering::SeqCst)
     }
 }
