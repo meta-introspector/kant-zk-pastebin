@@ -27,7 +27,8 @@ jobs:
       - name: Setup IPFS
         uses: ibnesayeed/setup-ipfs@master
         with:
-          ipfs-version: 'latest'
+          ipfs_version: 'latest'
+          run_daemon: false
 
       - name: Initialize IPFS
         run: ipfs init
