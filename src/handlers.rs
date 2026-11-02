@@ -1558,7 +1558,7 @@ fn c13_sqlite_commit(
     Ok(())
 }
 
-fn c13_commit_matches(spool: &str, entry: &PasteIndex) -> bool {
+pub(crate) fn c13_commit_matches(spool: &str, entry: &PasteIndex) -> bool {
     if !is_safe_paste_id(&entry.id)
         || Path::new(&entry.filename).file_name()
             .and_then(|n| n.to_str()) != Some(entry.filename.as_str())

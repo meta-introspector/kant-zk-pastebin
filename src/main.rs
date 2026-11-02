@@ -257,6 +257,8 @@ fn run_rename_allm_pastes_cli(args: RenameAllmPastesArgs) -> Result<(), String> 
         apply: args.apply,
         rename_files: args.rename_files,
         limit: args.limit,
+        #[cfg(test)]
+        skip_c13_check: false,
     };
     let report = rename::rename_allm_pastes(&options)?;
 

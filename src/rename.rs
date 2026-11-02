@@ -12,6 +12,8 @@ pub struct RenameOptions {
     pub apply: bool,
     pub rename_files: bool,
     pub limit: Option<usize>,
+    #[cfg(test)]
+    pub skip_c13_check: bool,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -97,6 +99,18 @@ pub fn rename_allm_pastes(options: &RenameOptions) -> Result<RenameReport, Strin
     let mut changed_entries = Vec::new();
     for entry in entries.iter().cloned() {
         if !is_allm_candidate(&entry) {
+            continue;
+        }
+
+        // C13-2 SECURITY GATE: Only process authorized, COMMITTED entries.
+        let is_authorized = {
+            #[cfg(test)]
+            if options.skip_c13_check { true } else { crate::handlers::c13_commit_matches(&options.uucp_dir, &entry) }
+            #[cfg(not(test))]
+            { crate::handlers::c13_commit_matches(&options.uucp_dir, &entry) }
+        };
+        if !is_authorized {
+            report.skipped += 1;
             continue;
         }
         if report.items.len() >= options.limit.unwrap_or(usize::MAX) {
@@ -492,6 +506,8 @@ mod tests {
             apply: false,
             rename_files: false,
             limit: None,
+            #[cfg(test)]
+            skip_c13_check: true,
         };
 
         let preview = rename_allm_pastes(&options).unwrap();
