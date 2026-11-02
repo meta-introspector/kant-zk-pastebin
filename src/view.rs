@@ -223,13 +223,26 @@ pub fn render_threads_page(
             } else {
                 &entry.title
             };
+            let cid = format!("CID: {}", entry.cid);
+            let ipfs_cid = entry.ipfs_cid.as_deref().map(|c| {
+                let short = if c.len() > 16 { &c[..16] } else { c };
+                format!("<br><a href=\"/ipfs/{}\" target=\"_blank\">IPFS: {}</a>", c, short)
+            }).unwrap_or_default();
+            let tags = entry.keywords.iter().map(|k| format!("<span class=\"tag\">{}</span>", k)).collect::<Vec<_>>().join(" ");
             format!(
-                r#"<div class="thread-root"><a href="{bp}/thread/{id}">{title}</a><div class="meta">{ts} · {size} bytes</div><div class="meta">ID: {id}</div></div>"#,
+                r#"<div class="thread-root"><a href="{bp}/thread/{id}" target="_blank">{title}</a>
+<div class="meta">{ts} · {size} bytes</div>
+<div class="meta">ID: {id}</div>
+{cid}{ipfs_cid}
+<div class="meta">{tags}</div></div>"#,
                 bp = base_path,
                 id = html_escape(&entry.id),
                 title = html_escape(title),
                 ts = html_escape(&entry.timestamp),
-                size = entry.size
+                size = entry.size,
+                cid = cid,
+                ipfs_cid = ipfs_cid,
+                tags = tags
             )
         })
         .collect::<Vec<_>>()
@@ -244,16 +257,17 @@ pub fn render_threads_page(
 <meta charset="UTF-8">
 <title>Threads - kant-pastebin</title>
 <style>
-body{{background:#000;color:#0f0;font-family:monospace;padding:20px}}
-a{{color:#0ff;text-decoration:none;margin-right:10px}}
-.nav{{background:#111;padding:10px;margin:10px 0;border:1px solid #0f0}}
-.thread-root{{border-bottom:1px solid #333;padding:12px 0}}
-.meta{{color:#888;font-size:12px}}
-.pager{{margin:15px 0}}
+  body{{background:#000;color:#0f0;font-family:monospace;padding:20px}}
+  a{{color:#0ff;text-decoration:none;margin-right:10px}}
+  .nav{{background:#111;padding:10px;margin:10px 0;border:1px solid #0f0}}
+  .thread-root{{border-bottom:1px solid #333;padding:12px 0}}
+  .meta{{color:#888;font-size:12px}}
+  .pager{{margin:15px 0}}
+  .tag{{display:inline-block;margin:2px 4px;background:#0f3460;color:#fff;padding:2px 6px;border-radius:10px;font-size:0.8em}}
 </style>
 </head>
 <body>
-<div class="nav"><a href="{bp}/">🏠 Home</a> <a href="{bp}/browse">📚 Browse</a> <a href="{bp}/threads">🧵 Threads</a></div>
+<div class="nav"><a href="{bp}/">🏠 Home</a> <a href="{bp}/browse">📚 Browse</a> <a href="{bp}/threads">𧵵 Threads</a></div>
 <h1>🧵 Thread Roots</h1>
 <p class="meta">{total} threads · page {page}/{total_pages}</p>
 {pager}

@@ -1,5 +1,71 @@
 // Tagging - Auto-tagging, content analysis, and text utilities
 use std::collections::HashMap;
+use once_cell::sync::Lazy;
+use regex_lite::Regex;
+
+/// Regex for matching IPFS CIDv0 (Qm...) and CIDv1 (bafy...) in text
+pub static CID_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?:Qm|baf[ya][^ ]{44})").unwrap());
+
+/// Extract IPFS CIDs from text content
+pub fn extract_cids(content: &str) -> Vec<String> {
+    let mut cids = Vec::new();
+    for cap in CID_REGEX.captures_iter(content) {
+        if let Some(m) = cap.get(0) {
+            cids.push(m.as_str().to_string());
+        }
+    }
+    cids
+}
+
+/// Check if a CID is potentially dangerous based on known patterns
+pub fn is_cid_dangerous(cid: &str) -> bool {
+    // Check for known malicious patterns in CID structure
+    let dangerous_prefixes = ["bafybeiem", "bafybeian", "bafybeibm"];
+    for prefix in &dangerous_prefixes {
+        if cid.starts_with(prefix) {
+            return true;
+        }
+    }
+    // Check for short CIDs (likely invalid)
+    if cid.len() < 46 {
+        return true;
+    }
+    false
+}
+
+/// Auto-detect and auto-tag CIDs in content, returning HTML links for safe CIDs
+pub fn auto_link_cids(content: &str, base_path: &str) -> String {
+    let cids = extract_cids(content);
+    let mut result = content.to_string();
+    let mut cid_tags = Vec::new();
+    
+    for cid in &cids {
+        if is_cid_dangerous(cid) {
+            cid_tags.push(format!("<span class=\"cid-danger\">{}</span>", cid));
+        } else {
+            let short = cid.get(..16).unwrap_or(cid);
+            let link = format!("<a href=\"{}/ipfs/{}\" target=\"_blank\" class=\"cid-link\">{}</a>", 
+                base_path.trim_end_matches('/'), cid, short);
+            cid_tags.push(link);
+            // Also add as a tag
+            let tag = format!("cid:{}", short);
+            // We don't auto-add to keywords to avoid clutter, but we could
+        }
+    }
+    
+    // Replace CIDs in original content with linked versions
+    // Simple approach: replace each CID occurrence
+    for cid in &cids {
+        if !is_cid_dangerous(cid) {
+            let short = cid.get(..16).unwrap_or(cid);
+            let replacement = format!("<a href=\"{}/ipfs/{}\" target=\"_blank\" class=\"cid-link\">{}</a>", 
+                base_path.trim_end_matches('/'), cid, short);
+            result = result.replace(cid, &replacement);
+        }
+    }
+    
+    result
+}
 
 pub fn slugify(s: &str) -> String {
     s.chars()

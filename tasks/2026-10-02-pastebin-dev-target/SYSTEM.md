@@ -67,6 +67,14 @@ accounts `Jmikedupont2@gmail.com's Account`, `kant`, `twitterstorm`.
 — no envelope, empty `account_id`, values nested under a `cloudflare:` key the
 script does not read. See PB-20.
 
+**Resolved 2026-10-31:** one registry is left, `.sops/registry.sops.yaml`;
+`sops graph` found three copies (`cloudflare.sops.yaml`, `credentials.sops.yaml`,
+`registry.sops.yaml`) holding the same `cloudflare.account_id` /
+`cloudflare.api_token` to the same recipients, so they could diverge on the
+next rotation. `deploy-cloudflare-worker.sh`, `scripts/deploy-all.sh` and
+`scripts/setup-cloudflare-credentials.sh` now all read and write the registry,
+and the two duplicates were removed.
+
 ## Results
 
 | target | headless | headed | notes |

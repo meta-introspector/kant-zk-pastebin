@@ -13,6 +13,9 @@ mod svg_anim;
 mod gallery;
 mod handlers;
 mod ipfs;
+mod ipfs_daemon;
+mod task_attachments;
+mod ipfs_tile;
 mod mesh;
 mod model;
 mod plugin;
@@ -25,6 +28,7 @@ mod summary;
 mod tagging;
 mod tiles;
 mod view;
+mod db;
 
 mod archive;
 mod archive_store;
@@ -587,6 +591,11 @@ async fn main() -> std::io::Result<()> {
     registry.register(Box::new(plugins::screenshot::ScreenshotPlugin::new()));
     registry.register(Box::new(plugins::pipelight::PipelightPlugin::new()));
     registry.register(Box::new(plugins::git2nora::Git2NoraPlugin::new()));
+    registry.register(Box::new(plugins::nora::NoraPlugin::new()));
+    registry.register(Box::new(plugins::git::GitPlugin::new()));
+    registry.register(Box::new(plugins::forgejo::ForgejoPlugin::new()));
+    registry.register(Box::new(plugins::pipelite::PipelitePlugin::new()));
+    registry.register(Box::new(plugins::task::TaskPlugin::new()));
 
     // Discover and register tile plugins from TILES_DIR
     let tiles_dir = env::var("TILES_DIR").unwrap_or_default();
@@ -628,6 +637,20 @@ async fn main() -> std::io::Result<()> {
         env::var("MESH_RELAY_ID").unwrap_or_else(|_| "relay-local".to_string())
     );
 
+    // Initialize Postgres connection pool
+    let pg_config = deadpool_postgres::Config::new()
+        .host(env::var("PG_HOST").unwrap_or_else(|_| "localhost".to_string()))
+        .port(env::var("PG_PORT").unwrap_or_else(|_| "5432".to_string()))
+        .user(env::var("PG_USER").unwrap_or_else(|_| "mdupont".to_string()))
+        .dbname(env::var("PG_DB").unwrap_or_else(|_| "postgres".to_string()))
+        .manager(deadpool_postgres::ManagerConfig {
+            recycling_method: deadpool_postgres::RecyclingMethod::Fast,
+        });
+    let pg_pool = pg_config.create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
+        .expect("Failed to create postgres pool");
+    let pg_pool = web::Data::new(pg_pool);
+    log::info!("Postgres pool initialized");
+
     let openapi = ApiDoc::openapi();
 
     HttpServer::new(move || {
@@ -641,6 +664,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(cors)
             .app_data(registry.clone())
             .app_data(mesh_state.clone())
+            .app_data(pg_pool.clone())
             .app_data(web::PayloadConfig::new(256 * 1024 * 1024)) // 256MB max upload
             .service(SwaggerUi::new("/swagger-ui/{_:.*}").url("/openapi.json", openapi.clone()))
             .route("/", web::get().to(handlers::index))
@@ -696,6 +720,10 @@ async fn main() -> std::io::Result<()> {
             .route(
                 "/archive-split/{session_id}",
                 web::post().to(handlers::archive_split),
+            )
+            .route(
+                "/archive-pattern/{session_id}",
+                web::post().to(handlers::archive_pattern),
             )
             .route(
                 "/archive-preview/{session_id}/{idx}",
@@ -774,6 +802,30 @@ async fn main() -> std::io::Result<()> {
                 "/api/git-reindex",
                 web::post().to(handlers::api_git_reindex),
             )
+            // IPFS tile routes
+            .route("/tile/ipfs", web::get().to(handlers::ipfs_tile))
+            .route("/tile/ipfs/status", web::get().to(handlers::ipfs_tile_status))
+            .route("/tile/ipfs/start", web::get().to(handlers::ipfs_tile_start))
+            .route("/tile/ipfs/stop", web::get().to(handlers::ipfs_tile_stop))
+            .route("/tile/ipfs/restart", web::get().to(handlers::ipfs_tile_restart))
+            .route("/tile/ipfs/pin/{cid}", web::get().to(handlers::ipfs_tile_pin))
+            .route("/tile/ipfs/unpin/{cid}", web::get().to(handlers::ipfs_tile_unpin))
+            .route("/tile/ipfs/peers", web::get().to(handlers::ipfs_tile_peers))
+            .route("/tile/ipfs/peer/{peer_id}", web::get().to(handlers::ipfs_tile_peer_reputation))
+            // Task attachments tile routes
+            .route("/tile/task-attachments", web::get().to(handlers::task_attachments_tile))
+            .route("/tile/task-attachments/status", web::get().to(handlers::task_attachments_tile_status))
+            .route("/tile/task-attachments/add", web::post().to(handlers::task_attachments_add))
+            .route("/api/cid-search", web::get().to(handlers::cid_search))
+            .route("/api/ipld/cid/{cid}", web::get().to(handlers::ipld_cid))
+            .route("/api/ipld/resolve/{cid}", web::get().to(handlers::ipld_resolve))
+            .route("/tile/sparql-query", web::get().to(handlers::sparql_query_tile))
+            .route("/tile/ipld-query", web::get().to(handlers::ipld_query_tile))
+            // nginx-fronts tile: every live front from nginx-fronts.service
+            .route("/tile/nginx-fronts", web::get().to(handlers::nginx_fronts_tile))
+            // Pages reference {BASE_PATH}/static/*.js; without this service those
+            // requests fall through to the paste route and 404.
+            .service(actix_files::Files::new("/static", "static"))
     })
     .bind(&bind)?
     .run()

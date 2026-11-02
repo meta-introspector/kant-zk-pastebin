@@ -142,6 +142,15 @@ restart:
 | `PASTEBIN_DIR` | script directory | Project root |
 | `UUCP_SPOOL` | `/mnt/data1/spool/uucp/pastebin` | Shared spool directory |
 
+### Two Fixes Made on 2026-10-28
+
+Both were found while deploying the archive-pattern build; each made a redeploy look successful when it was not.
+
+- **Stop with sudo.** `systemctl stop` needs root on this host. The script only tried `sudo` for `start`, so `stop` silently failed, the old process kept the port, and `start` was a no-op — a redeploy appeared to succeed while the old binary kept serving. It now falls back to `sudo systemctl stop`.
+- **Bind to loopback.** The unit used `BIND_ADDR=0.0.0.0:${BETA_PORT}`. Nginx proxies `/pastebin/beta/` locally, so the backend has no reason to listen on a public interface; it now binds `127.0.0.1`.
+
+Both matter for verification: `curl …/pastebin/beta/api/version` reports the `build_time` baked in at compile time, so a stale `build_time` is the tell that the restart did not take.
+
 ### Logging Functions
 
 `deploy-beta.sh` defines its own helper functions:

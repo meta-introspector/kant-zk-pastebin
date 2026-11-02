@@ -37,9 +37,23 @@
         # `/download`, and a tarball fetched from it hashes to the `cksum` the
         # index publishes — so cargo can verify it and no fabricated
         # `.cargo-checksum.json` is needed.
+        # Cargo.lock is committed with some crates sourced from the nora
+        # registry at http://127.0.0.1:4000 — that is what `cargo` wrote on the
+        # machine that produced the lock. crane has to be told how to fetch a
+        # crate from a source it finds in the lock, or `vendorCargoDeps` aborts
+        # with "not sure how to download crates from sparse+http://127.0.0.1:…"
+        # before any build starts (that is the Nix Build check being red). The
+        # index stays whatever the lock names; the download goes to nora over
+        # HTTPS, which serves the same tarballs, so this resolves on any host
+        # with a network and not only on the one running nora locally.
         craneLib = craneLibOrig.appendCrateRegistries [
           (craneLibOrig.registryFromDownloadUrl {
             indexUrl = "https://solana.solfunmeme.com/nora/cargo/index/";
+            dl = "https://solana.solfunmeme.com/nora/cargo/api/v1/crates/{crate}/{version}/download";
+            registryPrefix = "sparse+";
+          })
+          (craneLibOrig.registryFromDownloadUrl {
+            indexUrl = "http://127.0.0.1:4000/cargo/index/";
             dl = "https://solana.solfunmeme.com/nora/cargo/api/v1/crates/{crate}/{version}/download";
             registryPrefix = "sparse+";
           })
@@ -69,6 +83,16 @@ replace-with = "unified"
 [source.nora]
 registry = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
 replace-with = "unified"
+# Cargo.toml names this registry by name (`registry = "nora"` on four
+# dependencies), and cargo refuses to parse a manifest whose named registry is
+# not declared: "registry index was not found in any configuration: `nora`".
+# Outside the sandbox that table comes from the user's ~/.cargo/config.toml,
+# which is exactly why a local `cargo build` succeeded while every Nix build
+# failed at `cargo check` before compiling anything. Declaring it here makes
+# the sandbox self-contained; the sources above still vendor from `unified`.
+[registries.nora]
+index = "sparse+https://solana.solfunmeme.com/nora/cargo/index/"
+credential-provider = "cargo:token"
 EOF
         '';
 
@@ -91,6 +115,15 @@ EOF
             if [ -n "$CLI" ]; then
               cp "$CLI" "$out/bin/svg2tile-cli"
             fi
+            # The fabric daemon is a second binary of the same crate; it ships
+            # in the same output so `nix build .#agent-fabric` and the
+            # system-manager module resolve to one store path with both.
+            FAB=$(find target -name "agent-fabric" -type f -executable | head -1)
+            if [ -z "$FAB" ]; then
+              echo "agent-fabric was not built; src/bin/agent_fabric.rs is missing" >&2
+              exit 1
+            fi
+            cp "$FAB" "$out/bin/agent-fabric"
             runHook postInstall
           '';
         };
@@ -113,6 +146,12 @@ EOF
         packages = {
           inherit kant-pastebin;
           default = kant-pastebin;
+
+          # Same derivation, both binaries: kant-pastebin and agent-fabric.
+          # The fabric joins the pastebin, the relay, IPLD, Postgres, the GPU
+          # and a Cloudflare Durable Object into one coordination unit; see
+          # fabric-system.nix.
+          agent-fabric = kant-pastebin;
 
           # The browser the GUI2Lean4 captures run against.
           #
@@ -149,6 +188,7 @@ EOF
         };
         apps = {
           default = { type = "app"; program = "${kant-pastebin}/bin/kant-pastebin"; };
+          agent-fabric = { type = "app"; program = "${kant-pastebin}/bin/agent-fabric"; };
           fileshare-capture = {
             type = "app";
             program = "${self.packages.${system}.fileshare-capture}/bin/fileshare-capture";
@@ -168,6 +208,26 @@ EOF
     )) // {
       systemConfigs.kant-pastebin-only = system-manager.lib.makeSystemConfig {
         modules = [ ./pastebin-system.nix { nixpkgs.hostPlatform = "x86_64-linux"; } ];
+        specialArgs = { pastebin-src = self; };
+      };
+
+      # The coordination unit: agent-fabric plus the local Durable Object
+      # board. It starts after the pastebin, the relay, the IPLD pool and
+      # Postgres, and its gate refuses to run until all of them answer.
+      #
+      #   nix build .#systemConfigs.kant-fabric
+      #
+      # This config contains those two units and nothing else, so it is for
+      # building and inspecting the unit — `system-manager switch` against it
+      # alone would drop every other unit on the host. To deploy, import the
+      # module into the config that already owns those services:
+      #
+      #   modules = [
+      #     ...
+      #     (pastebin-src + "/fabric-system.nix")
+      #   ];
+      systemConfigs.kant-fabric = system-manager.lib.makeSystemConfig {
+        modules = [ ./fabric-system.nix { nixpkgs.hostPlatform = "x86_64-linux"; } ];
         specialArgs = { pastebin-src = self; };
       };
     };

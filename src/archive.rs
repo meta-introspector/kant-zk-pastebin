@@ -286,24 +286,26 @@ fn extract_tar_from_reader<R: Read>(reader: R, filename: &str) -> Result<Archive
             continue;
         }
 
-        // Markdown/lean-only mode: only allow specific extensions
-        // Check if path has a markdown/lean extension
-        let allowed = MARKDOWN_EXTENSIONS.iter().any(|&mext| lower_path.ends_with(mext))
-            || lower_path.ends_with(".tar.gz")
-            || lower_path.ends_with(".tgz")
-            || lower_path.ends_with(".tar.bz2")
-            || lower_path.ends_with(".tar.xz")
-            || lower_path.ends_with(".zip");
-        
-        // If not in markdown/lean mode and file doesn't have allowed extension, skip
-        // (When MARKDOWN_EXTENSIONS check passes, we continue; otherwise skip)
-        if !allowed && !lower_path.ends_with(".tar.gz") && !lower_path.ends_with(".tgz")
-            && !lower_path.ends_with(".tar.bz2") && !lower_path.ends_with(".tar.xz")
-            && !lower_path.ends_with(".zip")
-        {
+        // A directory is a row in the viewer, not a file: it has no content
+        // and must not land in the file patterns. (The tar path used to keep
+        // every entry as `is_dir: false`, so directories showed up as
+        // zero-byte text files.)
+        if is_dir {
+            entries.push(ArchiveEntry {
+                path,
+                size: 0,
+                is_dir: true,
+                content: None,
+            });
             continue;
         }
 
+        // Extraction keeps every file type: narrowing to Markdown/Lean is a
+        // selection the caller makes afterwards (`--category`, `--markdown-only`,
+        // or a pattern in the archive viewer), not something the reader may
+        // impose. Applying the allow-list here silently dropped every .rs,
+        // .html, .py, .toml … entry, so those files could never be browsed or
+        // split.
         total_size += size;
 
         // Read content — expand the limit for known text extensions so that
@@ -407,22 +409,7 @@ fn extract_zip(data: &[u8], filename: &str) -> Result<ArchiveResult, String> {
             continue;
         }
 
-        // Markdown/lean-only mode: only allow specific extensions
-        let allowed = MARKDOWN_EXTENSIONS.iter().any(|&mext| lower_path.ends_with(mext))
-            || lower_path.ends_with(".tar.gz")
-            || lower_path.ends_with(".tgz")
-            || lower_path.ends_with(".tar.bz2")
-            || lower_path.ends_with(".tar.xz")
-            || lower_path.ends_with(".zip");
-        
-        // If not in markdown/lean mode and file doesn't have allowed extension, skip
-        if !allowed && !lower_path.ends_with(".tar.gz") && !lower_path.ends_with(".tgz")
-            && !lower_path.ends_with(".tar.bz2") && !lower_path.ends_with(".tar.xz")
-            && !lower_path.ends_with(".zip")
-        {
-            continue;
-        }
-
+        // Same as the tar reader: keep every file type, filter at selection.
         if is_dir {
             entries.push(ArchiveEntry {
                 path,
@@ -575,4 +562,48 @@ pub fn categorize_by_extension(path: &str) -> &'static str {
         return "binary";
     }
     "other"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn sample_targz() -> Vec<u8> {
+        let mut tar_bytes = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tar_bytes);
+            for (path, body) in [
+                ("proj/src/main.rs", "fn main() {}\n"),
+                ("proj/docs/a.md", "# a\n"),
+            ] {
+                let mut header = tar::Header::new_gnu();
+                header.set_path(path).unwrap();
+                header.set_size(body.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder.append(&header, body.as_bytes()).unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(&tar_bytes).unwrap();
+        gz.finish().unwrap()
+    }
+
+    #[test]
+    fn extraction_keeps_non_markdown_sources() {
+        let result = extract(&sample_targz(), "sample.tar.gz").unwrap();
+        let paths: Vec<&str> = result.entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(
+            paths.contains(&"proj/src/main.rs"),
+            "a .rs entry was dropped by extraction: {:?}",
+            paths
+        );
+        assert!(
+            paths.contains(&"proj/docs/a.md"),
+            "a .md entry was dropped by extraction: {:?}",
+            paths
+        );
+    }
 }

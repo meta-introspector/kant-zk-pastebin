@@ -60,6 +60,47 @@ Response shape:
 
 Implementation: `src/handlers.rs:3656`
 
+### Archive sessions survive a restart
+
+An archive upload returns a `session_id`, and that session is now written to disk as well as kept in memory:
+
+- `POST /upload-archive` saves `$UUCP_SPOOL/archive_sessions/<session_id>.json` (the full `ArchiveResult`: entries, per-file content, prefixes/ngrams/tags). A write failure is logged and does not fail the upload — the archive file and its metadata sidecar are already in the spool.
+- On startup `handlers::load_archive_sessions()` reads every `*.json` back into the in-memory map and logs `Loaded N archive sessions from disk`.
+- `GET /browse-archive/{id}`, `/archive-pattern`, `/archive-split`, `/archive-generate` and `/archive-preview` all resolve through `get_archive_session()`, which checks memory first and falls back to the file. So an archive browsed before a redeploy still opens afterwards.
+- The session file is the only copy: deleting it makes the session unavailable, and re-uploading the same bytes yields the same `session_id` (it is the first 16 hex characters of the SHA-256 of the upload).
+
+### `POST /archive-pattern/{session_id}`
+
+Selects the files of an uploaded/browsed archive by pattern, so the selection can be split. The session is the one `/upload-archive` returned (see *Archive sessions survive a restart* above for where it lives).
+
+Request:
+
+```json
+{
+  "pattern": "src/**/*.rs"
+}
+```
+
+Pattern language:
+
+- `*` matches within one path segment; `**` crosses `/` (`**/` also matches zero directories); `?` is one character; everything else is literal.
+- A pattern with no `/` also matches the bare file name, so `*.md` finds `docs/README.md`.
+- A pattern ending in `/` selects everything under that directory.
+- Plain text (no `*`/`?`, not ending in `/`) is a case-insensitive path search that also consults the archive's prefix, ngram and tag indexes (`src/archive_utils.rs`, `PatternStore`).
+
+Response:
+
+```json
+{
+  "pattern": "src/**/*.rs",
+  "matches": ["./src/main.rs", "./src/db/schema.rs"],
+  "count": 2,
+  "total": 5
+}
+```
+
+Paths are the archive's own entry paths, `./` prefix included — identical to the checkbox `value`s in the viewer.
+
 ### `POST /api/split-download`
 
 Downloads split chunks as a ZIP. Accepts either `paste_id` or raw `content`.
@@ -83,6 +124,48 @@ Response:
 - No manifest or extra files
 
 Implementation: `src/handlers.rs:3720`
+
+### Archive viewer pattern bar
+
+`GET /browse-archive/{session_id}` carries a pattern bar above the file table:
+
+- **🎯 Select matching** posts the pattern to `/archive-pattern/{session_id}` and checks the matching rows, so **✂️ Split Selected** and **📝 Generate allm.txt** act on the pattern's selection.
+- **🔗 Share pattern** puts the pattern in the page URL (`?pattern=…`, percent-encoded) and copies the link; opening that link re-applies the pattern on load. Rebuilding a pattern store per call is cheap — it is derived from the session's stored entries, not persisted separately.
+
+The pattern response returns the same path strings the checkboxes carry (`./src/main.rs`, not `src/main.rs`), so the client can check rows by value with no path normalisation.
+
+### Beta verification (2026-10-28)
+
+Run against `https://solana.solfunmeme.com/pastebin/beta/` (`v0.2.0`, backend `127.0.0.1:8085`, final build `172b27e` / `build_time=2026-10-28T14:04:05Z`) with the five-file fixture in `.archive-test-fixture/sample.tar.gz` (5 files, 4 directories):
+
+| step | call | result |
+|---|---|---|
+| upload | `POST /upload-archive` (`sample.tar.gz`) | `session_id=ca99711e63f45e6e`, 10 entries, `archive_sessions/ca99711e63f45e6e.json` written |
+| glob | `{"pattern":"*.rs"}` | 2 of 5 files: `./src/main.rs`, `./src/db/schema.rs` |
+| glob | `{"pattern":"src/**/*.rs"}` | same 2 (matches bare and nested paths) |
+| dir | `{"pattern":"docs/"}` | 2 of 5: `./docs/README.md`, `./docs/notes.txt` |
+| bare name | `{"pattern":"*.md"}` | 1 of 5: `./docs/README.md` |
+| miss | `{"pattern":"lean"}` | 0 of 5, no error |
+| split | `POST /archive-split` with the 2 glob matches | 1 chunk, `/paste/split_index_20261028_135745` |
+| restart | `systemctl restart kant-pastebin-beta`, then the same session | `Loaded 1 archive sessions from disk`; viewer 200, pattern still resolves |
+| share link | headless chromium, `?pattern=src%2F**%2F*.rs` | bar auto-applied: 2 of 5 checked, Split landed on `/paste/split_index_20261028_141506` |
+| no match | headless chromium, `?pattern=nomatch-xyz` | script throws (`pattern … selected no rows`) — the negative control |
+
+The browser run is `scripts/archive-viewer-check.mjs` (puppeteer-core from the repo's `node_modules`):
+
+```bash
+S=$(cat logs/pattern-test-session.txt)
+CHROME=/home/mdupont/.nix-profile/bin/chromium \
+CHROME_ARGS="--host-resolver-rules=MAP|solana.solfunmeme.com|127.0.0.1;--ignore-certificate-errors" \
+  node scripts/archive-viewer-check.mjs https://solana.solfunmeme.com/pastebin/beta "$S" 'src/**/*.rs'
+```
+
+`CHROME_ARGS` entries are `;`-separated and `|` becomes a space, because the host-resolver rule needs spaces inside one argv element. The `CHROME_ARGS` in that command are only needed because this host resolves `solana.solfunmeme.com` to a LAN address first; the script itself is host-agnostic. It exits non-zero when the pattern does not reach the input, selects zero rows, or Split does not navigate — the only console error left on a passing run is the site-wide `/favicon.ico` 404.
+
+### Two defects found by the run, both fixed
+
+- **Sessions were never written.** `archive_store::save_session` existed and `load_archive_sessions()` ran at startup, but no upload path called `save_session`, so `$UUCP_SPOOL/archive_sessions/` did not exist and every restart emptied the store — `GET /browse-archive/<id>` 404'd after a redeploy. `POST /upload-archive` now saves the session (a failed write is logged, not fatal), which is what makes the persistence rows above true.
+- **Every paste page loaded a broken script.** The template had `<script src="{share_menu}/static/a11y.js">`, interpolating the share-menu *HTML* into a `src` attribute, so the browser requested `/paste/%3Cdiv%20class=` and got a 404; there was also no route serving `static/` at all. The tag is now `{bp}/static/a11y.js` and `main.rs` mounts `actix_files::Files::new("/static", "static")` (`actix-files` was already a dependency). `GET /static/a11y.js` returns `text/javascript` on the backend and through nginx.
 
 ### `POST /api/split-upload`
 

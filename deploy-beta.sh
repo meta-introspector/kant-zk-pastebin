@@ -140,7 +140,7 @@ ExecStart=$BINARY
 Restart=always
 RestartSec=10
 Environment="UUCP_SPOOL=$UUCP_SPOOL"
-Environment="BIND_ADDR=0.0.0.0:${BETA_PORT}"
+Environment="BIND_ADDR=127.0.0.1:${BETA_PORT}"
 Environment="PORT=${BETA_PORT}"
 Environment="BASE_PATH=/pastebin/beta"
 Environment="BASE_URL=https://${DOMAIN}"
@@ -170,7 +170,10 @@ if command -v systemctl >/dev/null 2>&1; then
     as_root "$UNIT_DIR" cp "$UNIT_SRC" "$UNIT_DIR/$UNIT_NAME.service"
     log "installed $UNIT_DIR/$UNIT_NAME.service"
     systemctl daemon-reload >/dev/null 2>&1 || sudo systemctl daemon-reload
-    systemctl stop "$UNIT_NAME" >/dev/null 2>&1 || true
+    # stop needs root on this host; without the sudo fallback the old process
+    # kept running and "start" was a no-op, so a redeploy never took effect.
+    systemctl stop "$UNIT_NAME" >/dev/null 2>&1 \
+        || sudo systemctl stop "$UNIT_NAME" >/dev/null 2>&1 || true
     systemctl start "$UNIT_NAME" 2>/dev/null || sudo systemctl start "$UNIT_NAME"
     log "started $UNIT_NAME via systemd"
 else

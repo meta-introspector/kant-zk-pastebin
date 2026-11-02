@@ -56,15 +56,20 @@ decrypt_secrets() {
   tmp_dir="$(mktemp -d)"
   trap "rm -rf '$tmp_dir'" EXIT
 
-  # Decrypt Cloudflare credentials
-  if [ -f "${PASTEBIN_DIR}/.sops/credentials.sops.yaml" ]; then
-    sops decrypt "${PASTEBIN_DIR}/.sops/credentials.sops.yaml" > "${tmp_dir}/creds.yaml" 2>>"$LOG_FILE" || {
+  # Decrypt Cloudflare credentials. One registry for the whole repo:
+  # scripts/sops-set.sh writes it, scripts/sops-run.sh reads it, this reads it.
+  if [ -f "${PASTEBIN_DIR}/.sops/registry.sops.yaml" ]; then
+    # --decrypt, not `sops decrypt`: this sops (3.8.1) has no such
+    # subcommand, so the bare word was read as a filename and sops dropped
+    # into its editor, which fails without a TTY — the old line never
+    # produced creds.yaml at all.
+    sops --decrypt "${PASTEBIN_DIR}/.sops/registry.sops.yaml" > "${tmp_dir}/creds.yaml" 2>>"$LOG_FILE" || {
       log_err "Failed to decrypt credentials"
       return 1
     }
     log "Secrets decrypted to ${tmp_dir}/creds.yaml"
   else
-    log_warn "No .sops/credentials.sops.yaml found, using env vars"
+    log_warn "No .sops/registry.sops.yaml found, using env vars"
   fi
 
   export CF_API_TOKEN="${CF_API_TOKEN:-$(grep api_token "${tmp_dir}/creds.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')}"

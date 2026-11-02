@@ -110,19 +110,28 @@ deploy_cloudflare() {
   log "=== Deploying Cloudflare Workers ==="
   
   # Check if credentials exist
-  local creds_file="${PASTEBIN_DIR}/.sops/credentials.sops.yaml"
+  local creds_file="${PASTEBIN_DIR}/.sops/registry.sops.yaml"
   if [ ! -f "$creds_file" ]; then
     log_err "SOPS credentials not found: $creds_file"
     log "Run ./scripts/setup-cloudflare-credentials.sh first"
     return 1
   fi
   
-  # Check if credentials have actual values
-  local has_token=$(grep -c 'api_token: ""' "$creds_file" || true)
-  if [ "$has_token" -eq 0 ]; then
-    log "Credentials file appears to have values"
+  # Check the registry actually decrypts to a non-empty api_token. The
+  # encrypted file cannot be grepped: every value in it is sops ciphertext, so
+  # the old `grep -c 'api_token: ""'` matched nothing and reported success
+  # unconditionally. Decrypt into a 0600 temp and test for presence only — the
+  # value itself is never printed or logged.
+  local probe token=""
+  probe="$(mktemp)"
+  if sops --decrypt "$creds_file" >"$probe" 2>>"$LOG_FILE"; then
+    token="$(sed -n 's/^[[:space:]]*api_token:[[:space:]]*//p' "$probe" | tr -d "\"'" | tr -d '[:space:]' | head -n1)"
+  fi
+  rm -f "$probe"
+  if [ -n "$token" ]; then
+    log "Registry decrypts and holds a non-empty api_token"
   else
-    log_warn "Credentials file has empty values. Run setup-cloudflare-credentials.sh"
+    log_warn "Registry did not decrypt or holds no api_token. Run ./scripts/setup-cloudflare-credentials.sh"
   fi
   
   # Run the deploy script

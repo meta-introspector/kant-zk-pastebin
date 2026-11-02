@@ -57,10 +57,8 @@ Two systemd services manage the local services:
 This will:
 - Prompt for Cloudflare API Token (no special characters shown)
 - Prompt for Cloudflare Account ID
-- Encrypt credentials using SOPS with PGP keys:
-  - A76A0CF9079EC60D
-  - 445EB57704130B8D
-- Save to `.sops/credentials.sops.yaml`
+- Encrypt credentials using SOPS to the age and PGP recipients in `.sops.yaml`
+- Save to `.sops/registry.sops.yaml` — the one registry every reader uses
 
 ### Step 2: Deploy Systemd Services
 ```bash
@@ -121,9 +119,11 @@ If you see an error about the account being over quota:
 ### SOPS Decryption Errors
 If SOPS fails to decrypt:
 ```bash
-sops --decrypt .sops/credentials.sops.yaml
+sops --decrypt .sops/registry.sops.yaml
 ```
-Make sure your GPG keyring has the required keys.
+Make sure your age key is at `~/.config/sops/age/keys.txt` (or point
+`SOPS_AGE_KEY_FILE` at it), and that your GPG keyring has the PGP recipient
+from `.sops.yaml`.
 
 ### Service Not Starting
 Check the systemd logs:
