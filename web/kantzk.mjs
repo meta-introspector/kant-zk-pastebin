@@ -715,3 +715,35 @@ export const stripLimitFor = (carrier) => {
   }
   return 0;
 };
+
+// INT24b-01: relay URL safety validator. Pure, no side effects.
+const RELAY_ALLOWED_SCHEMES = new Set(["http:", "https:", "ws:", "wss:"]);
+
+export function assertSafeRelayUrl(base, {
+  allowUnsafe = false, allowPrivate = true, protocols = null,
+} = {}) {
+  const raw = String(base ?? "");
+  if (allowUnsafe) return { ok: true, unsafe: true, url: raw };
+  let u;
+  try { u = new URL(raw); } catch { return { ok: false, reason: "invalid URL", url: raw }; }
+  const schemes = protocols ?? RELAY_ALLOWED_SCHEMES;
+  if (!schemes.has(u.protocol)) return { ok: false, reason: `scheme ${u.protocol} not allowed`, url: u.href };
+  let host = u.hostname.toLowerCase();
+  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+  if (host === "" || host === "0.0.0.0" || host === "::") return { ok: false, reason: `host ${host || "<empty>"} blocked`, url: u.href };
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const a = Number(v4[1]), b = Number(v4[2]);
+    if (a === 169 && b === 254) return { ok: false, reason: `link-local ${host} blocked`, url: u.href };
+    if (a >= 224) return { ok: false, reason: `multicast/reserved ${host} blocked`, url: u.href };
+    const loop = a === 127;
+    const rfc1918 = a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+    if (!allowPrivate && (loop || rfc1918)) return { ok: false, reason: `private ${host} blocked`, url: u.href };
+  }
+  if (host.includes(":")) {
+    if (/^fe[89ab][0-9a-f]:/i.test(host)) return { ok: false, reason: `IPv6 link-local ${host} blocked`, url: u.href };
+    if (!allowPrivate && (/^fc/i.test(host) || /^fd/i.test(host) || host === "::1")) return { ok: false, reason: `IPv6 private ${host} blocked`, url: u.href };
+  }
+  if (!allowPrivate && (host === "localhost" || host.endsWith(".localhost"))) return { ok: false, reason: `localhost ${host} blocked`, url: u.href };
+  return { ok: true, url: u.href, protocol: u.protocol };
+}

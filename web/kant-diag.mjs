@@ -339,8 +339,20 @@ export function servedBase(href) {
 /** Ask a base URL whether it is a relay.  Never throws: every outcome is
  *  a value, and every outcome is logged. */
 export async function probeRelay(base, { fetchImpl = globalThis.fetch, log = null,
-                                          timeoutMs = 4000 } = {}) {
+                                          timeoutMs = 4000, allowUnsafe = false } = {}) {
   if (!base) return { ok: false, status: 0, reason: "no relay named" };
+  // INT24b-01: probeRelay — refuse unsafe relay (dynamic import avoids cycle)
+  let _check = { ok: true };
+  try {
+    const _mod = await import("./kantzk.mjs");
+    if (typeof _mod.assertSafeRelayUrl === "function") {
+      _check = _mod.assertSafeRelayUrl(String(base), { allowUnsafe });
+    }
+  } catch { /* leave ok if module unavailable */ }
+  if (!_check.ok) {
+    log?.warn("probe", `refusing to probe unsafe relay (${_check.reason})`, String(base).slice(0, 120));
+    return { ok: false, status: 0, reason: `unsafe relay: ${_check.reason}` };
+  }
   const url = `${String(base).replace(/\/+$/, "")}/health`;
   log?.info("probe", "probing a relay", url);
   const ctl = typeof AbortController === "function" ? new AbortController() : null;
