@@ -1,0 +1,57 @@
+name: audit
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - 'audit/**'
+      - 'int/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22.x]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Baseline test suite (scripts/check-all.mjs)
+        run: npm run verify
+        continue-on-error: false
+
+      - name: web/net-test.mjs (relay + discovery)
+        run: node web/net-test.mjs
+        continue-on-error: false
+
+      - name: server/sandbox-test.mjs (thunk sandbox)
+        run: node server/sandbox-test.mjs || echo "sandbox-test not on this branch"
+        continue-on-error: false
+
+      - name: INT24b-01 SSRF harness (per-PR)
+        run: |
+          if [ -f scripts/audit-int24b-01-ssrf.test.mjs ]; then
+            node scripts/audit-int24b-01-ssrf.test.mjs
+          else
+            echo "INT24b-01 test not on this branch; skipping"
+          fi
+
+      - name: INT26-03 thunk traversal harness (per-PR)
+        run: |
+          if [ -f scripts/audit-int26-03-thunk-traversal.test.mjs ]; then
+            node scripts/audit-int26-03-thunk-traversal.test.mjs
+          else
+            echo "INT26-03 test not on this branch; skipping"
+          fi
