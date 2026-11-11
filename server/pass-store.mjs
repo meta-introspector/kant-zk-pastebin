@@ -29,6 +29,8 @@ export class PassStore {
     this.peerWindowMs = peerWindowMs;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
+    // Bound lock contention across independent relay processes.
+    this.db.exec("PRAGMA busy_timeout = 2500");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS pass_spends (
         id TEXT PRIMARY KEY,
@@ -54,7 +56,8 @@ export class PassStore {
        VALUES (?, ?, ?, 0, ?, ?)`);
     this.spendInc = this.db.prepare(
       `UPDATE pass_spends SET spent = spent + 1, updated_at = ?
-       WHERE id = ? RETURNING spent, limit_max`);
+       WHERE id = ? AND room = ? AND spent < limit_max
+       RETURNING spent, limit_max`);
     this.peerCount = this.db.prepare(
       "SELECT COUNT(*) AS n FROM peer_posts WHERE room = ? AND sender = ? AND at >= ?");
     this.peerIns = this.db.prepare(
@@ -73,29 +76,100 @@ export class PassStore {
    * Returns { ok: true } or { ok: false, status, error }.
    */
   admit({ pass = null, sender, room, lines = 1, now = Date.now() }) {
-    this.prune(now);
-    if (pass && pass.limit > 0) {
-      const idHex = Buffer.from(pass.id).toString("hex");
-      this.spendIns.run(idHex, room, pass.limit, now, now);
-      const cur = this.spendGet.get(idHex, room);
-      if (!cur || cur.spent >= cur.limit_max) {
-        return { ok: false, status: 429,
-          error: `pass spent (${cur ? cur.limit_max : "?"} post(s) allowed)` };
+    // The entire quota decision and its associated writes must
+    // be serialized against other SQLite connections.
+    //
+    // An expected rejection rolls back pruning as well:
+    // rejected admissions must have no ledger side effects.
+    this.db.exec("BEGIN IMMEDIATE");
+
+    let transactionOpen = true;
+
+    try {
+      this.prune(now);
+
+      let verdict;
+
+      if (pass && pass.limit > 0) {
+        const idHex = Buffer.from(pass.id).toString("hex");
+
+        this.spendIns.run(
+          idHex, room, pass.limit, now, now
+        );
+
+        const cur = this.spendGet.get(idHex, room);
+
+        if (!cur || cur.spent >= cur.limit_max) {
+          verdict = {
+            ok: false,
+            status: 429,
+            error: `pass spent (${cur ? cur.limit_max : "?"} post(s) allowed)`
+          };
+        } else {
+          // The UPDATE itself also enforces the quota.
+          const row = this.spendInc.get(
+            now, idHex, room
+          );
+
+          if (!row || row.spent > row.limit_max) {
+            verdict = {
+              ok: false,
+              status: 429,
+              error: `pass spent (${cur.limit_max} post(s) allowed)`
+            };
+          } else {
+            verdict = {
+              ok: true,
+              remaining: row.limit_max - row.spent
+            };
+          }
+        }
+      } else {
+        // Preserve existing behavior for limit=0.
+        // Its invitation semantics will be audited separately.
+        const { n } = this.peerCount.get(
+          room, sender, now - this.peerWindowMs
+        );
+
+        if (n + lines > this.peerLimit) {
+          verdict = {
+            ok: false,
+            status: 429,
+            error: `rate limit: ${this.peerLimit} posts per ${Math.round(this.peerWindowMs / 60000)} min`
+          };
+        } else {
+          for (let i = 0; i < lines; i++) {
+            this.peerIns.run(room, sender, now);
+          }
+
+          verdict = {
+            ok: true,
+            remaining: this.peerLimit - n - lines
+          };
+        }
       }
-      const row = this.spendInc.get(now, idHex);
-      if (!row || row.spent > row.limit_max) {
-        return { ok: false, status: 429,
-          error: `pass spent (${row ? row.limit_max : "?"} post(s) allowed)` };
+
+      if (verdict.ok) {
+        this.db.exec("COMMIT");
+      } else {
+        this.db.exec("ROLLBACK");
       }
-      return { ok: true, remaining: row.limit_max - row.spent };
+
+      transactionOpen = false;
+      return verdict;
+
+    } catch (error) {
+      if (transactionOpen) {
+        try {
+          this.db.exec("ROLLBACK");
+        } catch (rollbackError) {
+          // Do not turn a failed rollback into an accepted
+          // admission or hide the original SQLite exception.
+          error.rollbackError = rollbackError;
+        }
+      }
+
+      throw error;
     }
-    // No pass (or an unlimited owner invite): per-sender rate limit.
-    const { n } = this.peerCount.get(room, sender, now - this.peerWindowMs);
-    if (n + lines > this.peerLimit) {
-      return { ok: false, status: 429,
-        error: `rate limit: ${this.peerLimit} posts per ${Math.round(this.peerWindowMs / 60000)} min` };
-    }
-    for (let i = 0; i < lines; i++) this.peerIns.run(room, sender, now);
-    return { ok: true, remaining: this.peerLimit - n - lines };
   }
 }

@@ -129,6 +129,51 @@ function readPassHeader(req, room, log) {
 }
 
 /** The kzchat sender id inside a line, if the line is a chat message. */
+
+/*
+ * Experimental strict V2-only authorization.
+ * Never trust issuer keys supplied by the bearer.
+ */
+function readV2Header(req) {
+  const raw = req.headers["x-kant-v2"];
+
+  if (
+    typeof raw !== "string" ||
+    raw.length === 0 ||
+    raw.length > 4096 ||
+    !/^[A-Za-z0-9_-]+$/.test(raw)
+  ) return false;
+
+  try {
+    const bytes = Buffer.from(raw, "base64url");
+
+    if (bytes.toString("base64url") !== raw) {
+      return false;
+    }
+
+    const token = JSON.parse(
+      bytes.toString("utf8")
+    );
+
+    if (
+      !token ||
+      typeof token !== "object" ||
+      Array.isArray(token)
+    ) return false;
+
+    return token;
+  } catch {
+    return false;
+  }
+}
+
+function hasLegacyCredential(req) {
+  return (
+    req.headers["x-kant-pass"] !== undefined ||
+    req.headers["x-kant-invite"] !== undefined
+  );
+}
+
 function senderOf(lines) {
   for (const l of lines) {
     const m = parseMsg(l);
@@ -408,6 +453,26 @@ function makePassStore(cfg) {
 
 export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLogger(cfg),
   passes = makePassStore(cfg)) {
+  if (
+    cfg.v2Only === true &&
+    (
+      !cfg.v2Authority ||
+      typeof cfg.v2Authority.validate !== "function" ||
+      typeof cfg.v2Authority.admit !== "function"
+    )
+  ) {
+    throw new Error("V2_AUTHORITY_REQUIRED");
+  }
+
+  if (cfg.v2Durable === true && (
+    cfg.v2Only !== true ||
+    !cfg.v2Authority ||
+    typeof cfg.v2Authority.admitDurable !== "function" ||
+    typeof cfg.v2Authority.readDurable !== "function"
+  )) {
+    throw new Error("DURABLE_V2_AUTHORITY_REQUIRED");
+  }
+
   const blocks = new Blocks(cfg);
   // The archive: every room line and every block pin, appended to one
   // ndjson file per room handle, so a reader can replay a room that the
@@ -464,13 +529,112 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
         // `x-kant-pass` (limited invite) or a kzinvite in
         // `x-kant-invite` (owner's unlimited invite).  Without either,
         // the per-sender rate limit applies.
-        const pass = readPassHeader(req, room, log);
-        if (pass === false) {
-          sendJson(res, cfg, 401, { ok: false, error: "bad pass" });
+        const v2Token = cfg.v2Only === true
+          ? readV2Header(req)
+          : null;
+
+        const pass = cfg.v2Only === true
+          ? null
+          : readPassHeader(req, room, log);
+
+        if (
+          pass === false ||
+          (
+            cfg.v2Only === true &&
+            (
+              v2Token === false ||
+              hasLegacyCredential(req)
+            )
+          ) ||
+          (
+            cfg.v2Only !== true &&
+            req.headers["x-kant-v2"] !== undefined
+          )
+        ) {
+          sendJson(res, cfg, 401, {
+            ok: false,
+            error: "invalid credential"
+          });
           return;
         }
         const sender = senderOf(lines) ?? `ip:${req.socket.remoteAddress ?? "?"}`;
-        const verdict = passes.admit({ pass, sender, room, lines: lines.length });
+
+        if (cfg.v2Durable === true) {
+          const publicationId =
+            req.headers["x-kant-publication-id"];
+
+          if (
+            typeof publicationId !== "string" ||
+            !/^[0-9a-f]{32}$/.test(publicationId)
+          ) {
+            sendJson(res, cfg, 400, {
+              ok: false,
+              error: "invalid publication id"
+            });
+            return;
+          }
+
+          let durable;
+
+          try {
+            durable = cfg.v2Authority.admitDurable(
+              v2Token, room, lines, publicationId
+            );
+          } catch (error) {
+            log.error(
+              "relay", "durable admission failed",
+              error.message
+            );
+            sendJson(res, cfg, 503, {
+              ok: false,
+              error: "durable admission unavailable"
+            });
+            return;
+          }
+
+          if (!durable?.ok) {
+            sendJson(res, cfg, durable?.status ?? 503, {
+              ok: false,
+              error: durable?.error ??
+                "durable admission rejected"
+            });
+            return;
+          }
+
+          sendJson(res, cfg, 200, {
+            ok: true,
+            cursor: durable.sequence,
+            accepted: lines.length,
+            duplicate: durable.duplicate,
+            passRemaining: durable.remaining ?? null
+          });
+          return;
+        }
+
+        let verdict;
+
+        try {
+          verdict = cfg.v2Only === true
+            ? cfg.v2Authority.admit(
+                v2Token, room, lines.length
+              )
+            : passes.admit({
+                pass, sender, room, lines: lines.length
+              });
+        } catch (error) {
+          // Never publish when the SQLite admission ledger fails.
+          log.error(
+            "relay",
+            "HTTP admission failed",
+            error.message
+          );
+
+          sendJson(res, cfg, 503, {
+            ok: false,
+            error: "admission temporarily unavailable"
+          });
+          return;
+        }
         if (!verdict.ok) {
           log.warn("relay", "a post was refused", `${roomRef(room)}: ${verdict.error}`);
           sendJson(res, cfg, verdict.status, { ok: false, error: verdict.error });
@@ -484,6 +648,54 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
         return;
       }
       if (req.method === "GET") {
+        if (cfg.v2Durable === true) {
+          const raw = url.searchParams.get("cursor") ?? "0";
+          const cursor = Number(raw);
+
+          if (
+            !/^(0|[1-9][0-9]*)$/.test(raw) ||
+            !Number.isSafeInteger(cursor)
+          ) {
+            sendJson(res, cfg, 400, {
+              ok: false, error: "invalid cursor"
+            });
+            return;
+          }
+
+          let publications;
+
+          try {
+            publications = cfg.v2Authority.readDurable(
+              room, cursor, 100
+            );
+          } catch (error) {
+            log.error(
+              "relay", "durable read failed",
+              error.message
+            );
+            sendJson(res, cfg, 503, {
+              ok: false,
+              error: "durable read unavailable"
+            });
+            return;
+          }
+
+          sendJson(res, cfg, 200, {
+            ok: true,
+            cursor: publications.length
+              ? publications[publications.length - 1].sequence
+              : cursor,
+            lines: publications.flatMap(x => x.lines),
+            publications: publications.map(x => ({
+              publicationId: x.publicationId,
+              sequence: x.sequence,
+              epoch: x.epoch
+            })),
+            truncated: false
+          });
+          return;
+        }
+
         const cursor = Number(url.searchParams.get("cursor") ?? 0) || 0;
         const wait = Math.min(Number(url.searchParams.get("wait") ?? 0) || 0, 60);
         log.info("relay", `fetch room`, `${roomRef(room)} cursor=${cursor} wait=${wait}`);
@@ -560,7 +772,8 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
     sendJson(res, cfg, 404, { ok: false, error: "not found" });
   });
 
-  server.on("upgrade", (req, socket) => handleUpgrade(cfg, rooms, req, socket, log));
+  server.on("upgrade", (req, socket, head) =>
+    handleUpgrade(cfg, rooms, req, socket, log, passes, head));
   server.on("clientError", (e, socket) => {
     log.error("relay", "a connection failed before any request", e.message);
     socket.destroy();
@@ -601,32 +814,529 @@ function wsFrame(text) {
 }
 
 /** Pull whole frames out of a buffer; returns how many bytes were used. */
-function wsFrames(buf) {
-  const out = [];
-  let off = 0;
-  while (off + 2 <= buf.length) {
-    const b0 = buf[off], b1 = buf[off + 1];
-    const opcode = b0 & 0x0f;
-    const masked = (b1 & 0x80) !== 0;
-    let len = b1 & 0x7f;
-    let p = off + 2;
-    if (len === 126) { if (p + 2 > buf.length) break; len = buf.readUInt16BE(p); p += 2; }
-    else if (len === 127) {
-      if (p + 8 > buf.length) break;
-      len = Number(buf.readBigUInt64BE(p)); p += 8;
-    }
-    let mask = null;
-    if (masked) { if (p + 4 > buf.length) break; mask = buf.subarray(p, p + 4); p += 4; }
-    if (p + len > buf.length) break;
-    const data = Buffer.from(buf.subarray(p, p + len));
-    if (mask) for (let i = 0; i < data.length; i++) data[i] ^= mask[i % 4];
-    off = p + len;
-    out.push({ opcode, data });
-  }
-  return { frames: out, used: off };
+const INT05_WS_MAX_DATA = 1048576;
+const INT05_WS_MAX_PENDING = 1048590;
+const INT05_WS_INCOMPLETE_TIMEOUT_MS = 5000;
+
+const int05Utf8 = new TextDecoder("utf-8", {
+  fatal: true,
+  ignoreBOM: true
+});
+
+function int05CloseFrame(code) {
+  const frame = Buffer.alloc(4);
+  frame[0] = 0x88;
+  frame[1] = 2;
+  frame.writeUInt16BE(code, 2);
+  return frame;
 }
 
-function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, error() {} }) {
+function int05ValidCloseCode(code) {
+  if (code >= 3000 && code <= 4999) return true;
+
+  return [
+    1000, 1001, 1002, 1003,
+    1007, 1008, 1009, 1010,
+    1011, 1012, 1013, 1014
+  ].includes(code);
+}
+
+/*
+ * INT05-12D: fail-closed WebSocket frame parser.
+ *
+ * All complete frames in the supplied buffer are validated
+ * before their contents are returned to the application.
+ *
+ * Fragmented messages are intentionally unsupported.
+ */
+function wsFrames(buf) {
+  const frames = [];
+  let off = 0;
+
+  const reject = code => ({
+    frames: [],
+    used: 0,
+    invalid: true,
+    code
+  });
+
+  while (off + 2 <= buf.length) {
+    const b0 = buf[off];
+    const b1 = buf[off + 1];
+
+    const fin = (b0 & 0x80) !== 0;
+    const rsv = b0 & 0x70;
+    const opcode = b0 & 0x0f;
+    const masked = (b1 & 0x80) !== 0;
+
+    if (!masked || rsv !== 0) {
+      return reject(1002);
+    }
+
+    // Fragmented frames and continuation opcodes are unsupported.
+    if (!fin || opcode === 0x0) {
+      return reject(1002);
+    }
+
+    // Only text, close, ping and pong are supported.
+    if (![0x1, 0x8, 0x9, 0xa].includes(opcode)) {
+      return reject(1002);
+    }
+
+    const control = opcode >= 0x8;
+    let len = b1 & 0x7f;
+    let p = off + 2;
+
+    // Control frames must use the short payload encoding.
+    if (control && len > 125) {
+      return reject(1002);
+    }
+
+    if (len === 126) {
+      if (p + 2 > buf.length) break;
+
+      len = buf.readUInt16BE(p);
+      p += 2;
+
+      if (len < 126) {
+        return reject(1002);
+      }
+    } else if (len === 127) {
+      if (p + 8 > buf.length) break;
+
+      const big = buf.readBigUInt64BE(p);
+      p += 8;
+
+      // The high bit is forbidden; oversized frames must
+      // be rejected before conversion to Number.
+      if (big & (1n << 63n)) {
+        return reject(1002);
+      }
+
+      if (big < 65536n) {
+        return reject(1002);
+      }
+
+      if (big > BigInt(INT05_WS_MAX_DATA)) {
+        return reject(1009);
+      }
+
+      len = Number(big);
+    }
+
+    if (control && len > 125) {
+      return reject(1002);
+    }
+
+    if (!control && len > INT05_WS_MAX_DATA) {
+      return reject(1009);
+    }
+
+    // Every client frame requires a four-byte masking key.
+    if (p + 4 > buf.length) break;
+
+    const mask = buf.subarray(p, p + 4);
+    p += 4;
+
+    if (p + len > buf.length) break;
+
+    const data = Buffer.from(buf.subarray(p, p + len));
+
+    for (let i = 0; i < data.length; i++) {
+      data[i] ^= mask[i % 4];
+    }
+
+    let text = null;
+
+    if (opcode === 0x1) {
+      try {
+        text = int05Utf8.decode(data);
+      } catch {
+        return reject(1007);
+      }
+    }
+
+    if (opcode === 0x8) {
+      if (len === 1) {
+        return reject(1002);
+      }
+
+      if (len >= 2) {
+        const code = data.readUInt16BE(0);
+
+        if (!int05ValidCloseCode(code)) {
+          return reject(1002);
+        }
+
+        try {
+          int05Utf8.decode(data.subarray(2));
+        } catch {
+          return reject(1007);
+        }
+      }
+    }
+
+    off = p + len;
+
+    frames.push({
+      opcode,
+      data,
+      text
+    });
+  }
+
+  return {
+    frames,
+    used: off,
+    invalid: false,
+    code: null
+  };
+}
+
+
+/* INT05-D2B-R1: isolated durable WebSocket transport. */
+function int05DurableWsUpgrade(cfg, req, socket, head, log) {
+  function reject(status, reason) {
+    socket.end(
+      `HTTP/1.1 ${status} ${reason}\r\n` +
+      "Connection: close\r\n" +
+      "Content-Length: 0\r\n\r\n"
+    );
+  }
+
+  let url;
+  let room;
+
+  try {
+    url = new URL(
+      req.url,
+      `http://${req.headers.host ?? "localhost"}`
+    );
+    const match = url.pathname.match(/^\/ws\/([^/]+)$/);
+    if (!match) {
+      reject(404, "Not Found");
+      return;
+    }
+    room = decodeURIComponent(match[1]);
+  } catch {
+    reject(400, "Bad Request");
+    return;
+  }
+
+  const raw = url.searchParams.get("cursor") ?? "0";
+  const cursor = Number(raw);
+
+  if (
+    !/^(0|[1-9][0-9]*)$/.test(raw) ||
+    !Number.isSafeInteger(cursor)
+  ) {
+    reject(400, "Bad Request");
+    return;
+  }
+
+  const key = req.headers["sec-websocket-key"];
+  const connection = req.headers.connection;
+
+  if (
+    typeof key !== "string" ||
+    !/^[A-Za-z0-9+/]{22}==$/.test(key) ||
+    Buffer.from(key, "base64").length !== 16 ||
+    req.headers["sec-websocket-version"] !== "13" ||
+    String(req.headers.upgrade).toLowerCase() !== "websocket" ||
+    typeof connection !== "string" ||
+    !connection.toLowerCase().split(",")
+      .some(x => x.trim() === "upgrade")
+  ) {
+    reject(400, "Bad Request");
+    return;
+  }
+
+  const authority = cfg.v2Authority;
+
+  if (
+    cfg.v2Only !== true ||
+    !authority ||
+    typeof authority.validate !== "function" ||
+    typeof authority.admitDurable !== "function" ||
+    typeof authority.readDurable !== "function"
+  ) {
+    reject(503, "Service Unavailable");
+    return;
+  }
+
+  const token = readV2Header(req);
+
+  if (token === false || hasLegacyCredential(req)) {
+    reject(401, "Unauthorized");
+    return;
+  }
+
+  let authorized;
+  let initial;
+
+  try {
+    authorized = authority.validate(token, room);
+    if (authorized) {
+      initial = authority.readDurable(room, cursor, 100);
+    }
+  } catch (error) {
+    log.error("socket", "durable upgrade failed", error.message);
+    reject(503, "Service Unavailable");
+    return;
+  }
+
+  if (!authorized) {
+    reject(401, "Unauthorized");
+    return;
+  }
+
+  if (!Array.isArray(initial)) {
+    reject(503, "Service Unavailable");
+    return;
+  }
+
+  socket.write(
+    "HTTP/1.1 101 Switching Protocols\r\n" +
+    "Upgrade: websocket\r\n" +
+    "Connection: Upgrade\r\n" +
+    `Sec-WebSocket-Accept: ${wsAccept(key)}\r\n\r\n`
+  );
+
+  let currentCursor = cursor;
+  let pending = Buffer.alloc(0);
+  let timer = null;
+  let poller = null;
+  let closed = false;
+
+  function cleanup() {
+    if (closed) return;
+    closed = true;
+    if (timer !== null) clearTimeout(timer);
+    if (poller !== null) clearInterval(poller);
+    pending = Buffer.alloc(0);
+  }
+
+  function closeWith(code) {
+    if (closed) return;
+    cleanup();
+    socket.end(int05CloseFrame(code));
+  }
+
+  function send(value) {
+    if (closed || socket.destroyed) return false;
+    const ok = socket.write(wsFrame(JSON.stringify(value)));
+    if (!ok) {
+      closeWith(1013);
+      return false;
+    }
+    return true;
+  }
+
+  function sendRows(rows) {
+    if (!Array.isArray(rows)) {
+      closeWith(1011);
+      return false;
+    }
+
+    if (rows.length === 0) return true;
+
+    let previous = currentCursor;
+    for (const row of rows) {
+      if (
+        !Number.isSafeInteger(row.sequence) ||
+        row.sequence <= previous ||
+        !Array.isArray(row.lines)
+      ) {
+        closeWith(1011);
+        return false;
+      }
+      previous = row.sequence;
+    }
+
+    const out = {
+      ok: true,
+      type: "publications",
+      cursor: previous,
+      lines: rows.flatMap(x => x.lines),
+      publications: rows.map(x => ({
+        publicationId: x.publicationId,
+        sequence: x.sequence,
+        epoch: x.epoch
+      })),
+      truncated: false
+    };
+
+    if (!send(out)) return false;
+    currentCursor = previous;
+    return true;
+  }
+
+  function refresh() {
+    if (closed) return;
+    try {
+      for (let i = 0; i < 4; i++) {
+        const rows = authority.readDurable(
+          room, currentCursor, 100
+        );
+        if (!sendRows(rows)) return;
+        if (rows.length < 100) return;
+      }
+    } catch (error) {
+      log.error("socket", "durable read failed", error.message);
+      closeWith(1011);
+    }
+  }
+
+  function updateTimer() {
+    if (pending.length === 0) {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      return;
+    }
+    if (timer !== null) return;
+    timer = setTimeout(() => {
+      timer = null;
+      if (!closed && pending.length) closeWith(1002);
+    }, INT05_WS_INCOMPLETE_TIMEOUT_MS);
+    timer.unref?.();
+  }
+
+  function handleChunk(chunk) {
+    if (closed) return;
+
+    if (
+      pending.length + chunk.length >
+      INT05_WS_MAX_PENDING
+    ) {
+      closeWith(1009);
+      return;
+    }
+
+    pending = Buffer.concat([pending, chunk]);
+    const parsed = wsFrames(pending);
+
+    if (parsed.invalid) {
+      closeWith(parsed.code ?? 1002);
+      return;
+    }
+
+    pending = pending.subarray(parsed.used);
+    updateTimer();
+
+    for (const frame of parsed.frames) {
+      if (closed) return;
+      const { opcode, data, text } = frame;
+
+      if (opcode === 0x8) {
+        cleanup();
+        socket.end(Buffer.concat([
+          Buffer.from([0x88, data.length]), data
+        ]));
+        return;
+      }
+
+      if (opcode === 0x9) {
+        if (!socket.write(Buffer.concat([
+          Buffer.from([0x8a, data.length]), data
+        ]))) {
+          closeWith(1013);
+        }
+        continue;
+      }
+
+      if (opcode === 0xa) continue;
+
+      if (opcode !== 0x1) {
+        closeWith(1002);
+        return;
+      }
+
+      let message;
+      try {
+        message = JSON.parse(text);
+      } catch {
+        closeWith(1008);
+        return;
+      }
+
+      if (
+        !message ||
+        typeof message !== "object" ||
+        Array.isArray(message) ||
+        typeof message.publicationId !== "string" ||
+        !/^[0-9a-f]{32}$/.test(message.publicationId) ||
+        !Array.isArray(message.lines) ||
+        message.lines.length < 1 ||
+        message.lines.length > 100 ||
+        !message.lines.every(line =>
+          typeof line === "string" &&
+          line.length > 0 &&
+          line.trim() === line &&
+          !/[\r\n]/.test(line) &&
+          line.length <= cfg.maxLine &&
+          Buffer.byteLength(line, "utf8") <= 4096
+        )
+      ) {
+        closeWith(1008);
+        return;
+      }
+
+      let result;
+      try {
+        result = authority.admitDurable(
+          token, room, message.lines,
+          message.publicationId
+        );
+      } catch (error) {
+        log.error("socket", "durable admission failed", error.message);
+        closeWith(1011);
+        return;
+      }
+
+      if (
+        !result?.ok ||
+        !Number.isSafeInteger(result.sequence)
+      ) {
+        closeWith(result?.ok ? 1011 : 1008);
+        return;
+      }
+
+      if (!send({
+        ok: true,
+        type: "ack",
+        publicationId: message.publicationId,
+        cursor: result.sequence,
+        accepted: message.lines.length,
+        duplicate: result.duplicate,
+        passRemaining: result.remaining ?? null
+      })) return;
+
+      refresh();
+    }
+  }
+
+  socket.on("data", handleChunk);
+  socket.on("close", cleanup);
+  socket.on("error", cleanup);
+
+  if (!sendRows(initial)) return;
+
+  poller = setInterval(refresh, 250);
+  poller.unref?.();
+
+  if (head?.length) {
+    queueMicrotask(() => {
+      if (!closed) handleChunk(head);
+    });
+  }
+}
+
+function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, error() {} }, passes, head) {
+  if (cfg.v2Durable === true) {
+    int05DurableWsUpgrade(cfg, req, socket, head, log);
+    return;
+  }
+
   const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
   const m = url.pathname.match(/^\/ws\/([^/]+)$/);
   const key = req.headers["sec-websocket-key"];
@@ -635,7 +1345,74 @@ function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, er
     socket.destroy();
     return;
   }
-  const room = decodeURIComponent(m[1]);
+  let room;
+  try {
+    room = decodeURIComponent(m[1]);
+  } catch {
+    // INT05-SEC-04: malformed room URI must not crash Node.
+    socket.end(
+      "HTTP/1.1 400 Bad Request\r\n" +
+      "Connection: close\r\n" +
+      "Content-Length: 0\r\n\r\n"
+    );
+    return;
+  }
+
+  // INT05: fail closed if admission enforcement is unavailable.
+  if (!passes || typeof passes.admit !== "function") {
+    socket.destroy();
+    return;
+  }
+
+  // Validate authorization before accepting the upgrade.
+  const v2Token = cfg.v2Only === true
+    ? readV2Header(req)
+    : null;
+
+  const pass = cfg.v2Only === true
+    ? null
+    : readPassHeader(req, room, log);
+
+  let authorized = (
+    pass !== false &&
+    (
+      cfg.v2Only === true
+        ? v2Token !== false &&
+          !hasLegacyCredential(req)
+        : req.headers["x-kant-v2"] === undefined
+    )
+  );
+
+  if (authorized && cfg.v2Only === true) {
+    try {
+      authorized = cfg.v2Authority.validate(
+        v2Token, room
+      );
+    } catch (error) {
+      log.error(
+        "socket",
+        "v2 validation failed",
+        error.message
+      );
+
+      socket.end(
+        "HTTP/1.1 503 Service Unavailable\r\n" +
+        "Connection: close\r\n" +
+        "Content-Length: 0\r\n\r\n"
+      );
+      return;
+    }
+  }
+
+  if (!authorized) {
+    socket.end(
+      "HTTP/1.1 401 Unauthorized\r\n" +
+      "Connection: close\r\n" +
+      "Content-Length: 0\r\n\r\n"
+    );
+    return;
+  }
+
   log.info("relay", "websocket upgrade", `${roomRef(room)} cursor=${url.searchParams.get("cursor") ?? 0}`);
 
   socket.write(
@@ -658,24 +1435,177 @@ function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, er
   state.push(rooms.fetch(room, state.cursor));
 
   let pending = Buffer.alloc(0);
-  socket.on("data", (chunk) => {
+  let incompleteTimer = null;
+  let closing = false;
+
+  function clearIncompleteTimer() {
+    if (incompleteTimer !== null) {
+      clearTimeout(incompleteTimer);
+      incompleteTimer = null;
+    }
+  }
+
+  function closeWithCode(code) {
+    if (closing) return;
+
+    closing = true;
+    clearIncompleteTimer();
+    pending = Buffer.alloc(0);
+
+    socket.end(int05CloseFrame(code));
+  }
+
+  function refreshIncompleteTimer() {
+    if (pending.length === 0) {
+      clearIncompleteTimer();
+      return;
+    }
+
+    if (incompleteTimer !== null) return;
+
+    incompleteTimer = setTimeout(() => {
+      incompleteTimer = null;
+
+      if (!closing && pending.length > 0) {
+        closeWithCode(1002);
+      }
+    }, INT05_WS_INCOMPLETE_TIMEOUT_MS);
+
+    incompleteTimer.unref?.();
+  }
+
+  socket.on("data", chunk => {
+    if (closing) return;
+
+    // Bound buffering before allocating the concatenated buffer.
+    if (
+      pending.length + chunk.length >
+      INT05_WS_MAX_PENDING
+    ) {
+      closeWithCode(1009);
+      return;
+    }
+
     pending = Buffer.concat([pending, chunk]);
-    const { frames, used } = wsFrames(pending);
-    pending = pending.subarray(used);
-    for (const { opcode, data } of frames) {
-      if (opcode === 0x8) { socket.end(); return; }
-      if (opcode === 0x9) socket.write(Buffer.concat([Buffer.from([0x8a, data.length]), data]));
+
+    const result = wsFrames(pending);
+
+    if (result.invalid) {
+      closeWithCode(result.code ?? 1002);
+      return;
+    }
+
+    pending = pending.subarray(result.used);
+
+    refreshIncompleteTimer();
+
+    // Parser validation is complete for all available frames.
+    // Only now may application-side effects occur.
+    for (const { opcode, data, text } of result.frames) {
+      if (closing) return;
+
+      if (opcode === 0x8) {
+        closing = true;
+        clearIncompleteTimer();
+        pending = Buffer.alloc(0);
+
+        socket.end(
+          Buffer.concat([
+            Buffer.from([0x88, data.length]),
+            data
+          ])
+        );
+        return;
+      }
+
+      if (opcode === 0x9) {
+        socket.write(
+          Buffer.concat([
+            Buffer.from([0x8a, data.length]),
+            data
+          ])
+        );
+        continue;
+      }
+
+      if (opcode === 0xa) {
+        continue;
+      }
+
       if (opcode === 0x1) {
-        const lines = data.toString("utf8").split("\n")
-          .map((l) => l.trim()).filter((l) => l.length > 0 && l.length <= cfg.maxLine);
-        if (lines.length) rooms.post(room, lines);
+        const lines = text.split("\n")
+          .map(l => l.trim())
+          .filter(l =>
+            l.length > 0 &&
+            l.length <= cfg.maxLine
+          );
+
+        if (!lines.length) continue;
+
+        const sender = senderOf(lines) ??
+          `ip:${req.socket.remoteAddress ?? "?"}`;
+
+        let verdict;
+
+        try {
+          verdict = cfg.v2Only === true
+            ? cfg.v2Authority.admit(
+                v2Token, room, lines.length
+              )
+            : passes.admit({
+                pass,
+                sender,
+                room,
+                lines: lines.length
+              });
+        } catch (error) {
+          log.error(
+            "socket",
+            "admission failed",
+            error.message
+          );
+
+          closeWithCode(1011);
+          return;
+        }
+
+        if (!verdict || !verdict.ok) {
+          log.warn(
+            "socket",
+            "message admission rejected",
+            roomRef(room)
+          );
+
+          closeWithCode(1008);
+          return;
+        }
+
+        rooms.post(room, lines);
       }
     }
   });
 
-  const drop = () => { r.sockets.delete(state); };
-  socket.on("close", () => { log.info("socket", `a stream closed`, roomRef(room)); drop(); });
-  socket.on("error", (e) => { log.error("socket", "a stream failed", e.message); drop(); });
+  const drop = () => {
+    clearIncompleteTimer();
+    pending = Buffer.alloc(0);
+    closing = true;
+    r.sockets.delete(state);
+  };
+
+  socket.on("close", () => {
+    log.info("socket", "a stream closed", roomRef(room));
+    drop();
+  });
+
+  socket.on("error", error => {
+    log.error(
+      "socket",
+      "a stream failed",
+      error.message
+    );
+    drop();
+  });
+
   log.info("socket", "a stream opened", roomRef(room));
 }
 
