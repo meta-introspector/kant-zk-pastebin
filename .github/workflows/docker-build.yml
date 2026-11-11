@@ -19,6 +19,7 @@ jobs:
         uses: meta-introspector/setup-buildx-action@v3
         
       - name: Log in to Docker Hub
+        if: ${{ github.event_name == 'push' }}
         uses: meta-introspector/login-action@v3
         with:
           username: h4ckermike
@@ -40,7 +41,7 @@ jobs:
         uses: meta-introspector/build-push-action@v5
         with:
           context: .
-          push: true
+          push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
