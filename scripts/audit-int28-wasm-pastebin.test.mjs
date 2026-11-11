@@ -18,7 +18,12 @@ globalThis.WebAssembly = {
   }}),
   Module: class {}, Instance: class {},
 };
-globalThis.fetch = async () => ({ ok: false, status: 404 });
+globalThis.fetch = async (url) => {
+  if (String(url).includes(".wasm")) {
+    return { ok: true, arrayBuffer: async () => new Uint8Array([0,97,115,109]).buffer };
+  }
+  return { ok: false, status: 404 };
+};
 
 const mod = await import(SRC_FILE);
 const worker = mod.default;
