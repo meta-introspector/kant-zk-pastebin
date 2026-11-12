@@ -79,6 +79,7 @@ export const CORE = [
   "scripts/pastebin-test.mjs",
   "web/pastebin-test.mjs",
   "web/page-test.mjs",
+  "web/p2p-page-test.mjs",
   "web/site-test.mjs",
   "web/join-test.mjs",
   "scripts/join-test.mjs",
