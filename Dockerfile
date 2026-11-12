@@ -1,10 +1,13 @@
-FROM rust:1.75-slim as builder
+FROM rust:1.85-slim as builder
 
 WORKDIR /build
+
+ENV CARGO_REGISTRIES_NORA_INDEX=sparse+https://solana.solfunmeme.com/nora/cargo/index/
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY build.rs ./
 
-RUN cargo build --release
+RUN cargo build --locked --release
 
 FROM debian:bookworm-slim
 
