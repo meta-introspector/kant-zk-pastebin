@@ -649,6 +649,46 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
       }
       if (req.method === "GET") {
         if (cfg.v2Durable === true) {
+
+          const readToken = readV2Header(req);
+
+          if (
+            readToken === false ||
+            readToken == null ||
+            hasLegacyCredential(req)
+          ) {
+            sendJson(res, cfg, 401, {
+              ok: false,
+              error: "invalid v2 authority"
+            });
+            return;
+          }
+
+          let readAuthorized;
+
+          try {
+            readAuthorized = cfg.v2Authority.validate(
+              readToken, room
+            );
+          } catch (error) {
+            log.error(
+              "relay", "durable read authorization failed",
+              error.message
+            );
+            sendJson(res, cfg, 503, {
+              ok: false,
+              error: "durable read unavailable"
+            });
+            return;
+          }
+
+          if (!readAuthorized) {
+            sendJson(res, cfg, 401, {
+              ok: false,
+              error: "invalid v2 authority"
+            });
+            return;
+          }
           const raw = url.searchParams.get("cursor") ?? "0";
           const cursor = Number(raw);
 
