@@ -19,6 +19,7 @@ import {
 } from "./kantzk.mjs";
 import { DiagLog, ref as diagRef, diagnose, effectiveRelay, clientOf, probeRelay } from "./kant-diag.mjs";
 import { parseManifest, printManifest, manifestWitness } from "./kant-file.mjs";
+import { assertSafeRelayUrl } from "./kantzk.mjs"; // INT24b-01: kant-net
 
 /** The witness a manifest is named by — re-exported so a caller quoting a
  *  file does not have to import both modules. */
@@ -624,7 +625,9 @@ export class Server {
  *    GET  {base}/room/{room}?cursor=N[&wait=S]-> { cursor, lines, truncated }
  */
 export class RelayClient {
-  constructor(base, { fetchImpl = globalThis.fetch?.bind(globalThis), log = NULL_LOG } = {}) {
+  constructor(base, { fetchImpl = globalThis.fetch?.bind(globalThis), log = NULL_LOG, allowUnsafe = false } = {}) {
+    const _r = assertSafeRelayUrl(base, { allowUnsafe });
+    if (!_r.ok) throw new Error(`RelayClient: unsafe relay (${_r.reason}): ${String(base).slice(0, 80)}`);
     this.base = base.replace(/\/+$/, "");
     this.fetchImpl = fetchImpl;
     this.log = log ?? NULL_LOG;
@@ -699,7 +702,11 @@ export class RelayClient {
 export class RelaySocket {
   constructor(base, room, { cursor = 0, onLines = () => {}, onOpen = () => {},
                             onClose = () => {}, WebSocketImpl = globalThis.WebSocket,
-                            log = NULL_LOG } = {}) {
+                            log = NULL_LOG, allowUnsafe = false } = {}) {
+    const _r = assertSafeRelayUrl(base, {
+      allowUnsafe, protocols: new Set(["http:", "https:", "ws:", "wss:"]),
+    });
+    if (!_r.ok) throw new Error(`RelaySocket: unsafe relay (${_r.reason}): ${String(base).slice(0, 80)}`);
     this.log = log ?? NULL_LOG;
     const wsBase = base.replace(/^http/, "ws").replace(/\/+$/, "");
     this.url = `${wsBase}/ws/${encodeURIComponent(room)}?cursor=${cursor}`;
@@ -910,7 +917,14 @@ export class PeerMesh {
  */
 export class KantNode {
   constructor({ peer, relay = "", room = "", secret = null, addrs = [],
-                fetchImpl, onChange = () => {}, log = null, reach = null } = {}) {
+                fetchImpl, onChange = () => {}, log = null, reach = null,
+                allowUnsafeRelay = false, allowPrivateRelay = true } = {}) {
+    if (relay) {
+      const _r = assertSafeRelayUrl(relay, { allowUnsafe: allowUnsafeRelay, allowPrivate: allowPrivateRelay });
+      if (!_r.ok) throw new Error(`KantNode: unsafe relay (${_r.reason}): ${String(relay).slice(0, 80)}`);
+    }
+    this.allowUnsafeRelay = allowUnsafeRelay;
+    this.allowPrivateRelay = allowPrivateRelay;
     this.self = peer ?? peerIdOf(freshSecret(16));
     this.log = log ?? new DiagLog({ cap: 2000 });
     this.relayBase = relay;
@@ -1008,6 +1022,13 @@ export class KantNode {
     this.secret = i.secret;
     this.room = inviteRoom(i);
     if (i.relay) {
+      const _r = assertSafeRelayUrl(i.relay, {
+        allowUnsafe: this.allowUnsafeRelay, allowPrivate: this.allowPrivateRelay,
+      });
+      if (!_r.ok) {
+        this.log.error("app", `the invitation names an unsafe relay (${_r.reason})`, String(i.relay).slice(0, 120));
+        return null;
+      }
       this.relayBase = i.relay;
       this.client = new RelayClient(i.relay, { fetchImpl: this.fetchImpl, log: this.log });
       this.log.info("app", "the invitation names a relay", i.relay);
@@ -1031,6 +1052,14 @@ export class KantNode {
     this.room = roomOf(this.secret);
     this.relayBase = relayBase;
     if (relayBase) {
+      const _r = assertSafeRelayUrl(relayBase, {
+        allowUnsafe: this.allowUnsafeRelay, allowPrivate: this.allowPrivateRelay,
+      });
+      if (!_r.ok) {
+        this.log.error("app", `createRoom: unsafe relay (${_r.reason})`, String(relayBase).slice(0, 120));
+        this.client = null;
+        return this.inviteText();
+      }
       this.client = new RelayClient(relayBase, { fetchImpl: this.fetchImpl, log: this.log });
     } else {
       this.client = null;

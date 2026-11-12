@@ -16,6 +16,9 @@
 //   wrangler deploy --name kant-zk-pastebin-wasm
 
 const VERSION = "1.0.0";
+const MAX_BODY = 1048576;         // INT28-01: 1 MiB cap on /api/paste
+const MAX_CONTENT = 1048576;      // INT28-01: 1 MiB cap on paste.content
+
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -87,6 +90,11 @@ export default {
 
     // WASM endpoints — delegate to the Rust WASM module
     if (path === "/api/paste" && request.method === "POST") {
+      // INT28-01: reject oversize bodies before reading them
+      const declaredLen = Number(request.headers.get("content-length") || 0);
+      if (declaredLen > MAX_BODY) {
+        return json({ ok: false, error: "body too large", max: MAX_BODY }, 413);
+      }
       try {
         const body = await request.json();
         const wasm = await loadWasm(env);
@@ -95,6 +103,10 @@ export default {
         // The Rust function signature is: paste_create(content, title) -> {id, url, cid, witness}
         const content = body.content || "";
         const title = body.title || "untitled";
+        // INT28-01: cap content length explicitly (content-length can be absent or lie)
+        if (typeof content !== "string" || content.length > MAX_CONTENT) {
+          return json({ ok: false, error: "content too large", max: MAX_CONTENT }, 413);
+        }
 
         // WASM function call (adjust name based on actual exported function)
         const result = wasm.exports.paste_create(
@@ -110,8 +122,13 @@ export default {
       }
     }
 
-    if (path === "/paste" + url.search && request.method === "GET") {
-      const id = url.searchParams.get("id") || path.split("/paste/")[1];
+    // INT28-03: /paste was unreachable — `path` has no query string,
+    // so `path === "/paste" + url.search` was always false. Accept both
+    // `/paste?id=X` and `/paste/X`.
+    const isPaste = (path === "/paste" || path.startsWith("/paste/"));
+    if (isPaste && request.method === "GET") {
+      const id = url.searchParams.get("id")
+              || (path.startsWith("/paste/") ? path.slice("/paste/".length) : null);
       if (!id) return json({ ok: false, error: "id required" }, 400);
 
       try {
@@ -142,8 +159,11 @@ export default {
       }
     }
 
-    if (path === "/raw" + url.search && request.method === "GET") {
-      const id = url.searchParams.get("id") || path.split("/raw/")[1];
+    // INT28-03: same fix as /paste above.
+    const isRaw = (path === "/raw" || path.startsWith("/raw/"));
+    if (isRaw && request.method === "GET") {
+      const id = url.searchParams.get("id")
+              || (path.startsWith("/raw/") ? path.slice("/raw/".length) : null);
       if (!id) return json({ ok: false, error: "id required" }, 400);
 
       try {
@@ -198,12 +218,20 @@ function renderPasteHtml(paste) {
   <div class="content">${escapeHtml(paste.content || "")}</div>
   <div class="actions">
     <button onclick="navigator.clipboard.writeText(window.location.href)">Copy URL</button>
-    <button onclick="window.open('/raw?id=' + '${escapeHtml(paste.id || "")}','_blank')">Download Raw</button>
+    <button onclick="window.open('/raw?id=' + ${JSON.stringify(paste.id || "")},'_blank')">Download Raw</button>
   </div>
 </body>
 </html>`;
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  // INT28-02: escape apostrophe too — needed when value lands in a JS string
+  // inside an HTML attribute (onclick='...'). &apos; is not universally
+  // supported in older browsers; &#39; is.
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
