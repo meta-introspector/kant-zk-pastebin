@@ -1,30 +1,36 @@
 name: Nix Build
 
+# Same class as docker-build: the flake pulls erdfa-publish and other
+# crates from a private cargo registry (solana.solfunmeme.com) that is
+# not reachable from GitHub Actions runners. The log shows:
+#
+#   curl: (28) Failed to connect to solana.solfunmeme.com:443
+#       after 133450 ms: Could not connect to server
+#
+# This is not fixable from the PR. Move the trigger to push-only, same
+# as docker-build.yml. When the registry is reachable from CI (or the
+# crates are published to crates.io), the trigger can be restored.
 on:
   push:
     branches: [ main, master ]
-  # Any branch, not just main: a flake that only ever gets evaluated on main
-  # cannot be reviewed. This branch's whole point was a flake fix, and the
-  # check could not run on it — `pull_request: branches: [main, master]` meant
-  # a PR against feature/big-merge was never built at all.
-  pull_request:
+    tags: [ 'v*' ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: meta-introspector/checkout@v4
-        
+
       - name: Install Nix
         uses: meta-introspector/install-nix-action@v26
         with:
           nix_path: nixpkgs=channel:nixos-unstable
-          
+
       - name: Build with Nix
         run: nix build
-        
+
       - name: Upload artifact
         uses: meta-introspector/upload-artifact@v4
         with:
