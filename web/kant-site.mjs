@@ -172,6 +172,20 @@ export const readCardLine = (s) => toCard(envelopeDecode(s));
 
 export const CARD_MARKER = "<!--kzcard:";
 
+// INT44-01: reject URL schemes that execute script when rendered in an
+// <a href>. escapeHtml handles markup, not scheme. javascript:, data:,
+// vbscript:, file: all execute or leak in some browser. The card's
+// url comes from a peer envelope; without this it becomes a script
+// payload the moment the SVG is rendered inline via innerHTML.
+const SAFE_SCHEMES = ["http:", "https:"];
+export function assertSafeUrl(u) {
+  try {
+    const parsed = new URL(String(u));
+    if (!SAFE_SCHEMES.includes(parsed.protocol)) return false;
+    return true;
+  } catch { return false; }
+}
+
 /** The side, in modules, of the picture placed in the middle of the code. */
 export const logoSide = (n) => Math.floor(n / 5);
 
@@ -203,7 +217,8 @@ export function cardSvg(k, qr, { scale = 8, border = 4, dark = "#000", light = "
     `aria-label="${escapeHtml(k.alt)}">\n` +
     `<title>${escapeHtml(k.caption)}</title>\n` +
     `<rect width="100%" height="100%" fill="${light}"/>\n` +
-    `<a href="${escapeHtml(k.url)}"><g fill="${dark}">${rects.join("")}</g></a>\n` +
+    (!assertSafeUrl(k.url) ? `<!-- INT44-01: unsafe url ${escapeHtml(k.url)} -->\n` :
+        `<a href="${escapeHtml(k.url)}"><g fill="${dark}">${rects.join("")}</g></a>\n`) +
     (k.picture
       ? `<image href="${escapeHtml(k.picture)}" x="${logoAt}" y="${logoAt}" ` +
         `width="${logo}" height="${logo}"/>\n`
