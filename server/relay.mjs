@@ -66,6 +66,11 @@ export const CONFIG = {
   peerLimit: Number(args.get("peer-limit") ?? 10),
   peerWindowMs: Number(args.get("peer-window") ?? 10 * 60 * 1000),
   maxBlock: Number(args.get("max-block") ?? 1048576),
+  wsMaxPending: Number(args.get("ws-max-pending") ?? 262144 * 2 + 1024),
+  maxRooms: Number(args.get("max-rooms") ?? 1000000),
+  maxSocketsPerRoom: Number(args.get("max-sockets-per-room") ?? 64),
+  maxPeerPostsPerRoom: Number(args.get("max-peer-posts-per-room") ?? 50000),
+  maxWaitersPerRoom: Number(args.get("max-waiters-per-room") ?? 1024),
   gasStoreBudget: Number(args.get("gas-store") ?? 64 * 1024 * 1024),
   gasServeBudget: Number(args.get("gas-serve") ?? 256 * 1024 * 1024),
   gasWindowMs: Number(args.get("gas-window") ?? 60 * 60 * 1000),
@@ -182,10 +187,19 @@ export class Blocks {
   room(name) {
     let r = this.map.get(name);
     if (!r) {
-      r = { blocks: new Map(), gas: { stored: 0, served: 0, window: Date.now() } };
+      r = { blocks: new Map(), gas: { stored: 0, served: 0, window: Date.now() }, touched: Date.now() };
       this.map.set(name, r);
     }
+    r.touched = Date.now();
     return r;
+  }
+
+  /** Evict rooms whose blocks were not touched within `maxAge` ms. */
+  sweep(maxAge) {
+    const cutoff = Date.now() - maxAge;
+    for (const [name, r] of this.map) {
+      if (r.touched < cutoff) this.map.delete(name);
+    }
   }
 
   /** The ledger, rolled over if the window has passed. */
@@ -395,7 +409,11 @@ function serveStatic(cfg, res, urlPath) {
 /** The pass store: at the configured path when that is usable, else a
  *  writable os.tmpdir() fallback (CI, sandboxes, unprivileged runs). */
 function makePassStore(cfg) {
-  const opts = { peerLimit: cfg.peerLimit, peerWindowMs: cfg.peerWindowMs };
+  const opts = {
+    peerLimit: cfg.peerLimit,
+    peerWindowMs: cfg.peerWindowMs,
+    maxPeerPostsPerRoom: cfg.maxPeerPostsPerRoom,
+  };
   try {
     return new PassStore(cfg.passDb ?? "/var/lib/kant-zk/passes.sqlite", opts);
   } catch (err) {
@@ -418,7 +436,7 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
     try {
       fs.mkdirSync(cfg.archiveDir, { recursive: true });
       fs.appendFileSync(
-        path.join(cfg.archiveDir, `${roomRef(room)}.ndjson`),
+        path.join(cfg.archiveDir, `${crypto.createHash("sha256").update(String(room)).digest("hex")}.ndjson`),
         JSON.stringify({ t: new Date().toISOString(), kind, ...payload }) + "\n");
     } catch (e) { log.warn("archive", "an entry was not written", e.message); }
   };
@@ -446,6 +464,11 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
     if (m) {
       const room = decodeURIComponent(m[1]);
       log.info("relay", `route room ${roomRef(room)}`, `${req.method} ${shown}`);
+      if (!rooms.map.has(room) && rooms.map.size >= cfg.maxRooms) {
+        log.warn("relay", "room capacity reached", roomRef(room));
+        sendJson(res, cfg, 503, { ok: false, error: "room capacity reached" });
+        return;
+      }
       if (req.method === "POST") {
         let body;
         try { body = await readBody(req, cfg.maxBody); }
@@ -486,6 +509,14 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
       if (req.method === "GET") {
         const cursor = Number(url.searchParams.get("cursor") ?? 0) || 0;
         const wait = Math.min(Number(url.searchParams.get("wait") ?? 0) || 0, 60);
+        if (wait > 0) {
+          const rs = rooms.map.get(room);
+          if (rs && rs.waiters.size >= cfg.maxWaitersPerRoom) {
+            log.warn("relay", "wait capacity reached", roomRef(room));
+            sendJson(res, cfg, 503, { ok: false, error: "wait capacity reached" });
+            return;
+          }
+        }
         log.info("relay", `fetch room`, `${roomRef(room)} cursor=${cursor} wait=${wait}`);
         let out = rooms.fetch(room, cursor);
         if (wait > 0 && out.lines.length === 0) {
@@ -518,6 +549,11 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
         catch (e) {
           log.warn("block", "a body was refused", `${roomRef(room)}: ${e.message}`);
           sendJson(res, cfg, 413, { ok: false, error: "block too large" });
+          return;
+        }
+        if (!blocks.map.has(room) && blocks.map.size >= cfg.maxRooms) {
+          log.warn("block", "room capacity reached", roomRef(room));
+          sendJson(res, cfg, 503, { ok: false, error: "block room capacity reached" });
           return;
         }
         const refused = blocks.put(room, cid, body);
@@ -560,14 +596,18 @@ export function createServer(cfg = CONFIG, rooms = new Rooms(cfg), log = makeLog
     sendJson(res, cfg, 404, { ok: false, error: "not found" });
   });
 
-  server.on("upgrade", (req, socket) => handleUpgrade(cfg, rooms, req, socket, log));
+  server.on("upgrade", (req, socket) => handleUpgrade(cfg, rooms, req, socket, log, passes, archive));
   server.on("clientError", (e, socket) => {
     log.error("relay", "a connection failed before any request", e.message);
     socket.destroy();
   });
-  const sweeper = setInterval(() => rooms.sweep(), 60_000);
+  const sweeper = setInterval(() => {
+    rooms.sweep();
+    blocks.sweep(cfg.roomTtlMs);
+  }, 60_000);
   sweeper.unref?.();
   server.rooms = rooms;
+  server.blocks = blocks;
   server.log = log;
   return server;
 }
@@ -626,7 +666,7 @@ function wsFrames(buf) {
   return { frames: out, used: off };
 }
 
-function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, error() {} }) {
+function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, error() {} }, passes, archive) {
   const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
   const m = url.pathname.match(/^\/ws\/([^/]+)$/);
   const key = req.headers["sec-websocket-key"];
@@ -636,6 +676,45 @@ function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, er
     return;
   }
   const room = decodeURIComponent(m[1]);
+
+  // INT05: fail closed if admission enforcement is unavailable.
+  if (!passes || typeof passes.admit !== "function") {
+    socket.destroy();
+    return;
+  }
+
+  // Validate authorization before accepting the upgrade.
+  const pass = readPassHeader(req, room, log);
+  if (pass === false) {
+    socket.end(
+      "HTTP/1.1 401 Unauthorized\r\n" +
+      "Connection: close\r\n" +
+      "Content-Length: 0\r\n\r\n"
+    );
+    return;
+  }
+
+  if (!rooms.map.has(room) && rooms.map.size >= cfg.maxRooms) {
+    log.warn("relay", "websocket upgrade rejected", "room capacity reached");
+    socket.end(
+      "HTTP/1.1 503 Service Unavailable\r\n" +
+      "Connection: close\r\n" +
+      "Content-Length: 0\r\n\r\n"
+    );
+    return;
+  }
+
+  const existingSockets = rooms.map.get(room);
+  if (existingSockets && existingSockets.sockets.size >= cfg.maxSocketsPerRoom) {
+    log.warn("relay", "websocket upgrade rejected", "socket capacity reached");
+    socket.end(
+      "HTTP/1.1 503 Service Unavailable\r\n" +
+      "Connection: close\r\n" +
+      "Content-Length: 0\r\n\r\n"
+    );
+    return;
+  }
+
   log.info("relay", "websocket upgrade", `${roomRef(room)} cursor=${url.searchParams.get("cursor") ?? 0}`);
 
   socket.write(
@@ -659,6 +738,11 @@ function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, er
 
   let pending = Buffer.alloc(0);
   socket.on("data", (chunk) => {
+    if (pending.length + chunk.length > cfg.wsMaxPending) {
+      log.warn("socket", "pending buffer cap exceeded", roomRef(room));
+      try { socket.end(Buffer.from([0x88, 0x02, 0x03, 0xf1])); } catch {}
+      return;
+    }
     pending = Buffer.concat([pending, chunk]);
     const { frames, used } = wsFrames(pending);
     pending = pending.subarray(used);
@@ -668,7 +752,35 @@ function handleUpgrade(cfg, rooms, req, socket, log = { info() {}, warn() {}, er
       if (opcode === 0x1) {
         const lines = data.toString("utf8").split("\n")
           .map((l) => l.trim()).filter((l) => l.length > 0 && l.length <= cfg.maxLine);
-        if (lines.length) rooms.post(room, lines);
+        if (lines.length) {
+          // HTTP and WebSocket share the same SQLite admission ledger.
+          const sender = senderOf(lines) ??
+            `ip:${req.socket.remoteAddress ?? "?"}`;
+
+          let verdict;
+          try {
+            verdict = passes.admit({
+              pass, sender, room, lines: lines.length
+            });
+          } catch (error) {
+            log.error("socket", "admission failed", error.message);
+            socket.end(Buffer.from([0x88, 0x02, 0x03, 0xf3]));
+            return;
+          }
+
+          if (!verdict || !verdict.ok) {
+            log.warn("socket", "message admission rejected",
+              roomRef(room));
+            // RFC 6455 close code 1008: policy violation.
+            socket.end(Buffer.from([0x88, 0x02, 0x03, 0xf0]));
+            return;
+          }
+
+          const wsCursor = rooms.post(room, lines);
+          if (typeof archive === "function") {
+            for (const l of lines) archive(room, "line", { cursor: wsCursor, line: l });
+          }
+        }
       }
     }
   });
