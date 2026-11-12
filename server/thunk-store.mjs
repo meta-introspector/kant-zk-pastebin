@@ -12,6 +12,17 @@ import { Thunk } from "./thunk.mjs";
 /**
  * @param {string} dir  directory that holds `thunks/<id>.json`
  */
+// INT26-03: safe id - refuse path traversal and metacharacters.
+const ID_SAFE = /^[A-Za-z0-9_.@:-]+$/;
+function assertSafeId(id) {
+  if (typeof id !== "string" || id.length === 0 || id.length > 256) {
+    throw new Error(`unsafe thunk id: length or type`);
+  }
+  if (!ID_SAFE.test(id) || id.includes("..") || /^\.+$/.test(id)) {
+    throw new Error(`unsafe thunk id: ${String(id).slice(0, 80)}`);
+  }
+}
+
 export class ThunkStore {
   #dir;
   #cache = new Map(); // id -> Thunk
@@ -82,7 +93,7 @@ export class ThunkStore {
     return true;
   }
 
-  #path(id) { return join(this.#dir, `${id}.json`); }
+  #path(id) { assertSafeId(id); return join(this.#dir, `${id}.json`); }
   #read(id) {
     try { return JSON.parse(readFileSync(this.#path(id), "utf8")); } catch { return null; }
   }
