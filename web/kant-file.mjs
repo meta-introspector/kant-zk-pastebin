@@ -136,6 +136,15 @@ export async function encryptFile(secret, name, mime, data) {
 /** Fetch and decrypt every chunk back into the original bytes; any chunk
  *  whose digest does not match its cid is refused. */
 export async function decryptFile(secret, manifest, fetchChunk) {
+  // INT41-01: bound the allocation to what the cids can actually contain.
+  // A peer can send a kzfile manifest with any `size`; without this check
+  // `new Uint8Array(size)` allocates what the manifest asks for, so
+  // size = 2**31-1 is a per-tab DoS from a single line.
+  if (typeof manifest.size !== "number" ||
+      manifest.size < 0 ||
+      manifest.size > manifest.cids.length * CHUNK_SIZE) {
+    throw new Error(`invalid manifest size ${manifest.size} for ${manifest.cids.length} chunk(s)`);
+  }
   const out = new Uint8Array(manifest.size);
   for (let i = 0; i < manifest.cids.length; i += 1) {
     const cipher = new Uint8Array(await fetchChunk(manifest.cids[i]));
