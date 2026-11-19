@@ -572,8 +572,23 @@ async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
     let bind = env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8090".to_string());
-    let uucp_dir =
-        env::var("UUCP_SPOOL").unwrap_or_else(|_| "/mnt/data1/spool/uucp/pastebin".to_string());
+    // All spool consumers must use one explicit deployment path.
+    // Do not silently select incompatible per-module defaults.
+    let uucp_dir = env::var("UUCP_SPOOL").map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "UUCP_SPOOL must be explicitly configured",
+        )
+    })?;
+
+    if uucp_dir.is_empty()
+        || !std::path::Path::new(&uucp_dir).is_absolute()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "UUCP_SPOOL must be a nonempty absolute path",
+        ));
+    }
 
     let git_commit = option_env!("GIT_COMMIT").unwrap_or("unknown");
     let build_time = option_env!("BUILD_TIME").unwrap_or("unknown");
