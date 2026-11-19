@@ -813,44 +813,57 @@ async fn create_paste_inner(paste: Paste) -> Result<HttpResponse> {
 /// POST /upload - Upload file (multipart)
 /// Save-first: write file to disk immediately, then return.
 /// No NLP, no HTML extraction, no blocking calls in this handler.
-fn find_file_in_dir(dir: &str, id: &str, requested_ext: &str) -> Option<std::path::PathBuf> {
-    let entries: Vec<std::path::PathBuf> = fs::read_dir(dir)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
+fn find_file_in_dir(
+    dir: &str,
+    id: &str,
+    requested_ext: &str,
+) -> Option<std::path::PathBuf> {
+    if !is_safe_paste_id(id)
+        || requested_ext.len() > 16
+        || !requested_ext.chars().all(|c| c.is_ascii_alphanumeric())
+    {
+        return None;
+    }
 
-    if requested_ext.is_empty() {
-        if let Some(gif) = entries.iter().find(|p| {
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
-            name.ends_with(".gif") && stem.ends_with(&format!("_{}", id))
-                && !name.ends_with(".cid") && !name.ends_with(".meta")
-        }).cloned() {
-            return Some(gif);
+    let mut selected = None;
+
+    for entry in fs::read_dir(dir).ok()? {
+        let entry = entry.ok()?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_str()?;
+
+        if name.ends_with(".meta") || name.ends_with(".cid") {
+            continue;
         }
+
+        let matches = if requested_ext.is_empty() {
+            name == id
+                || name
+                    .rsplit_once('.')
+                    .map(|(stem, _)| stem == id)
+                    .unwrap_or(false)
+        } else {
+            name == format!("{}.{}", id, requested_ext)
+        };
+
+        if !matches {
+            continue;
+        }
+
+        let metadata = fs::symlink_metadata(&path).ok()?;
+        if !metadata.file_type().is_file() {
+            return None;
+        }
+
+        if selected.is_some() {
+            return None;
+        }
+
+        selected = Some(path);
     }
 
-    let mut matches: Vec<_> = entries
-        .iter()
-        .filter(|p| {
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
-            stem == id && !name.ends_with(".cid") && !name.ends_with(".meta")
-                && name.ends_with(requested_ext)
-        })
-        .cloned()
-        .collect();
-    if !matches.is_empty() {
-        return matches.into_iter().next();
-    }
-
-    entries.into_iter().find(|p| {
-        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
-        stem.ends_with(&format!("_{}", id)) && !name.ends_with(".cid") && !name.ends_with(".meta")
-            && name.ends_with(requested_ext)
-    })
+    selected
 }
 
 fn find_render_info(uucp_dir: &str, id: &str) -> Option<(String, String)> {
@@ -872,6 +885,13 @@ fn find_render_info(uucp_dir: &str, id: &str) -> Option<(String, String)> {
 pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
     let id_with_ext = path.into_inner();
     let (id, requested_ext) = id_with_ext.rsplit_once('.').map(|(s, e)| (s, e)).unwrap_or((&id_with_ext, ""));
+    if !is_safe_paste_id(id)
+        || requested_ext.len() > 16
+        || !requested_ext.chars().all(|c| c.is_ascii_alphanumeric())
+    {
+        return Ok(HttpResponse::BadRequest().body("Invalid file id"));
+    }
+
     let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
 
     let file = find_file_in_dir(&uucp_dir, &id, &requested_ext)
@@ -894,7 +914,32 @@ pub async fn get_file(path: web::Path<String>) -> Result<HttpResponse> {
             } else {
                 mime_guess::from_ext(&ext).first_or_octet_stream()
             };
-            Ok(HttpResponse::Ok().content_type(mime.to_string()).body(data))
+            let mime_string = mime.to_string();
+            let extension = ext.to_ascii_lowercase();
+
+            let active_content = matches!(
+                extension.as_str(),
+                "svg" | "svgz" | "html" | "htm" | "shtml"
+                    | "xhtml" | "mht" | "mhtml" | "mth" | "xml"
+            ) || matches!(
+                mime_string.as_str(),
+                "text/html" | "image/svg+xml"
+                    | "application/xhtml+xml"
+                    | "application/xml" | "text/xml"
+            );
+
+            let mut response = HttpResponse::Ok();
+            response.insert_header(("X-Content-Type-Options", "nosniff"));
+            response.insert_header(("Content-Security-Policy", "sandbox"));
+
+            if active_content {
+                response.insert_header(("Content-Disposition", "attachment"));
+                response
+                    .content_type("application/octet-stream")
+                    .body(data)
+            } else {
+                response.content_type(mime_string).body(data)
+            }
         }
         None => Ok(HttpResponse::NotFound().body("File not found")),
     }
@@ -1038,10 +1083,22 @@ pub async fn get_paste(
             };
 
             let prev_link = prev_id
-                .map(|pid| format!(r#"<a href="{}/paste/{}">← Prev</a>"#, base_path, pid))
+                .map(|pid| {
+                    format!(
+                        r#"<a href="{}/paste/{}">← Prev</a>"#,
+                        html_escape(&base_path),
+                        html_escape(pid)
+                    )
+                })
                 .unwrap_or_else(|| "".to_string());
             let next_link = next_id
-                .map(|nid| format!(r#"<a href="{}/paste/{}">Next →</a>"#, base_path, nid))
+                .map(|nid| {
+                    format!(
+                        r#"<a href="{}/paste/{}">Next →</a>"#,
+                        html_escape(&base_path),
+                        html_escape(nid)
+                    )
+                })
                 .unwrap_or_else(|| "".to_string());
 
             let related_html = if !related.is_empty() {
@@ -1050,7 +1107,9 @@ pub async fn get_paste(
                     .map(|e| {
                         format!(
                             r#"<div style="padding:5px"><a href="{}/paste/{}">{}</a></div>"#,
-                            base_path, e.id, e.title
+                            html_escape(&base_path),
+                            html_escape(&e.id),
+                            html_escape(&e.title)
                         )
                     })
                     .collect();
@@ -1076,38 +1135,52 @@ pub async fn get_paste(
 
             struct Page {
                 bp: String,
+                bp_js: String,
                 id: String,
+                id_js: String,
                 title: String,
+                title_js: String,
                 prev_link: String,
                 next_link: String,
                 ipfs_cmd: String,
+                ipfs_cmd_js: String,
                 file_cmd: String,
+                file_cmd_js: String,
                 curl_cmd: String,
+                curl_cmd_js: String,
                 reply_cmd: String,
+                reply_cmd_js: String,
                 body: String,
                 pipelight_tile: String,
                 git2nora_tile: String,
                 related_html: String,
-                ipfs_cid: String,
+                ipfs_cid_js: String,
                 share_menu: String,
                 share_script: String,
             }
 
             let page = Page {
-                bp: base_path,
-                id: id.to_string(),
-                title: title.to_string(),
+                bp: html_escape(&base_path),
+                bp_js: js_string(&base_path),
+                id: html_escape(&id),
+                id_js: js_string(&id),
+                title: html_escape(title),
+                title_js: js_string(title),
                 prev_link: prev_link.clone(),
                 next_link: next_link.clone(),
-                ipfs_cmd: ipfs_cmd.to_string(),
-                file_cmd: file_cmd.to_string(),
-                curl_cmd: curl_cmd.to_string(),
-                reply_cmd: reply_cmd.to_string(),
-                body: body.to_string(),
+                ipfs_cmd: html_escape(&ipfs_cmd),
+                ipfs_cmd_js: js_attr(&ipfs_cmd),
+                file_cmd: html_escape(&file_cmd),
+                file_cmd_js: js_attr(&file_cmd),
+                curl_cmd: html_escape(&curl_cmd),
+                curl_cmd_js: js_attr(&curl_cmd),
+                reply_cmd: html_escape(&reply_cmd),
+                reply_cmd_js: js_attr(&reply_cmd),
+                body: html_escape(body),
                 pipelight_tile: pipelight_tile.to_string(),
                 git2nora_tile: git2nora_tile.to_string(),
                 related_html: related_html.to_string(),
-                ipfs_cid: ipfs_cid.unwrap_or_default().to_string(),
+                ipfs_cid_js: js_string(ipfs_cid.unwrap_or_default()),
                 share_menu: crate::share::render_share_menu(),
                 share_script: crate::share::render_share_script().to_string(),
             };
@@ -1150,10 +1223,10 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
 <a class="reply-btn" href="{bp}/paste/{id}/split">Split</a>
 
 <h3>Access Commands:</h3>
-<div class="cmd" onclick="navigator.clipboard.writeText('{ipfs_cmd}');this.style.borderColor='#0f0'">$ {ipfs_cmd}</div>
-<div class="cmd" onclick="navigator.clipboard.writeText('{file_cmd}');this.style.borderColor='#0f0'">$ {file_cmd}</div>
-<div class="cmd" onclick="navigator.clipboard.writeText('{curl_cmd}');this.style.borderColor='#0f0'">$ {curl_cmd}</div>
-<div class="cmd" onclick="navigator.clipboard.writeText('{reply_cmd}');this.style.borderColor='#0f0'">$ {reply_cmd}</div>
+<div class="cmd" onclick="navigator.clipboard.writeText({ipfs_cmd_js});this.style.borderColor='#0f0'">$ {ipfs_cmd}</div>
+<div class="cmd" onclick="navigator.clipboard.writeText({file_cmd_js});this.style.borderColor='#0f0'">$ {file_cmd}</div>
+<div class="cmd" onclick="navigator.clipboard.writeText({curl_cmd_js});this.style.borderColor='#0f0'">$ {curl_cmd}</div>
+<div class="cmd" onclick="navigator.clipboard.writeText({reply_cmd_js});this.style.borderColor='#0f0'">$ {reply_cmd}</div>
 
 <h3>Content:</h3>
 <pre onclick="navigator.clipboard.writeText(this.textContent);this.style.borderColor='#0ff';setTimeout(()=>this.style.borderColor='#0f0',1500)" style="cursor:pointer">{body}</pre>
@@ -1174,11 +1247,11 @@ pre{{background:#111;padding:20px;border:1px solid #0f0;overflow:auto;max-height
   <button onclick="document.getElementById('qrModal').style.display='none'">Close</button>
 </div>
 <script>
-const ipfsCid = '{ipfs_cid}';
+const ipfsCid = {ipfs_cid_js};
 const pasteUrl = window.location.href;
-const currentPasteId = '{id}';
-const title = '{title}';
-console.log('[pastebin][debug] page id=' + currentPasteId + ' title=' + title + ' base_path={bp}');
+const currentPasteId = {id_js};
+const title = {title_js};
+console.log('[pastebin][debug] page id=' + currentPasteId + ' title=' + title + ' base_path=' + {bp_js});
 console.log('[pastebin][debug] pre present=', !!document.querySelector('pre'));
 console.log('[pastebin][debug] pre count=', document.querySelectorAll('pre').length);
 if (!document.querySelector('pre')) console.error('[pastebin][lint] missing <pre> content container');
@@ -1217,22 +1290,29 @@ function shareRDFa() {{
 }}
 
 function showPreview() {{
-  const content = document.querySelector('pre').innerHTML;
-  const modal = document.createElement('div');
-  modal.className = 'preview-modal';
-  modal.style.display = 'block';
-  
-  // Decode HTML entities
-  const decoded = document.createElement('textarea');
-  decoded.innerHTML = content;
-  const actualContent = decoded.value;
+  const actualContent = document.querySelector('pre').textContent;
+  const safeText = actualContent
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
   
   // Add base styles for non-HTML content
   const styledContent = actualContent.includes('<html') || actualContent.includes('<!DOCTYPE') 
     ? actualContent 
-    : '<html><head><style>body{{font-family:sans-serif;padding:20px;line-height:1.6}}</style></head><body><pre style=\"white-space:pre-wrap;word-wrap:break-word\">' + actualContent + '</pre></body></html>';
+    : '<html><head><style>body{{font-family:sans-serif;padding:20px;line-height:1.6}}</style></head><body><pre style=\"white-space:pre-wrap;word-wrap:break-word\">' + safeText + '</pre></body></html>';
   
-  modal.innerHTML = '<button onclick=\"this.parentElement.remove()\" style=\"position:fixed;top:10px;right:10px;z-index:3000;padding:10px 20px;background:#f00;color:#fff;border:none;cursor:pointer\">✕ Close</button><iframe srcdoc=\"' + styledContent.replace(/"/g, '&quot;') + '\"></iframe>';
+  const modal = document.createElement('div');
+  modal.className = 'preview-modal';
+  modal.style.display = 'block';
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.textContent = '✕ Close';
+  closeButton.style.cssText = 'position:fixed;top:10px;right:10px;z-index:3000;padding:10px 20px;background:#f00;color:#fff;border:none;cursor:pointer';
+  closeButton.addEventListener('click', () => modal.remove());
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('sandbox', '');
+  iframe.srcdoc = styledContent;
+  modal.append(closeButton, iframe);
   document.body.appendChild(modal);
 }}
 
@@ -1243,7 +1323,7 @@ function toggleSidebar() {{
     return;
   }}
   s.classList.add('open');
-  fetch('{bp}/api/similar/' + currentPasteId)
+  fetch({bp_js} + '/api/similar/' + currentPasteId)
     .then(r => r.json())
     .then(d => {{
       const div = document.getElementById('similarResults');
@@ -1255,14 +1335,32 @@ function toggleSidebar() {{
       d.results.forEach((r, i) => {{
         const item = document.createElement('div');
         item.className = 'sidebar-item';
-        item.innerHTML = '<input type="checkbox" id="sim-' + i + '" value="' + r.id + '">' +
-          '<label for="sim-' + i + '"><a href="' + r.url + '" onclick="event.stopPropagation()" style="color:#0ff;font-size:13px">' +
-          r.title.slice(0, 40) + '</a><br><span class="ts">' + r.timestamp + '</span></label>';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = 'sim-' + i;
+        checkbox.value = r.id;
+        const label = document.createElement('label');
+        label.htmlFor = 'sim-' + i;
+        const link = document.createElement('a');
+        link.href = r.url;
+        link.style.color = '#0ff';
+        link.style.fontSize = '13px';
+        link.textContent = String(r.title).slice(0, 40);
+        link.addEventListener('click', (event) => event.stopPropagation());
+        const br = document.createElement('br');
+        const timestamp = document.createElement('span');
+        timestamp.className = 'ts';
+        timestamp.textContent = r.timestamp;
+        label.appendChild(link);
+        label.appendChild(br);
+        label.appendChild(timestamp);
+        item.appendChild(checkbox);
+        item.appendChild(label);
         div.appendChild(item);
       }});
     }})
     .catch(e => {{
-      document.getElementById('similarResults').innerHTML = '<div style="color:#f00">Error: ' + e + '</div>';
+      document.getElementById('similarResults').textContent = 'Error: ' + String(e);
     }});
 }}
 
@@ -1271,7 +1369,7 @@ function bundleSelected() {{
   if (checks.length === 0) {{ alert('Select at least one post.'); return; }}
   const pastes = [currentPasteId];
   checks.forEach(c => pastes.push(c.value));
-  fetch('{bp}/api/bundle', {{
+  fetch({bp_js} + '/api/bundle', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{pastes: pastes}})
@@ -1290,19 +1388,26 @@ function bundleSelected() {{
 </div>
 </body></html>"#,
                 title = page.title,
+                title_js = page.title_js,
                 bp = page.bp,
+                bp_js = page.bp_js,
                 id = page.id,
+                id_js = page.id_js,
                 prev_link = page.prev_link,
                 next_link = page.next_link,
                 ipfs_cmd = page.ipfs_cmd,
+                ipfs_cmd_js = page.ipfs_cmd_js,
                 file_cmd = page.file_cmd,
+                file_cmd_js = page.file_cmd_js,
                 curl_cmd = page.curl_cmd,
+                curl_cmd_js = page.curl_cmd_js,
                 reply_cmd = page.reply_cmd,
+                reply_cmd_js = page.reply_cmd_js,
                 body = page.body,
                 pipelight_tile = page.pipelight_tile,
                 git2nora_tile = page.git2nora_tile,
                 related_html = page.related_html,
-                ipfs_cid = page.ipfs_cid,
+                ipfs_cid_js = page.ipfs_cid_js,
                 share_menu = page.share_menu,
                 share_script = page.share_script,
                 build_time = option_env!("BUILD_TIME").unwrap_or("unknown"),
@@ -1337,12 +1442,18 @@ function bundleSelected() {{
             let cid = headers.get("CID").cloned().unwrap_or_default();
             let size = headers.get("Size").cloned().unwrap_or_default();
 
+            let title_html = html_escape(&title);
+            let id_attr = html_escape(&id);
+            let bp = html_escape(&base_path);
+            let id_js = js_attr(&id);
+            let bp_js = js_attr(&base_path);
+
             let is_svg = mime == "image/svg+xml" || id.ends_with(".svg");
             let content_html = if is_svg {
                 let render_info = find_render_info(&uucp_dir, &id);
                 match render_info {
                     Some((ref render_ext, ref render_name)) => {
-                        let render_url = format!("{}/render/{}", base_path, html_escape(render_name));
+                        let render_url = format!("{}/render/{}", bp, html_escape(render_name));
                         let render_label = match render_ext.as_str() {
                             "png" => "PNG",
                             "gif" => "GIF",
@@ -1352,26 +1463,26 @@ function bundleSelected() {{
 <div style="flex:1;text-align:center"><div style="font-size:12px;color:#0ff;margin-bottom:5px">SVG Source</div><object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff"><a href="{}/file/{}">{}</a></object></div>
 <div style="flex:1;text-align:center"><div style="font-size:12px;color:#0ff;margin-bottom:5px">{}</div><a href="{}"><img src="{}" style="max-width:100%;border:1px solid #0f0" alt=""></a></div>
 </div><p style="margin-top:10px"><a href="{}/svg2anim/{}" style="color:#0f0" onclick="return confirm('Regenerate render?')">🔄 Re-render</a></p>"##,
-                            base_path, id, base_path, id, html_escape(&title),
-                            render_label, render_url, render_url, base_path, id)
+                            bp, id_attr, bp, id_attr, title_html,
+                            render_label, render_url, render_url, bp, id_attr)
                     }
                     None => {
                         format!(r##"<object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff">
   <a href="{}/file/{}">{}</a>
 </object>
-<p style="margin-top:10px"><button onclick="fetch('{}/svg2anim/{}',{{method:'GET'}}).then(r=>r.json()).then(d=>{{window.location='{}/paste/'+d.id}})" style="background:#0f0;color:#000;border:none;padding:8px 16px;cursor:pointer;font-weight:bold">🎬 Render Animated GIF</button></p>"##,
-                            base_path, id, base_path, id, html_escape(&title), base_path, id, base_path)
+<p style="margin-top:10px"><button onclick="fetch({} + '/svg2anim/' + {},{{method:'GET'}}).then(r=>r.json()).then(d=>{{window.location={} + '/paste/' + d.id}})" style="background:#0f0;color:#000;border:none;padding:8px 16px;cursor:pointer;font-weight:bold">🎬 Render Animated GIF</button></p>"##,
+                            bp, id_attr, bp, id_attr, title_html, bp_js, id_js, bp_js)
                     }
                 }
             } else if mime.starts_with("image/") {
                 format!(
                     r#"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"#,
-                    base_path, id, title
+                    bp, id_attr, title_html
                 )
             } else {
                 format!(
                     r#"<p>📎 <a href="{}/file/{}">{}</a> ({}, {} bytes)</p>"#,
-                    base_path, id, title, mime, size
+                    bp, id_attr, title_html, html_escape(&mime), html_escape(&size)
                 )
             };
 
@@ -1388,8 +1499,9 @@ function bundleSelected() {{
   kant-pastebin v0.2.0 | git: <a href="https://github.com/erdfa/kant-pastebin/commit/{}">{}</a> | built {} | <a href="{}/api/version">API version</a>
 </div>
 </body></html>"#,
-                title, base_path, base_path, base_path, id, title, cid, ipfs_cid, content_html,
-                git_commit, git_commit, build_time, base_path
+                title_html, bp, bp, bp, id_attr, title_html,
+                html_escape(&cid), html_escape(&ipfs_cid), content_html,
+                git_commit, git_commit, build_time, bp
             );
 
             Ok(HttpResponse::Ok()
@@ -1446,13 +1558,19 @@ function bundleSelected() {{
                     } else {
                         mime.to_string()
                     };
+                    let title_html = html_escape(&title);
+                    let id_attr = html_escape(&id);
+                    let bp = html_escape(&base_path);
+                    let id_js = js_attr(&id);
+                    let bp_js = js_attr(&base_path);
+                    let display_mime_html = html_escape(&display_mime);
 
                     let is_svg = ext == "svg" || display_mime == "image/svg+xml";
                     let content_html = if is_svg {
                         let render_info = find_render_info(&uucp_dir, &id);
                         match render_info {
                             Some((ref render_ext, ref render_name)) => {
-                                let render_url = format!("{}/render/{}", base_path, html_escape(render_name));
+                                let render_url = format!("{}/render/{}", bp, html_escape(render_name));
                                 let render_label = match render_ext.as_str() {
                                     "png" => "PNG",
                                     "gif" => "GIF",
@@ -1462,28 +1580,28 @@ function bundleSelected() {{
 <div style="flex:1;text-align:center"><div style="font-size:12px;color:#0ff;margin-bottom:5px">SVG Source</div><object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff"><a href="{}/file/{}">{}</a></object></div>
 <div style="flex:1;text-align:center"><div style="font-size:12px;color:#0ff;margin-bottom:5px">{}</div><a href="{}"><img src="{}" style="max-width:100%;border:1px solid #0f0" alt=""></a></div>
 </div><p style="margin-top:10px"><a href="{}/svg2anim/{}" style="color:#0f0" onclick="return confirm('Regenerate render?')">🔄 Re-render</a></p>"##,
-                                base_path, id, base_path, id, html_escape(&title),
-                                render_label, render_url, render_url, base_path, id)
+                                bp, id_attr, bp, id_attr, title_html,
+                                render_label, render_url, render_url, bp, id_attr)
                             }
                             None => {
                                 format!(r##"<object data="{}/file/{}" type="image/svg+xml" style="max-width:100%;border:1px solid #0f0;background:#fff">
   <a href="{}/file/{}">{}</a>
 </object>
-<p style="margin-top:10px"><button onclick="fetch('{}/svg2anim/{}',{{method:'GET'}}).then(r=>r.json()).then(d=>{{window.location='{}/paste/'+d.id}})" style="background:#0f0;color:#000;border:none;padding:8px 16px;cursor:pointer;font-weight:bold">🎬 Render Animated GIF</button></p>"##,
-                                base_path, id, base_path, id, html_escape(&title), base_path, id, base_path)
+<p style="margin-top:10px"><button onclick="fetch({} + '/svg2anim/' + {},{{method:'GET'}}).then(r=>r.json()).then(d=>{{window.location={} + '/paste/' + d.id}})" style="background:#0f0;color:#000;border:none;padding:8px 16px;cursor:pointer;font-weight:bold">🎬 Render Animated GIF</button></p>"##,
+                                bp, id_attr, bp, id_attr, title_html, bp_js, id_js, bp_js)
                             }
                         }
                     } else if display_mime.starts_with("image/") {
                         format!(
                             r##"<img src="{}/file/{}" style="max-width:100%;border:1px solid #0f0" alt="{}">"##,
-                            base_path, id, title
+                            bp, id_attr, title_html
                         )
                     } else if ext == "mht" || ext == "mhtml" || ext == "mth" {
                         // Render MHT/MTH as inline HTML with download link
                         format!(
                             r##"<p>📎 <a href="{}/file/{}">{}</a> (MHT web archive, {} bytes)</p>
-<iframe src="{}/file/{}" style="width:100%;height:600px;border:1px solid #0f0;background:#fff"></iframe>"##,
-                            base_path, id, title, data.len(), base_path, id
+<iframe sandbox="" src="{}/file/{}" style="width:100%;height:600px;border:1px solid #0f0;background:#fff"></iframe>"##,
+                            bp, id_attr, title_html, data.len(), bp, id_attr
                         )
                     } else if display_mime.starts_with("text/") {
                         // Escape for safe display
@@ -1500,7 +1618,7 @@ function bundleSelected() {{
                     } else {
                         format!(
                             r##"<p>📎 <a href="{}/file/{}">{}</a> ({}, {} bytes)</p>"##,
-                            base_path, id, title, display_mime, data.len()
+                            bp, id_attr, title_html, display_mime_html, data.len()
                         )
                     };
 
@@ -1517,7 +1635,7 @@ function bundleSelected() {{
 </div>
 {}
 </body></html>"##,
-                        title, base_path, base_path, base_path, id, title, display_mime, data.len(), git_commit, git_commit, build_time, base_path, content_html
+                        title_html, bp, bp, bp, id_attr, title_html, display_mime_html, data.len(), git_commit, git_commit, build_time, bp, content_html
                     );
 
                     Ok(HttpResponse::Ok()
@@ -5519,6 +5637,26 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+/// Serialize `s` as a JavaScript string literal (including the surrounding
+/// quotes). JSON string syntax is valid JavaScript; the extra replacements keep
+/// the literal from closing an inline `<script>` element or being split by the
+/// JavaScript line-separator characters.
+fn js_string(s: &str) -> String {
+    serde_json::to_string(s)
+        .unwrap_or_else(|_| "\"\"".to_string())
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
+/// A JavaScript string literal encoded for use inside a double-quoted HTML
+/// attribute such as an `onclick` handler.
+fn js_attr(s: &str) -> String {
+    html_escape(&js_string(s))
 }
 
 fn format_size(size: u64) -> String {

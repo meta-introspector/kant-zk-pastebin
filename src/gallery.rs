@@ -51,28 +51,131 @@ fn find_in_dir(dir: &str, id: &str, requested_ext: &str) -> Option<PathBuf> {
     })
 }
 
-/// GET /render/{filename} - Serve a render file from svg2anim-results
-pub async fn render_file(path: web::Path<String>) -> Result<HttpResponse> {
-    let filename = path.into_inner();
-    let uucp_dir = env::var("UUCP_SPOOL").unwrap_or_else(|_| "/var/spool/uucp".to_string());
-    let results_dir = format!("{}/svg2anim-results", uucp_dir);
-    let file_path = format!("{}/{}", results_dir, filename);
+/// GET /render/{filename} — experimental Linux x86_64 hardening.
+fn read_render_safely(
+    dir: &std::path::Path,
+    name: &str,
+) -> std::io::Result<Vec<u8>> {
+    use std::ffi::{c_long, CString};
+    use std::io::{Error, ErrorKind, Read};
+    use std::os::fd::{AsRawFd, FromRawFd};
 
-    let data = fs::read(&file_path)
-        .map_err(|_| actix_web::error::ErrorNotFound("render not found"))?;
+    const MAX_BYTES: u64 = 64 * 1024 * 1024;
+    const O_CLOEXEC: u64 = 0o2000000;
+    const O_NOFOLLOW: u64 = 0o400000;
+    const RESOLVE_NO_SYMLINKS: u64 = 0x04;
+    const RESOLVE_BENEATH: u64 = 0x08;
 
-    let ext = std::path::Path::new(&filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("bin");
+    #[repr(C)]
+    struct OpenHow {
+        flags: u64,
+        mode: u64,
+        resolve: u64,
+    }
 
-    let mime = match ext {
-        "png" => "image/png",
-        "gif" => "image/gif",
-        _ => return Ok(HttpResponse::Ok().content_type(mime_guess::from_ext(ext).first_or_octet_stream().to_string()).body(data)),
+    unsafe extern "C" {
+        fn syscall(number: c_long, ...) -> c_long;
+    }
+
+    let valid = !name.is_empty()
+        && name.len() <= 255
+        && !name.starts_with('.')
+        && !name.contains("..")
+        && name.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(b, b'_' | b'-' | b'.')
+        })
+        && matches!(
+            name.rsplit_once('.'),
+            Some((stem, "png" | "gif")) if !stem.is_empty()
+        );
+
+    if !valid {
+        return Err(Error::new(ErrorKind::InvalidInput, "invalid render name"));
+    }
+
+    // The configured spool root is the trusted anchor.
+    // openat2 also resolves and checks the results directory.
+    let directory = fs::File::open(dir)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(Error::new(ErrorKind::InvalidInput, "spool not a directory"));
+    }
+    let relative = format!("svg2anim-results/{}", name);
+    let cname = CString::new(relative)
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "NUL"))?;
+
+    let how = OpenHow {
+        flags: O_CLOEXEC | O_NOFOLLOW,
+        mode: 0,
+        resolve: RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS,
     };
 
-    Ok(HttpResponse::Ok().content_type(mime.to_string()).body(data))
+    // Experimental x86_64-only syscall number.
+    #[cfg(target_arch = "x86_64")]
+    let number: c_long = 437;
+
+    #[cfg(not(target_arch = "x86_64"))]
+    return Err(Error::new(ErrorKind::Unsupported, "unsupported architecture"));
+
+    let fd = unsafe {
+        syscall(
+            number,
+            directory.as_raw_fd(),
+            cname.as_ptr(),
+            &how as *const OpenHow,
+            std::mem::size_of::<OpenHow>(),
+        )
+    };
+
+    if fd < 0 {
+        return Err(Error::last_os_error());
+    }
+
+    let mut file = unsafe { fs::File::from_raw_fd(fd as i32) };
+    let metadata = file.metadata()?;
+
+    if !metadata.is_file() || metadata.len() > MAX_BYTES {
+        return Err(Error::new(ErrorKind::InvalidData, "invalid render file"));
+    }
+
+    let mut data = Vec::new();
+    file.by_ref().take(MAX_BYTES + 1).read_to_end(&mut data)?;
+
+    if data.len() as u64 > MAX_BYTES {
+        return Err(Error::new(ErrorKind::InvalidData, "render too large"));
+    }
+
+    Ok(data)
+}
+
+pub async fn render_file(path: web::Path<String>) -> Result<HttpResponse> {
+    let filename = path.into_inner();
+
+    let uucp_dir = env::var("UUCP_SPOOL")
+        .unwrap_or_else(|_| "/var/spool/uucp".to_string());
+
+    let spool_dir = PathBuf::from(uucp_dir);
+
+    let data = match read_render_safely(&spool_dir, &filename) {
+        Ok(data) => data,
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+            return Ok(HttpResponse::BadRequest().finish());
+        }
+        Err(_) => {
+            return Ok(HttpResponse::NotFound().finish());
+        }
+    };
+
+    let mime = if filename.ends_with(".gif") {
+        "image/gif"
+    } else {
+        "image/png"
+    };
+
+    Ok(HttpResponse::Ok()
+        .insert_header(("X-Content-Type-Options", "nosniff"))
+        .content_type(mime)
+        .body(data))
 }
 
 /// GET /gallery - Gallery of NFT enrichments + uploaded media
