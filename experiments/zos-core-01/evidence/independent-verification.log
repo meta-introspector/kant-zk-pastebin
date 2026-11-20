@@ -1,0 +1,10 @@
+PASS signed digest for Check.lean
+PASS signed digest for Good.lean
+PASS signed digest for Ref.lean
+PASS signed digest for Good.olean
+PASS signed digest for Ref.olean
+/usr/bin/openssl pkeyutl -rawin -verify -pubin -inkey trusted-public.pem -in message.bin -sigfile signature.bin
+exit=0 stdout=b'Signature Verified Successfully\n' stderr=b''
+/usr/bin/openssl pkeyutl -rawin -verify -pubin -inkey other-public.pem -in message.bin -sigfile signature.bin
+exit=1 stdout=b'Signature Verification Failure\n' stderr=b'<provider-context>:error:030000EA:digital envelope routines:EVP_DigestVerify:provider signature failure:../crypto/evp/m_sigver.c:779:ED25519 digest_verify:\n'
+PASS 15/15 matrix cases, 14/14 complete state assertions, 0 skipped
