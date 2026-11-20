@@ -1,0 +1,25 @@
+=== cycle1_after_quota_before_insert ===
+PASS SIGKILL_cycle1_after_quota_before_insert
+PASS RECOVERY_cycle1_after_quota_before_insert
+=== cycle1_after_insert_before_commit ===
+PASS SIGKILL_cycle1_after_insert_before_commit
+PASS RECOVERY_cycle1_after_insert_before_commit
+=== cycle1_after_commit_before_ack ===
+PASS SIGKILL_cycle1_after_commit_before_ack
+PASS RECOVERY_cycle1_after_commit_before_ack
+=== cycle2_after_quota_before_insert ===
+PASS SIGKILL_cycle2_after_quota_before_insert
+PASS RECOVERY_cycle2_after_quota_before_insert
+=== cycle2_after_insert_before_commit ===
+PASS SIGKILL_cycle2_after_insert_before_commit
+PASS RECOVERY_cycle2_after_insert_before_commit
+=== cycle2_after_commit_before_ack ===
+PASS SIGKILL_cycle2_after_commit_before_ack
+PASS RECOVERY_cycle2_after_commit_before_ack
+INTEGRATED_SIGKILL_CASES=6_PASS
+INTEGRATED_PRECOMMIT_ROLLBACK=PASS
+INTEGRATED_POSTCOMMIT_DURABILITY=PASS
+INTEGRATED_INVALID_SIGNATURE_RETRY=6_REJECTED
+INTEGRATED_VALID_RECOVERY_RETRY=6_PASS
+INTEGRATED_SQLITE_INTEGRITY=PASS
+INT05_RUST_16B_CRASH_RECOVERY=PASS

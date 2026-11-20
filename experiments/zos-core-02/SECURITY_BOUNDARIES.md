@@ -1,0 +1,7 @@
+# Security boundaries
+
+The issuer and consumer are separate trust roles. The isolated CORE-01 issuer authenticates the Lean outcome with its Ed25519 signing key. The Rust consumer embeds an operator-selected public key and validates a fixed synthetic DAO rule before touching persistent state. The DAO identity is a ledger policy identity. The fixture is a bearer authorization for its single effect. Caller identity, network authentication, delegated authority and key rotation are outside the CLI contract.
+
+The lab assumes a trusted local operator, toolchain, issuer staging tree, consumer binary and database directory. A party that can change the binary, issuer key, staged trusted inputs or database can undermine these guarantees. SQLite integrity checks detect malformed state and schema drift. A database restored from an old copy lacks replay entries added after that copy. Separate databases have separate replay histories. There is no external nonrollbackable anchor.
+
+The Lean verdict is for the pinned fixture and its exact axiom policy. The signer is a trusted component and can sign arbitrary bytes if compromised. File input for the adapter is bounded, and temporary authentication files contain public material. The test build enables compiled-in crash and failure hooks. The normal build has no test subcommand. Recovery testing targets user-process death on the lab filesystem. Power failure, host failure, tamper resistance and formal FFI verification remain outside the evidence. Production acceptance remains BLOCKED.

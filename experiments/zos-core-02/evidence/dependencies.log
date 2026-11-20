@@ -1,0 +1,18 @@
+rustc 1.97.1 (8bab26f4f 2026-07-14)
+binary: rustc
+commit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+commit-date: 2026-07-14
+host: x86_64-unknown-linux-gnu
+release: 1.97.1
+LLVM version: 22.1.6
+Lean (version 4.35.0, x86_64-unknown-linux-gnu, commit eb6cafb7290e8bd5f2937522d8d804f58f02bafc, Release)
+OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+Python 3.14.4
+3.46.1
+d3a664c970a9fd8361b64194861bebc1ae37b9054e5ee3400dc1c9e691797eea  rustc
+bf8d54e4714cc4b03d3f6bb34c83b7202b87e49c8bfcbff6895c085bb90ceb38  lean
+1d72cbc5bf62be3f3dbd7626c295b63c5fdc1dd8439f323ac47998d8a062b4c9  openssl
+52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41  python3
+f84e76ea4da1e0c4e92254bd0d7dccdabe2c8b3098e734f27997dae3ee5d8e02  sha256sum
+f84e76ea4da1e0c4e92254bd0d7dccdabe2c8b3098e734f27997dae3ee5d8e02  timeout
+4633a4be13fdf05cb0f859e04fb06077a1fe30a90e405721a23873bd1f3d88a8  libsqlite3.so.0

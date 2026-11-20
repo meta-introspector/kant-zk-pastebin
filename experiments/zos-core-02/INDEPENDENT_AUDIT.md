@@ -1,0 +1,11 @@
+# Independent verification
+
+A clean directory was populated with the release inputs and no work products from the first integration run. The unmodified CORE-01 launcher and verifier ran under its Landlock rules again. The second run verified fixture Git blob IDs and regenerated both Lean artifacts used by the accepted receipt, matching the historical SHA-256 manifest. It generated a new synthetic issuer key and independently compiled the normal consumer, the wrong-pin consumer and the test builds with the pinned Rust compiler. Package manifests and dependency versions are included. All package files were separately checked after final archive extraction.
+
+The independent SQLite reader checked exact durable audit fields, matching effect identity, balance, foreign keys and database integrity. It inspected the full state immediately after each denial and each SIGKILL before retry. Direct SQL in a separate connection attempted a one-sided delete from each table and a second receipt with identical request identity but different message bytes. The deferred foreign keys and composite primary key rejected the changes.
+
+The trust-boundary probes distinguish malformed signatures from authenticated policy violations. Altered signed descriptors were signed by a separately generated test key and validated against a consumer compiled with that authorized test key so they reached exact descriptor comparison. The wrong-key case sent the legitimate receipt to a binary built with a different public-key pin. The invalid Lean cases exercised the actual CORE-01 issuer gate, followed by unsigned attempts at persistent consumption. They are compositional tests across the issuer and consumer boundaries.
+
+The sibling REUSE-04R service fault scenario could not run because its bubblewrap network namespace setup was denied. Its historical report was excluded from acceptance evidence. The standalone REUSE-04G runner exercised the byte-identical original guard. CORE-02 separately exercised the adapted guard through busy, actual write failure, independent rollback and process crashes.
+
+Original repositories and prior evidence were accessed read-only. Builds, fixture mutations and generated evidence remained in the fresh laboratory. No package installation, downloads, external publication or PR changes were performed.

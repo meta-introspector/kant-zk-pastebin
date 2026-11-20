@@ -1,0 +1,29 @@
+struct Transaction<'a> {
+    db: &'a Db,
+    active: bool,
+}
+
+impl<'a> Transaction<'a> {
+    fn begin(db: &'a Db) -> Self {
+        sql_exec(db, "BEGIN IMMEDIATE")
+            .expect("BEGIN IMMEDIATE failed");
+
+        Self { db, active: true }
+    }
+
+    fn commit(mut self) {
+        sql_exec(self.db, "COMMIT")
+            .expect("COMMIT failed");
+        self.active = false;
+    }
+}
+
+impl Drop for Transaction<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = sql_exec(self.db, "ROLLBACK");
+        }
+    }
+}
+
+
