@@ -1,0 +1,39 @@
+{
+  "project": "ZOS-CORE-03",
+  "verdict": "ACCEPT_FOR_EXPERIMENTAL_HANDOFF",
+  "production_acceptance": "BLOCKED",
+  "source_identity": {
+    "core01_commit": "0f0726575b5b608a8da8572dd93cac24b9187aec",
+    "core02_commit": "502827ec3db0186b681008f419a7942fd524dce8",
+    "core02_git_subtree": "37d71100d020f13415dd1c42fd09054d14d1b4fa",
+    "core02_public_archive_sha256": "5935eeb68abe48ff7ff41dc0c95f1a52778bb444df0f061e2c40cc56a8155b26",
+    "jobverifier_commit": "221cf074aaa3146f41863532a4fd9478dcba044f",
+    "result": "PASS"
+  },
+  "rust_native_build": {
+    "version": "1.100.0",
+    "target": "x86_64-unknown-linux-gnu",
+    "result": "PASS",
+    "sha256": "54ae5622ab92e7259819a1417d05f02b76d0c1b8c913185aa58c5f59bc91f0ea"
+  },
+  "wasm": {
+    "target": "wasm32-unknown-unknown",
+    "runtime": "Node.js 22.23.4 WebAssembly",
+    "module_import_count": 0,
+    "maximum_memory_bytes": 4194304,
+    "frame_limit_bytes": 1052852,
+    "build_and_execution": "PASS",
+    "sha256": "ae0eeed4afe81f166db53e2a2fe40b04ef72f9d1c0b40b9063f14373ee82cb12"
+  },
+  "native_wasm_differential": {"result": "PASS", "vectors": 24, "negative_vectors": 22},
+  "authorization_boundary": "PASS_INDEPENDENT_PINNED_CORE02_ADAPTER",
+  "synthetic_ledger": {"applied": 1, "replay_effects": 0, "denial_effects": 0, "control_database_unchanged": true},
+  "host_negative_tests": 8,
+  "core02_regressions": "PASS_ORIGINAL_AND_INDEPENDENT_REBUILD",
+  "independent_rebuild": "PASS_BYTE_IDENTICAL_NATIVE_WASM_AND_VECTOR_HASHES",
+  "locked_crate_versions_checked": 23,
+  "archive": "ZOS-CORE-03-review.tar.gz",
+  "archive_integrity": "CHECK_MANIFEST_AND_EXTERNAL_SHA256",
+  "original_repos_modified": false,
+  "scope": "One pinned synthetic receipt contract. No production or physical power-loss verification."
+}

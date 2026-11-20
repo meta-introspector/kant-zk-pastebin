@@ -1,0 +1,12 @@
+90f96a4d486404686e85354b046ededdd6b3f7c1  src/main.rs
+9258e2fc6e0201e135cff99afcf5e44401cb789a  src/sqlite.rs
+70364f4f8f9988763786cbfcf32df70f7d0fa70c  src/001.sql
+8bd17baa533425c2808bccf075f554a6a8c74da0  core01/evidence/descriptor.txt
+44479a8128c65930fbb8ece06373491d3901bd41  core01/evidence/message.bin
+03d227a7f4eb5bacc57fbf7230cc73c1467eb03e  core01/evidence/signature.bin
+97afd319d93b2da32f8947729fbac6386fec516a  core01/evidence/trusted-public.pem
+bf5e73dca90f5b5cd482fb8b2ed6d48126428a94  core01/intake/fixtures/Check.lean
+9aa042dce961b30a6fbdb71b3410045fb375ec74  core01/intake/fixtures/Good.lean
+eb659a53617c405fdd4968990c3f551e80fc17d6  core01/intake/fixtures/Ref.lean
+be062cbe78c3dbc5d6235e3af3c0a3f86c4d95f0  core01/intake/fixtures/SorryCase.lean
+1c53cd723947311a0128a99d29c2dae3e525dc13  core01/intake/fixtures/Mismatch.lean

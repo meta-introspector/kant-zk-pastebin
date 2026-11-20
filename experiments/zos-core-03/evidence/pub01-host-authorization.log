@@ -1,0 +1,11 @@
+PASS host unknown guest status DENIED_VERIFICATION, no mutation
+PASS host indeterminate guest DENIED_VERIFICATION, no mutation
+PASS host unavailable verifier DENIED_VERIFICATION, no mutation
+PASS host timed out verifier DENIED_VERIFICATION, no mutation
+PASS host unauthorized principal DENIED_AUTHORITY, no mutation
+PASS host unauthorized operation DENIED_OPERATION, no mutation
+PASS host bad signature DENIED_VERIFICATION, no mutation
+PASS host forged authentication result DENIED_ADAPTER, no mutation
+PASS host archived Lean receipt through WASM-to-SQLite authorized apply, transactional receipt, replay with no second effect
+PASS separate SQLite database remains byte-identical
+SQLite 3.46.1

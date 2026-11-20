@@ -1,0 +1,180 @@
+rustc 1.100.0 (0ef1bc386 2026-11-09)
+binary: rustc
+commit-hash: 0ef1bc386059596dada8fb65b50425aab2ea637a
+commit-date: 2026-11-09
+host: x86_64-unknown-linux-gnu
+release: 1.100.0
+LLVM version: 23.1.5
+v22.23.4
+OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+zos-core03 v0.1.0 (<lab-source>)
+├── ed25519-dalek v2.2.0
+│   ├── curve25519-dalek v4.1.3
+│   │   ├── cfg-if v1.0.5
+│   │   ├── digest v0.10.7
+│   │   │   ├── block-buffer v0.10.4
+│   │   │   │   └── generic-array v0.14.7
+│   │   │   │       └── typenum v1.20.1
+│   │   │   │       [build-dependencies]
+│   │   │   │       └── version_check v0.9.5
+│   │   │   └── crypto-common v0.1.7
+│   │   │       ├── generic-array v0.14.7 (*)
+│   │   │       └── typenum v1.20.1
+│   │   └── subtle v2.6.1
+│   │   [build-dependencies]
+│   │   └── rustc_version v0.4.1
+│   │       └── semver v1.0.28
+│   ├── ed25519 v2.2.3
+│   │   └── signature v2.2.0
+│   ├── sha2 v0.10.9
+│   │   ├── cfg-if v1.0.5
+│   │   └── digest v0.10.7 (*)
+│   └── subtle v2.6.1
+└── sha2 v0.10.9 (*)
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+zos-core03 v0.1.0 (<lab-source>)
+├── ed25519-dalek v2.2.0
+│   ├── curve25519-dalek v4.1.3
+│   │   ├── cfg-if v1.0.5
+│   │   ├── cpufeatures v0.2.17
+│   │   ├── curve25519-dalek-derive v0.1.1 (proc-macro)
+│   │   │   ├── proc-macro2 v1.0.107
+│   │   │   │   └── unicode-ident v1.0.27
+│   │   │   ├── quote v1.0.47
+│   │   │   │   └── proc-macro2 v1.0.107 (*)
+│   │   │   └── syn v2.0.119
+│   │   │       ├── proc-macro2 v1.0.107 (*)
+│   │   │       ├── quote v1.0.47 (*)
+│   │   │       └── unicode-ident v1.0.27
+│   │   ├── digest v0.10.7
+│   │   │   ├── block-buffer v0.10.4
+│   │   │   │   └── generic-array v0.14.7
+│   │   │   │       └── typenum v1.20.1
+│   │   │   │       [build-dependencies]
+│   │   │   │       └── version_check v0.9.5
+│   │   │   └── crypto-common v0.1.7
+│   │   │       ├── generic-array v0.14.7 (*)
+│   │   │       └── typenum v1.20.1
+│   │   └── subtle v2.6.1
+│   │   [build-dependencies]
+│   │   └── rustc_version v0.4.1
+│   │       └── semver v1.0.28
+│   ├── ed25519 v2.2.3
+│   │   └── signature v2.2.0
+│   ├── sha2 v0.10.9
+│   │   ├── cfg-if v1.0.5
+│   │   ├── cpufeatures v0.2.17
+│   │   └── digest v0.10.7 (*)
+│   └── subtle v2.6.1
+└── sha2 v0.10.9 (*)
+    Blocking waiting for file lock on package cache
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling semver v1.0.28
+   Compiling cfg-if v1.0.5
+   Compiling cpufeatures v0.2.17
+   Compiling subtle v2.6.1
+   Compiling signature v2.2.0
+   Compiling ed25519 v2.2.3
+   Compiling rustc_version v0.4.1
+   Compiling generic-array v0.14.7
+   Compiling curve25519-dalek v4.1.3
+   Compiling syn v2.0.119
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling ed25519-dalek v2.2.0
+   Compiling zos-core03 v0.1.0 (<lab-source>)
+    Finished `release` profile [optimized] target(s) in 3.51s
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling semver v1.0.28
+   Compiling cfg-if v1.0.5
+   Compiling signature v2.2.0
+   Compiling subtle v2.6.1
+   Compiling ed25519 v2.2.3
+   Compiling rustc_version v0.4.1
+   Compiling generic-array v0.14.7
+   Compiling curve25519-dalek v4.1.3
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling ed25519-dalek v2.2.0
+   Compiling zos-core03 v0.1.0 (<lab-source>)
+    Finished `release` profile [optimized] target(s) in 3.32s
+PASS locked crate block-buffer-0.10.4 3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71
+PASS locked crate cfg-if-1.0.5 4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600
+PASS locked crate cpufeatures-0.2.17 59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280
+PASS locked crate crypto-common-0.1.7 78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a
+PASS locked crate curve25519-dalek-4.1.3 97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be
+PASS locked crate curve25519-dalek-derive-0.1.1 f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3
+PASS locked crate digest-0.10.7 9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292
+PASS locked crate ed25519-2.2.3 115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53
+PASS locked crate ed25519-dalek-2.2.0 70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9
+PASS locked crate fiat-crypto-0.2.9 28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d
+PASS locked crate generic-array-0.14.7 85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a
+PASS locked crate libc-0.2.191 65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a
+PASS locked crate proc-macro2-1.0.107 985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9
+PASS locked crate quote-1.0.47 1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001
+PASS locked crate rustc_version-0.4.1 cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92
+PASS locked crate semver-1.0.28 8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd
+PASS locked crate sha2-0.10.9 a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283
+PASS locked crate signature-2.2.0 77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de
+PASS locked crate subtle-2.6.1 13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292
+PASS locked crate syn-2.0.119 872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297
+PASS locked crate typenum-1.20.1 b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20
+PASS locked crate unicode-ident-1.0.27 a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563
+PASS locked crate version_check-0.9.5 0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a
+PASS exact CORE02 Git subtree and archive identity
+PASS five pinned JobVerifier Git blobs
+PASS shared accepted 1 5960a328d2dbf2c0907fde851fd83d054c3cf0afb0acf3c96176187d8c276d2f
+PASS shared archived-lean-issuer-receipt 1 f7d6cb198fb6ee00270af6052c3e6972cc9e36ba978a5cbecc594a6afcf85055
+PASS shared invalid-signature 4 2ae42aa7b5c0867a68d8e88262667e20e43cf3b7dcba763176ed16fd8b278eb0
+PASS shared wrong-key 4 afde0e045eeda14d4e3bb6c116fd0739eeec962b6c5dbe0cbb408bb0160553dc
+PASS shared tampered-descriptor 5 fbb958e3a7b58853941f87e624bd3fd175c1b7bd63a74fa7392bd8d5d1a38d3a
+PASS shared artifact-mismatch 6 8476a87486d0333dbe34116177d69bc08d2d4e725b39f6a6343bd770635e5088
+PASS shared operation-substitution 7 e39154bba102656f6431f23912fefad2c667324a2da351c272ee6c83ca5224fc
+PASS shared signed-operation-substitution 5 c5adfd3aa8ec4bf3a7794fe6bb0946fe395e9aeafad6b888b9c542355ccd1bcc
+PASS shared unauthorized-operation 7 7e7c27cc109eb9cddcd0f72c4f612ac74bbf636c15d28b075b345917115a29e1
+PASS shared missing-fields 2 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+PASS shared truncated-length 2 01fbfcd2b45b7c151dfc680f1ce73271dd4ed3ec8924f28006bfa9a2cc1524fe
+PASS shared truncated-value 2 1d2a4dc04cf4185de861b46fc5141e49900537af8d350d22c36909bfbc3819eb
+PASS shared truncated-signature 2 a3ccc7d3977a33a3388589c48e6247b6cc9d6adf8d47f0ab8d1b0fe2e8ea166c
+PASS shared truncated-key 2 644966fb9403034a431d665855d29292ea1ad3b495f1563cb44b4b0c546aa582
+PASS shared trailing-frame-byte 2 54e3f0d453f5dd4a54bc594946061e46535e6e9e83c9427650d0266df72d597d
+PASS shared signed-duplicate-field 5 c79ce3c39af6b8773a6a4927e1ccd22e9ee3cb4ddd31fd4019af9f997dcf2622
+PASS shared signed-crlf 5 0a3a4e83c87de30b2b3918c3c81299bb35da2803366340be363a6f27c74a033a
+PASS shared signed-invalid-utf8 5 4b4a8d9b77a7e9505a339062f82a9ba87f1c51672604a552862061afbac35670
+PASS shared signed-unknown-verdict 5 1da3251694d164c5c6a06a6ac5801ff90b3a38545b1a50a54cdcf1534c79ba5c
+PASS shared oversized-length 3 ad95131bc0b799c0b1af477fb14fcf26a6a9f76079e48bf090acb7e8367bfd0e
+PASS shared oversized-message 3 ddb9bea454a688c5d1e8aae946f456b953d4eb1a92aada1b303cbd0285773d9b
+PASS shared oversized-artifact 3 d9b91d9e428f99de5e4a290bba97b6fb1997a6ce7d7edd95e2cf08787fdceeff
+PASS shared artifact-at-limit 6 31f526ac6d221942b3ec925b39c2fea82b197e2f9db4714d0e3e7fae791a2cf4
+PASS shared oversized-frame 3 8e2ef768874a0534b3f3b0d5750d19fd10e4303e0b9372fff041d9eacc8c3343
+PASS WASM direct overlength ABI call and memory growth cap, import-free
+PASS WASM loader failure maps to indeterminate
+PASS host unknown guest status DENIED_VERIFICATION, no mutation
+PASS host indeterminate guest DENIED_VERIFICATION, no mutation
+PASS host unavailable verifier DENIED_VERIFICATION, no mutation
+PASS host timed out verifier DENIED_VERIFICATION, no mutation
+PASS host unauthorized principal DENIED_AUTHORITY, no mutation
+PASS host unauthorized operation DENIED_OPERATION, no mutation
+PASS host bad signature DENIED_VERIFICATION, no mutation
+PASS host forged authentication result DENIED_ADAPTER, no mutation
+PASS host archived Lean receipt through WASM-to-SQLite authorized apply, transactional receipt, replay with no second effect
+PASS separate SQLite database remains byte-identical
+SQLite 3.46.1
+SHA256 native 54ae5622ab92e7259819a1417d05f02b76d0c1b8c913185aa58c5f59bc91f0ea
+SHA256 zos_core03.wasm ae0eeed4afe81f166db53e2a2fe40b04ef72f9d1c0b40b9063f14373ee82cb12

@@ -1,0 +1,5 @@
+PASS clean extraction and fresh target; all input files, binaries, vector hashes, and check results match
+handoff/evidence/core02-independent-regression.log:PASS all CORE02 mandatory executable scenarios
+primary/core02-regression.log:PASS all CORE02 mandatory executable scenarios
+PASS clean original checkout git-work 502827ec3db0186b681008f419a7942fd524dce8
+PASS clean original checkout JobVerifier 760c602ae10bcb35461a4b3adc3268c6e92478b3

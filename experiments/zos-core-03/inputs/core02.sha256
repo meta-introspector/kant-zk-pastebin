@@ -1,0 +1,12 @@
+97d9f3ed8049310a022cc20ec58a9ec19717e5eaebb16a83e6a9a4f7239d1f7c  ./core01/evidence/descriptor.txt
+e890dc3df4a43affbcbdfec09e1cfadb6adb1d10cc79c160914c5f21ddb406be  ./core01/evidence/message.bin
+b96f2db1acaf5929826a696320f718f177b189b6a345e56a6787a158632f75bc  ./core01/evidence/signature.bin
+4ee4be8b75475fcfea44311147c61e666235e5b6b0c33b13dcf7ac2c3457d7f6  ./core01/evidence/trusted-public.pem
+cd093a3540fba34c53c980c18920b2bdddda2753cf37ad8170243938f4c21edd  ./core01/intake/fixtures/Check.lean
+df70151090e05f2d444acce3ad5bd10f9eb9e6408c30aafe2c9152ab997e1a5a  ./core01/intake/fixtures/Good.lean
+6428341c0fe1510bac76621204d6aabd583e4c87fb10cd81929c2e5c24533712  ./core01/intake/fixtures/Mismatch.lean
+d2d8c48b114a77d39f503bd4089dd6308fe4f7f692005f194024fbbe508621cc  ./core01/intake/fixtures/Ref.lean
+46f2d644067cdac9b757d8eb56d44dfd0709c676a1a741c6531656762a4d8912  ./core01/intake/fixtures/SorryCase.lean
+81477e677858be4b545b67857521069f82b2bffcdf55b1f1a2e77f0e5746abbe  ./src/001.sql
+aba1bfe0f9dac35b5a11541f3d0ddffce80294cfc0fa0b6e14825c492d4093a2  ./src/main.rs
+8206600c377ce93732bc291e5da6a144079fa3551085dae7958c2cecb90d6d3e  ./src/sqlite.rs
