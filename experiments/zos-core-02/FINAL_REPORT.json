@@ -1,0 +1,25 @@
+{
+  "experiment": "ZOS-CORE-02",
+  "verdict": "ACCEPT_FOR_EXPERIMENTAL_HANDOFF",
+  "production_acceptance": "BLOCKED",
+  "core01_commit": "0f0726575b5b608a8da8572dd93cac24b9187aec",
+  "jobverifier_commit": "221cf074aaa3146f41863532a4fd9478dcba044f",
+  "journal_mode": "delete",
+  "synchronous": "FULL",
+  "busy_timeout_ms": 750,
+  "original_repos_modified": false,
+  "initial_and_independent_rebuild": {
+    "core01_cases_per_run": 15,
+    "workers_per_multiprocess_test": 12,
+    "applied_per_multiprocess_test": 1,
+    "replays_per_multiprocess_test": 11,
+    "sigkill_cases_per_run": 4,
+    "mandatory_consumer_scenarios": "PASS",
+    "independent_sql_constraints": "PASS"
+  },
+  "excluded_historical_evidence": {
+    "reuse04r06_service_fault_reexecution": "BLOCKED: bubblewrap NETLINK_ROUTE setup denied"
+  },
+  "scope": "Synthetic single-request process-crash experiment. No device power-loss claim.",
+  "archive_integrity": "MANIFEST.sha256 covers archive payload; archive digest in detached .sha256 file"
+}

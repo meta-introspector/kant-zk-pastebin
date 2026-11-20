@@ -1,0 +1,13 @@
+PASS SQLITE_NATIVE_READWRITE_COPY
+PASS COMMIT_A Committed transfers=1 outbox=1
+PASS REPLAY_A Replay transfers=1 outbox=1
+PASS AMOUNT_CONFLICT Conflict transfers=1 outbox=1
+PASS DIRECTION_CONFLICT Conflict transfers=1 outbox=1
+PASS INSUFFICIENT_B Insufficient transfers=1 outbox=1
+PASS COMMIT_B Committed transfers=2 outbox=2
+PASS COMMIT_C Committed transfers=3 outbox=3
+PASS REPLAY_A_AGAIN Replay transfers=3 outbox=3
+PASS INVALID_ID Invalid transfers=3 outbox=3
+PASS REOPEN_COMMITTED_STATE
+TRANSACTIONAL_STEPS=9
+NATIVE_RUST_SQLITE_COMMIT=PASS

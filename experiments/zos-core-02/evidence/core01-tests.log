@@ -1,0 +1,21 @@
+VERIFIER exit=Some(0) stdout="{\"axioms\":[],\"decl\":\"target\",\"declaredAxiomsInSubmission\":[],\"jobModule\":\"Good\",\"reasonCode\":\"OK\",\"schema\":\"zos.verify.v1-testonly\"}\n" stderr=""
+COMPILER exit=Some(1) stdout="Invalid.lean:2:26: error: unsolved goals\n⊢ False\n" stderr=""
+PASS 02-invalid complete_state_unchanged=true
+VERIFIER exit=Some(1) stdout="{\"axioms\":[\"sorryAx\"],\"decl\":\"target\",\"declaredAxiomsInSubmission\":[],\"jobModule\":\"SorryCase\",\"reasonCode\":\"SORRY\",\"schema\":\"zos.verify.v1-testonly\"}\n" stderr=""
+PASS 03-sorry complete_state_unchanged=true
+PASS 04-artifact complete_state_unchanged=true
+PASS 05-descriptor complete_state_unchanged=true
+PASS 06-tampered complete_state_unchanged=true
+PASS 07-wrong-key complete_state_unchanged=true
+PASS 08-unauthorized complete_state_unchanged=true
+VERIFIER exit=Some(2) stdout="{\"axioms\":[],\"decl\":\"target\",\"declaredAxiomsInSubmission\":[],\"jobModule\":\"Good\",\"reasonCode\":\"CHECKER_ERROR\",\"schema\":\"zos.verify.v1-testonly\"}\n" stderr=""
+PASS 10-indeterminate complete_state_unchanged=true
+VERIFIER exit=Some(127) stdout="" stderr="timeout: failed to execute process: No such file or directory (os error 2)\n"
+PASS 11-process complete_state_unchanged=true
+PASS 12-operation complete_state_unchanged=true
+VERIFIER exit=Some(1) stdout="{\"axioms\":[],\"decl\":\"target\",\"declaredAxiomsInSubmission\":[],\"jobModule\":\"Mismatch\",\"reasonCode\":\"STATEMENT_MISMATCH\",\"schema\":\"zos.verify.v1-testonly\"}\n" stderr=""
+PASS 13-mismatch complete_state_unchanged=true
+PASS 14-ambiguous complete_state_unchanged=true
+PASS 15-staged-substitution complete_state_unchanged=true
+PASS 01-valid
+PASS 09-replay complete_state_unchanged=true

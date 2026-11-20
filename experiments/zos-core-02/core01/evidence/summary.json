@@ -1,0 +1,48 @@
+{
+  "verdict": "ACCEPT_FOR_EXPERIMENTAL_REVIEW",
+  "production": "BLOCKED",
+  "phase": "Step 2",
+  "failure": null,
+  "passed_cases": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "planned_cases": 15,
+  "preserved_inputs_verified": true,
+  "source_commit": "221cf074aaa3146f41863532a4fd9478dcba044f",
+  "source_identities": {
+    "minimal/JobVerifier/Check.lean": {
+      "git_blob": "bf5e73dca90f5b5cd482fb8b2ed6d48126428a94",
+      "sha256": "cd093a3540fba34c53c980c18920b2bdddda2753cf37ad8170243938f4c21edd"
+    },
+    "minimal/JobVerifier/tests/Good.lean": {
+      "git_blob": "9aa042dce961b30a6fbdb71b3410045fb375ec74",
+      "sha256": "df70151090e05f2d444acce3ad5bd10f9eb9e6408c30aafe2c9152ab997e1a5a"
+    },
+    "minimal/JobVerifier/tests/Ref.lean": {
+      "git_blob": "eb659a53617c405fdd4968990c3f551e80fc17d6",
+      "sha256": "d2d8c48b114a77d39f503bd4089dd6308fe4f7f692005f194024fbbe508621cc"
+    },
+    "minimal/JobVerifier/tests/SorryCase.lean": {
+      "git_blob": "be062cbe78c3dbc5d6235e3af3c0a3f86c4d95f0",
+      "sha256": "46f2d644067cdac9b757d8eb56d44dfd0709c676a1a741c6531656762a4d8912"
+    },
+    "minimal/JobVerifier/tests/Mismatch.lean": {
+      "git_blob": "1c53cd723947311a0128a99d29c2dae3e525dc13",
+      "sha256": "6428341c0fe1510bac76621204d6aabd583e4c87fb10cd81929c2e5c24533712"
+    }
+  }
+}

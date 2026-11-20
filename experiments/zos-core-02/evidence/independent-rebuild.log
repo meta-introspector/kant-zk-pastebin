@@ -1,0 +1,56 @@
+Landlock ABI 7; write rule limited to the package root; in-root write/unlink succeeded; TCP bind/connect denied
+PASS signed digest for Check.lean
+PASS signed digest for Good.lean
+PASS signed digest for Ref.lean
+PASS signed digest for Good.olean
+PASS signed digest for Ref.olean
+/usr/bin/openssl pkeyutl -rawin -verify -pubin -inkey trusted-public.pem -in message.bin -sigfile signature.bin
+exit=0 stdout=b'Signature Verified Successfully\n' stderr=b''
+/usr/bin/openssl pkeyutl -rawin -verify -pubin -inkey other-public.pem -in message.bin -sigfile signature.bin
+exit=1 stdout=b'Signature Verification Failure\n' stderr=b'40072A359A710000:error:030000EA:digital envelope routines:EVP_DigestVerify:provider signature failure:../crypto/evp/m_sigver.c:779:ED25519 digest_verify:\n'
+PASS 15/15 matrix cases, 14/14 complete state assertions, 0 skipped
+PASS CORE01 artifact, descriptor and message match archived digests
+VERIFIER exit=Some(0) stdout="{\"axioms\":[],\"decl\":\"target\",\"declaredAxiomsInSubmission\":[],\"jobModule\":\"Good\",\"reasonCode\":\"OK\",\"schema\":\"zos.verify.v1-testonly\"}\n" stderr=""
+COMPILER exit=Some(1) stdout="Invalid.lean:2:26: error: unsolved goals\n⊢ False\n" stderr=""
+PASS 02-invalid complete_state_unchanged=true
+VERIFIER exit=Some(1) stdout="{\"axioms\":[\"sorryAx\"],\"decl\":\"target\",\"declaredAxiomsInSubmission\":[],\"jobModule\":\"SorryCase\",\"reasonCode\":\"SORRY\",\"schema\":\"zos.verify.v1-testonly\"}\n" stderr=""
+PASS 03-sorry complete_state_unchanged=true
+VERIFIER exit=Some(2) stdout="{\"axioms\":[],\"decl\":\"target\",\"declaredAxiomsInSubmission\":[],\"jobModule\":\"Good\",\"reasonCode\":\"CHECKER_ERROR\",\"schema\":\"zos.verify.v1-testonly\"}\n" stderr=""
+PASS 10-indeterminate complete_state_unchanged=true
+VERIFIER exit=Some(127) stdout="" stderr="timeout: failed to execute process: No such file or directory (os error 2)\n"
+VERIFIER exit=Some(1) stdout="{\"axioms\":[],\"decl\":\"target\",\"declaredAxiomsInSubmission\":[],\"jobModule\":\"Mismatch\",\"reasonCode\":\"STATEMENT_MISMATCH\",\"schema\":\"zos.verify.v1-testonly\"}\n" stderr=""
+SQLite 3.46.1 OpenSSL OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+	linux-vdso.so.1 (<load-address>)
+	libsqlite3.so.0 => /usr/lib/x86_64-linux-gnu/libsqlite3.so.0 (<load-address>)
+	libgcc_s.so.1 => /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 (<load-address>)
+	libc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (<load-address>)
+	/lib64/ld-linux-x86-64.so.2 (<load-address>)
+	libm.so.6 => /usr/lib/x86_64-linux-gnu/libm.so.6 (<load-address>)
+PASS invalid signature SIGNATURE committed state unchanged
+PASS wrong trusted key SIGNATURE committed state unchanged
+PASS modified artifact ARTIFACT committed state unchanged
+PASS operation substitution OPERATION committed state unchanged
+PASS unauthorized DAO identity AUTHORITY committed state unchanged
+PASS malformed envelope SIGNATURE committed state unchanged
+PASS SQLite write failure STEP:8: committed state unchanged
+PASS rollback after receipt insert INJECTED_ROLLBACK committed state unchanged
+PASS busy competing writer EXEC:5:database is locked committed state unchanged
+PASS signed descriptor substitution DESCRIPTOR committed state unchanged
+PASS signed operation substitution DESCRIPTOR committed state unchanged
+PASS signed duplicate request field DESCRIPTOR committed state unchanged
+PASS signed unknown request DESCRIPTOR committed state unchanged
+PASS signed forged accepted basis DESCRIPTOR committed state unchanged
+PASS Lean invalid: no authenticated receipt SIGNATURE committed state unchanged
+PASS Lean sorry: no authenticated receipt SIGNATURE committed state unchanged
+PASS Lean indeterminate: no authenticated receipt SIGNATURE committed state unchanged
+PASS valid receipt, same-process replay and restart replay
+PASS 12 independent processes: one APPLIED, eleven REPLAY
+PASS actual SIGKILL 1 before-commit: committed_at_reopen=False, retry and replay verified
+PASS actual SIGKILL 1 after-commit: committed_at_reopen=True, retry and replay verified
+PASS actual SIGKILL 2 before-commit: committed_at_reopen=False, retry and replay verified
+PASS actual SIGKILL 2 after-commit: committed_at_reopen=True, retry and replay verified
+PASS incompatible schema version SCHEMA committed state unchanged
+PASS unexpected schema trigger SCHEMA committed state unchanged
+PASS corrupt DB SQLITE_NOTADB, original bytes preserved
+PASS independent SQLite deferred foreign keys and duplicate request constraint
+PASS all CORE02 mandatory executable scenarios
