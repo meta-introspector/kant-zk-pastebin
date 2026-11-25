@@ -1,0 +1,186 @@
+[
+  {
+    "relative_path": "dynamic-input/DynamicPlanChecker.lean",
+    "sha256": "310d742a254455c0ba52e3a1f0bb6f22a6e1846f1d835f9db26c42ec4608cbdd"
+  },
+  {
+    "relative_path": "dynamic-input/DynamicVerifier.lean",
+    "sha256": "69ee203fd7270c4cba08511cce1edeb540e1f97b94ffbb78de9a0ff6329c0590"
+  },
+  {
+    "relative_path": "dynamic-input/FRESH_CERTIFICATE.json",
+    "sha256": "5be5f33621445bea310792e7a48a47ae76a1b03c05ee0ea950e00ddc137a401b"
+  },
+  {
+    "relative_path": "dynamic-input/FRESH_ENVELOPE.json",
+    "sha256": "516d48e05eff909cbc104347e83416177aa3c912581e09518b61d4205b253dc2"
+  },
+  {
+    "relative_path": "dynamic-input/FRESH_TRANSCRIPT.txt",
+    "sha256": "a5e9b000ce389fb27807d67068f708339275f7959d9e83aa2d03efb269cc1517"
+  },
+  {
+    "relative_path": "dynamic-input/GoapLeanPlan.lean",
+    "sha256": "8f73e7b41955b5631c9bdcd1860efc2aa6d96aa5b9d7973bcbfc45063e56c1ba"
+  },
+  {
+    "relative_path": "dynamic-input/INPUT_PINS.json",
+    "sha256": "7c16963e13133d7e00a6cec962a7ea43407eee04708abfc4ac14358d056d7a90"
+  },
+  {
+    "relative_path": "dynamic-input/LOCAL_EVIDENCE_CONTRACT.json",
+    "sha256": "b5fce70d31ed7155342ebe78fa46c93647e2e4f6db1cfb7bbc69efbcd5ff5e17"
+  },
+  {
+    "relative_path": "dynamic-input/modules/DynamicPlanChecker.olean",
+    "sha256": "30a97a7fc284c6a3886c386071f8998c4ea6fa65dce0973d55ed970ea8f6364d"
+  },
+  {
+    "relative_path": "dynamic-input/provenance_gate.py",
+    "sha256": "79165653c139ace2c9ab905d4e69d64d934202cf84f29b1ab61c2bb61252cbbe"
+  },
+  {
+    "relative_path": "gate/auth_gate.py",
+    "sha256": "31201e1792548ae4aca16c87b3590e9497deaceb7551f46e08bde64890ca1e05"
+  },
+  {
+    "relative_path": "gate/cert03_primitives.py",
+    "sha256": "cd598cfa81178a23404c5e77851b349f7b0f65e34ec14e1d9cd56448f7d1d44b"
+  },
+  {
+    "relative_path": "lean-entry/PolicyMain.lean",
+    "sha256": "38f5b526f7a0b8119b919f1f7a5f37462a9bfee36907a371884ed9d22cdfc841"
+  },
+  {
+    "relative_path": "lean-entry/VerifierMain.lean",
+    "sha256": "09e0bc6f10c0db2fc4dcf31048eccb2aabbaba7e3fc7fe1e5132a73ae3d4159c"
+  },
+  {
+    "relative_path": "policy-adapter/bounded_lean.py",
+    "sha256": "77e62e06e498ffb03e366c13b066c092ee803c76330ef28b5bbe2275b7c19198"
+  },
+  {
+    "relative_path": "policy-adapter/gateway.py",
+    "sha256": "0c7fc4ec471b2dd8969a6f2f9a75d87103bdd076a7d9a8c95268e32df79f71ac"
+  },
+  {
+    "relative_path": "policy-adapter/goap_policy.py",
+    "sha256": "aa14a233704f469e0a375b10588acb3a3238993fce74bdef2c223d4b3f50c8c9"
+  },
+  {
+    "relative_path": "policy-adapter/nonce_journal.py",
+    "sha256": "145cd696c6242b4ca92def72e5c8fbc97529bc7af9334c43ee18fef8c5675640"
+  },
+  {
+    "relative_path": "policy-adapter/verification_profiles.py",
+    "sha256": "fd4c76fb1e7e1ec3455a587a2a5c0b85fbbda65ab86f7f84d26f6630fac7b8fd"
+  },
+  {
+    "relative_path": "project/Cargo.lock",
+    "sha256": "bf25562c2a671e99eeffca62c970e98120f1b368dcf81d609dbd6da49fc3963c"
+  },
+  {
+    "relative_path": "project/Cargo.toml",
+    "sha256": "d31ae48224d14ae73967313a7434506651efeb84f256d15cf2912b9c3d50fcfc"
+  },
+  {
+    "relative_path": "project/src/bin/bounded_process.rs",
+    "sha256": "0ad957fd7eb9537b8163cd72e6b8f4221717eaf5fd5b388f69c146a7a5e64286"
+  },
+  {
+    "relative_path": "project/src/bin/caller_boundary.rs",
+    "sha256": "dc9db3ff1ed8fdcbdf43a111a172de632848cc328788b8064cc853e3ed7d4014"
+  },
+  {
+    "relative_path": "project/src/bin/canonical.rs",
+    "sha256": "4fbc70998fe6d6539fff096006a57083163626fdf5d671154204ccd3c7321f71"
+  },
+  {
+    "relative_path": "project/src/bin/canonical_probe.rs",
+    "sha256": "243e6063dc15ab2890aa19e5c65864c421a0a8159f47633329f4d6f4c4ca2e58"
+  },
+  {
+    "relative_path": "project/src/bin/persistence_components/descriptor_publish.rs",
+    "sha256": "a0c415d2f4250e4428dbcedc9e29e5dce673c4cd9224632dc4cf2f889f1050cb"
+  },
+  {
+    "relative_path": "project/src/bin/persistence_components/fixture.crate",
+    "sha256": "d5118a26dee7e34e894f7e85aa0ee5080ae4c18bf03c0e30d49a80e418f00a53"
+  },
+  {
+    "relative_path": "project/src/bin/persistence_components/idempotent_publish.rs",
+    "sha256": "2b3e555829c07de03dc6bb0852fec56822c35b9bb7b1ac0e1ff0ff30cec430d4"
+  },
+  {
+    "relative_path": "project/src/bin/persistence_components/mod.rs",
+    "sha256": "e12eb2e314b7dcba58944f56b5f8b4bb5578196a89f785d15ad89df16f95ffff"
+  },
+  {
+    "relative_path": "project/src/bin/persistence_components/raw_persist.inc",
+    "sha256": "80bfc4c7c9e0a7085bbd54cdadbe6e9d2c3fcee6756fb7fd369b51fd24bd5c92"
+  },
+  {
+    "relative_path": "project/src/bin/persistence_components/replay_adapter.inc",
+    "sha256": "25719d00dbb6ed263ce5d3660d665df2fa54fe38fff93cfe41cf83645ae39176"
+  },
+  {
+    "relative_path": "project/src/bin/persistence_components/secure_fs.rs",
+    "sha256": "8c1786a80113aa0d6e35e9d3975ebc6fafd61661b0db9ff682b5afa1c215f62f"
+  },
+  {
+    "relative_path": "project/src/bin/persistence_components/secure_jobs.inc",
+    "sha256": "ae19357f11ab19193957ddf9dee9ea8b479526ed0a551d110be015a85ddd7e6b"
+  },
+  {
+    "relative_path": "project/src/bin/persistence_components/unified_authority.inc",
+    "sha256": "fe75fc82618045a6f5d4ab106afd9cd4bee1f7a58cdd667371fec1a2e34dc595"
+  },
+  {
+    "relative_path": "project/src/bin/receipt_components/canonical_v1.inc",
+    "sha256": "282f37a63ccbc27160e4db876dd58c0e2e1a82d0d84b026f0dca29181ee83425"
+  },
+  {
+    "relative_path": "project/src/bin/receipt_components/canonical_v2.inc",
+    "sha256": "53607c177c7e289dbf92ff7843e3ed9ac3052953ecdcbb2c98fb2169bdf9c67c"
+  },
+  {
+    "relative_path": "project/src/bin/receipt_components/core02_crypto.inc",
+    "sha256": "2eafcbf8744a251e0cf1796091d36356821288a3879118d2de64389ef54b3041"
+  },
+  {
+    "relative_path": "project/src/bin/receipt_components/core02_sqlite.rs",
+    "sha256": "8206600c377ce93732bc291e5da6a144079fa3551085dae7958c2cecb90d6d3e"
+  },
+  {
+    "relative_path": "project/src/bin/receipt_components/expected_schema.inc",
+    "sha256": "a62e8ee567704410a1b17f0603f536837623551e4be1722e872916cb03989c3c"
+  },
+  {
+    "relative_path": "project/src/bin/receipt_components/mod.rs",
+    "sha256": "0e5d6e3e9a5a0c2e6993a7d0f66d4e06c3fd54dfb0ecf413f75586922d52d6aa"
+  },
+  {
+    "relative_path": "project/src/bin/receipt_components/receipt_registry.sql",
+    "sha256": "8d6d43af70ea3b654e46f54d506c49c040582090005fabed5a51d53cca6ae035"
+  },
+  {
+    "relative_path": "project/src/bin/receipt_components/registry_reuse.inc",
+    "sha256": "b05df46210fd4d8a78f0754eceb4ff43a1de224f7262611e5998d805c8db84dc"
+  },
+  {
+    "relative_path": "project/src/bin/receipt_components/verified_consumer.inc",
+    "sha256": "bd222d6e14b4b0e263a74358873eb14c7e25abc858d6e4e29da234f61500c721"
+  },
+  {
+    "relative_path": "project/src/bin/strict_json.rs",
+    "sha256": "6cbc7ca664caab6501db0881db77602f9f160c6e70f4dfbbcac027911a7ac275"
+  },
+  {
+    "relative_path": "project/src/bin/transaction_fixture.rs",
+    "sha256": "3c46f0492dd440e3306f68e1e3bade4b6c153814c9c10d6950f16b5d3910ab10"
+  },
+  {
+    "relative_path": "project/src/bin/zos_receipt_g02.rs",
+    "sha256": "2c07453e5864598f57a2f5ea25ea6a9869c80f940ed4d22e9596d926d1a6797f"
+  }
+]
