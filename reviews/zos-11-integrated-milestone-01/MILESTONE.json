@@ -1,0 +1,45 @@
+{
+  "dao_credits_authorized": "NO",
+  "date": "2026-11-26",
+  "documented_test_suites": 12,
+  "evidence": [
+    {
+      "report": "evidence/private-boundary.json",
+      "report_sha256": "1989a8d18a86603fd6d569375c84a1ae35d1566c0ec71efb2a881940c9bcb7f4",
+      "role": "private-boundary",
+      "verdict": "PRIVATE_EXECUTION_BOUNDARY_QUALIFIED"
+    },
+    {
+      "report": "evidence/external-consumer.json",
+      "report_sha256": "7a64c2318d7df08e1bd33f66cabece53292947f038d0c4b828cda7ef1bcfe14b",
+      "role": "external-consumer",
+      "verdict": "EXTERNAL_DENIAL_CONSUMER_QUALIFIED"
+    },
+    {
+      "report": "evidence/canonical-replay.json",
+      "report_sha256": "9f53b50d4d4142901d8ca52d6e973c03bb997c6d2574c61869e5a8e210318a0b",
+      "role": "canonical-replay",
+      "verdict": "CANONICAL_REPLAY_MODEL_REPRODUCED"
+    },
+    {
+      "report": "evidence/kubo-rust.json",
+      "report_sha256": "7e44546c03017a31f2ab9e2e3fc79b4b964a69157cdb87e8684c24ccd942b75c",
+      "role": "kubo-rust",
+      "verdict": "KUBO_RUST_DENIAL_INTEGRATION_QUALIFIED"
+    }
+  ],
+  "full_experiment_rebuild_from_package": false,
+  "independent_rebuild_from_public_package": false,
+  "milestone": "ZOS-11-INTEGRATED-MILESTONE-01",
+  "original_implementation_source_included": false,
+  "package_type": "EXPERIMENTAL_TECHNICAL_REVIEW_PACKAGE",
+  "private_source_identities": 65,
+  "production_acceptance": "BLOCKED",
+  "real_action_authorization": "DISABLED",
+  "schema": "zos.experimental.milestone.v1",
+  "source_code_included": false,
+  "standalone_evidence_verifier_included": true,
+  "v2_archive_manifest_verified": 587,
+  "v2_model_checks_reported": 37,
+  "verdict": "EXPERIMENTAL_REVIEW_CANDIDATE"
+}

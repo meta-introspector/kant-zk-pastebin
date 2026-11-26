@@ -1,0 +1,93 @@
+{
+  "cases": [
+    {
+      "detail": "NEW_REQUEST_CANDIDATE,EXACT_REPLAY",
+      "id": "new_then_exact_replay",
+      "status": "PASS"
+    },
+    {
+      "detail": "REQUEST_IDENTITY_CONFLICT",
+      "id": "artifact_conflict",
+      "status": "PASS"
+    },
+    {
+      "detail": "REQUEST_IDENTITY_CONFLICT",
+      "id": "operation_conflict",
+      "status": "PASS"
+    },
+    {
+      "detail": "REQUEST_IDENTITY_CONFLICT",
+      "id": "certificate_conflict",
+      "status": "PASS"
+    },
+    {
+      "detail": "REQUEST_IDENTITY_CONFLICT",
+      "id": "action_order_conflict",
+      "status": "PASS"
+    },
+    {
+      "detail": "NEW_REQUEST_CANDIDATE",
+      "id": "different_subject_scoped_key_is_new",
+      "status": "PASS"
+    },
+    {
+      "detail": "",
+      "id": "duplicate_key_rejected",
+      "status": "PASS"
+    },
+    {
+      "detail": "",
+      "id": "malformed_json_rejected",
+      "status": "PASS"
+    },
+    {
+      "detail": "",
+      "id": "nonfinite_json_rejected",
+      "status": "PASS"
+    },
+    {
+      "detail": "not in qualified proposed descriptor",
+      "id": "policy_identity_outside_descriptor_rejected",
+      "status": "PASS"
+    },
+    {
+      "detail": "",
+      "id": "digest_domain_separation_changes_digest",
+      "status": "PASS"
+    },
+    {
+      "detail": "EXACT_REPLAY",
+      "id": "restart_reopen_exact_replay",
+      "status": "PASS"
+    },
+    {
+      "detail": "STORAGE_FAILURE_ROLLED_BACK,NEW_REQUEST_CANDIDATE",
+      "id": "rollback_leaves_no_reservation",
+      "status": "PASS"
+    },
+    {
+      "detail": "",
+      "id": "unavailable_storage_fails_closed",
+      "status": "PASS"
+    },
+    {
+      "detail": "EXACT_REPLAY,NEW_REQUEST_CANDIDATE",
+      "id": "concurrent_identical",
+      "status": "PASS"
+    },
+    {
+      "detail": "REQUEST_IDENTITY_CONFLICT,NEW_REQUEST_CANDIDATE",
+      "id": "concurrent_conflict",
+      "status": "PASS"
+    },
+    {
+      "detail": "",
+      "id": "execution_authority_never_granted",
+      "status": "PASS"
+    }
+  ],
+  "executed": 17,
+  "execution_authorized": false,
+  "model_only": true,
+  "passed": 17
+}

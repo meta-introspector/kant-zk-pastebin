@@ -1,0 +1,80 @@
+{
+  "schema": "zos.experimental.test-matrix.v1",
+  "suites": [
+    {
+      "suite": "Wasmi runtime",
+      "expected": 58,
+      "passed": 58,
+      "scope": "Ubuntu experimental runtime"
+    },
+    {
+      "suite": "Rust-Lean-WASM composition",
+      "expected": 8,
+      "passed": 8,
+      "scope": "Historical denial composition"
+    },
+    {
+      "suite": "Private execution boundary",
+      "expected": 8,
+      "passed": 8,
+      "scope": "Ubuntu test-only boundary"
+    },
+    {
+      "suite": "Rust visibility",
+      "expected": 9,
+      "passed": 9,
+      "scope": "Compiler visibility checks"
+    },
+    {
+      "suite": "External Rust consumer",
+      "expected": 9,
+      "passed": 9,
+      "scope": "Non-test denial-only consumer"
+    },
+    {
+      "suite": "Canonical encoding",
+      "expected": 7,
+      "passed": 7,
+      "scope": "Independent Ubuntu reproduction"
+    },
+    {
+      "suite": "Replay model",
+      "expected": 17,
+      "passed": 17,
+      "scope": "Independent Ubuntu model reproduction"
+    },
+    {
+      "suite": "Kubo provider integration",
+      "expected": 9,
+      "passed": 9,
+      "scope": "Real offline Kubo"
+    },
+    {
+      "suite": "Kubo-Rust integration",
+      "expected": 6,
+      "passed": 6,
+      "scope": "Integrity and denial-only boundary"
+    },
+    {
+      "suite": "Expanded V2 contract",
+      "expected": 37,
+      "passed": 37,
+      "scope": "Codex reported model-only; archive integrity verified"
+    },
+    {
+      "suite": "Inherited receipt-boundary serialized",
+      "expected": 43,
+      "passed": 43,
+      "scope": "Codex reported offline regression"
+    },
+    {
+      "suite": "Inherited receipt-boundary parallel",
+      "expected": 43,
+      "passed": 43,
+      "scope": "Codex reported repeat of same suite"
+    }
+  ],
+  "aggregation_warning": "Suites overlap and must not be treated as independent security properties.",
+  "operational_authorization": false,
+  "production_acceptance": "BLOCKED"
+}

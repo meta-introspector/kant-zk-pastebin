@@ -1,0 +1,20 @@
+{
+  "authenticated_caller": "NOT_QUALIFIED",
+  "dao_credits_authorized": "NO",
+  "full_runtime_closure": "NOT_ESTABLISHED",
+  "general_proof_artifact_binding": "NOT_ESTABLISHED",
+  "new_dependencies": 0,
+  "original_manifest_sha256": "4fe4f7a9d18354dbdd820847cae3ab71c230fa3b10f9f5a76da1cf12f2199f83",
+  "original_report_sha256": "9efd1dd541d783176a715dad3feb69cc199606294778022af50fc56350044350",
+  "positive_execution_path": false,
+  "production_acceptance": "BLOCKED",
+  "provider_checks_passed": 9,
+  "provider_exit": 0,
+  "real_action_authorization": "DISABLED",
+  "rust_binary_sha256": "3d616a974164095f355f859da832eb8bae039e4dede844a16e2f14eeade715bf",
+  "rust_cases_passed": 6,
+  "rust_exit": 0,
+  "stage": "ZOS-11-04B-05I-R3-07D",
+  "strict_end_to_end_deadline": "NOT_ESTABLISHED",
+  "verdict": "KUBO_RUST_DENIAL_INTEGRATION_QUALIFIED"
+}

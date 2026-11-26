@@ -1,0 +1,16 @@
+{
+  "consumer_binary_sha256": "927b2b5e130953decc7d2ccacb23e6da1529e5bb2c9dd1d7d1d5ce4d219d3353",
+  "consumer_checks_expected": 9,
+  "consumer_checks_passed": 9,
+  "dao_credits_authorized": "NO",
+  "general_artifact_authority_binding": "NOT_ESTABLISHED",
+  "new_dependencies": 0,
+  "original_manifest_sha256": "746dc07a3f59776ce8d4eaf0f7c918e8cc453eb276d647e84e47b4b818a0b6be",
+  "original_report_sha256": "79ef46ca55d3a2c47e2d891e63a0d6a885559f0ed2a455482f1aa1bd5fe2759e",
+  "production_acceptance": "BLOCKED",
+  "public_execution_enabled": false,
+  "real_action_authorization": "DISABLED",
+  "sandbox_exit": 0,
+  "stage": "ZOS-11-04B-05I-R3-05B-02",
+  "verdict": "EXTERNAL_DENIAL_CONSUMER_QUALIFIED"
+}

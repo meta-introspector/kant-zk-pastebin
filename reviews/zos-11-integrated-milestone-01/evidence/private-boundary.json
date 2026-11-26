@@ -1,0 +1,17 @@
+{
+  "boundary_checks_passed": 8,
+  "dao_credits_authorized": "NO",
+  "general_artifact_authority_binding": "NOT_ESTABLISHED",
+  "historical_regression_identity": true,
+  "new_dependencies": 0,
+  "original_composition_preserved": true,
+  "original_manifest_sha256": "2607987db448e8c023de7f502a266b5c34ec30bc833fa48559086d43e66b9956",
+  "original_report_sha256": "0cb2a15b24ca8a13008f280a1a40db75630a51f453bd7e3ae9c7442a7f693599",
+  "production_acceptance": "BLOCKED",
+  "public_execution_enabled": false,
+  "real_action_authorization": "DISABLED",
+  "sandbox_exit": 0,
+  "stage": "ZOS-11-04B-05I-R3-05B-01",
+  "verdict": "PRIVATE_EXECUTION_BOUNDARY_QUALIFIED",
+  "visibility_checks_passed": 9
+}

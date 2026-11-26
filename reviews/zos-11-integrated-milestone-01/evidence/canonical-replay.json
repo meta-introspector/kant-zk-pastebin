@@ -1,0 +1,16 @@
+{
+  "authenticated_conflicts_qualified": false,
+  "authentication_v2_qualified": false,
+  "canonical_vectors_passed": 7,
+  "dao_credits_authorized": "NO",
+  "historical_test_identity": true,
+  "model_checks_passed": 17,
+  "model_only": true,
+  "original_manifest_sha256": "b63a06c9abfc5d745012779373d9e302fabb0e82a741db313683b765e6aea6ab",
+  "original_report_sha256": "eab2db33ab917a3dd2aa48640c3ac399dfd4e4ccc9e9cebc06f2b4b653c3ee62",
+  "production_acceptance": "BLOCKED",
+  "real_action_authorization": "DISABLED",
+  "sandbox_exit": 0,
+  "stage": "ZOS-11-04B-05I-R3-06C",
+  "verdict": "CANONICAL_REPLAY_MODEL_REPRODUCED"
+}

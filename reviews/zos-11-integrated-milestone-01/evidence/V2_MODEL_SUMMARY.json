@@ -1,0 +1,12 @@
+{
+  "archive_sha256": "cd8b11a5ac4b879cb0cf3e9a7786e02ce90ac3494eda1c4a6d08341602110cce",
+  "archive_manifest_verified_in_ubuntu": 587,
+  "model_checks_reported_passed": 37,
+  "inherited_model_reported_passed": 17,
+  "inherited_rust_serial_reported_passed": 43,
+  "inherited_rust_parallel_reported_passed": 43,
+  "independent_expanded_model_reproduction": "NOT_RUN",
+  "real_signature_verification": "NOT_PERFORMED",
+  "rust_api_compatibility": "NOT_ESTABLISHED",
+  "execution_authorized": false
+}
