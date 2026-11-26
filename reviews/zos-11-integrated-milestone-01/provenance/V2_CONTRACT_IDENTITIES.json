@@ -1,0 +1,74 @@
+{
+  "archive_manifest_verified": 587,
+  "archive_sha256": "cd8b11a5ac4b879cb0cf3e9a7786e02ce90ac3494eda1c4a6d08341602110cce",
+  "cryptographic_authentication": "NOT_QUALIFIED",
+  "documents": [
+    {
+      "bytes": 4180,
+      "filename": "FINAL_REPORT.md",
+      "original_content_included": false,
+      "sha256": "df2c0d26fc29b6c9f0fee1976164ee5e7a49bd5e1751b4415be77728109eedec"
+    },
+    {
+      "bytes": 720,
+      "filename": "FINAL_SUMMARY.json",
+      "original_content_included": false,
+      "sha256": "c0a65a68146a5b7664c8ac543115d625f131f4d5f2c07ab9bc2380a4fd0408d9"
+    },
+    {
+      "bytes": 4712,
+      "filename": "AUTHENTICATED_REQUEST_V2_CONTRACT.md",
+      "original_content_included": false,
+      "sha256": "884d8c81f006317d5b87af172d3693b8c91a2d17de719a520e1bf9cd0dd6e150"
+    },
+    {
+      "bytes": 1524,
+      "filename": "CANONICAL_ENCODING_SPEC.md",
+      "original_content_included": false,
+      "sha256": "406996f2828e0603e8518a4e5524e60590af80bb93b83108f8efe6cf1739632c"
+    },
+    {
+      "bytes": 1740,
+      "filename": "POLICY_BINDING_CONTRACT.md",
+      "original_content_included": false,
+      "sha256": "83efacc37e66f5dc78483be5953856218366b8480c0c38d91adaa675a677a470"
+    },
+    {
+      "bytes": 1993,
+      "filename": "REPLAY_IDENTITY_COMPATIBILITY.md",
+      "original_content_included": false,
+      "sha256": "4ca0f68883aa0aa073ba3db123e5807fded27d3867ae602387b4c480c9668197"
+    },
+    {
+      "bytes": 1561,
+      "filename": "AUTHORITY_TRUST_BOUNDARY.md",
+      "original_content_included": false,
+      "sha256": "43fe23a11b6056b4b51ab146e324655e96fc4a0c4282520915d29b8a1634af6f"
+    },
+    {
+      "bytes": 6155,
+      "filename": "INTEGRATION_HANDOFF.md",
+      "original_content_included": false,
+      "sha256": "ebc5dcfbab3d56f4723691bbbadd26ea032ba22905ff6b8d3c21a7935bb540de"
+    },
+    {
+      "bytes": 2202,
+      "filename": "TEST_RESULTS.json",
+      "original_content_included": false,
+      "sha256": "aab5525198c447f871004db1f45c3ea0e234da6b6e4ecece636edabef66fc5b9"
+    },
+    {
+      "bytes": 6018,
+      "filename": "TEST_VECTORS.json",
+      "original_content_included": false,
+      "sha256": "d38863e885e18e3bb811de8831189b2fa7b7b265a59295261f5c160ffb1c75e9"
+    },
+    {
+      "bytes": 13192,
+      "filename": "SOURCE_PATCH.diff",
+      "original_content_included": false,
+      "sha256": "2b85537542acd1bc8723b6c0380fbfbe4d84d7be08ac2f359fa4f9ed5b6747d2"
+    }
+  ],
+  "model_reproduction": "NOT_RUN_IN_INTAKE"
+}

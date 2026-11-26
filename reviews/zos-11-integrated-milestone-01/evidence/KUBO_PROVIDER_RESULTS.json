@@ -1,0 +1,18 @@
+{
+  "checks": {
+    "fresh_offline_repo": true,
+    "handoff_integrity": true,
+    "independent_cid_match": true,
+    "invalid_cid": true,
+    "loose_fixture_removed": true,
+    "real_verified_bytes": true,
+    "sealed_runtime_unchanged": true,
+    "wrong_digest": true,
+    "wrong_size": true
+  },
+  "checks_passed": 9,
+  "negative_retrieval_requests": 3,
+  "operational_execution": false,
+  "positive_retrieval_requests": 1,
+  "runtime_files_verified": 13
+}

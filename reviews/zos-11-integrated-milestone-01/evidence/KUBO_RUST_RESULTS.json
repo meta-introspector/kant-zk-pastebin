@@ -1,0 +1,61 @@
+{
+  "cases": [
+    {
+      "case": "real_kubo_bytes",
+      "observed": [
+        "RUST_VERIFIED_ARTIFACT=PASS",
+        "RUST_EXECUTION_AUTHORITY=DENY",
+        "RUST_OPERATIONAL_EXECUTION=NO"
+      ],
+      "passed": true,
+      "returncode": 0
+    },
+    {
+      "case": "mutated_bytes",
+      "observed": [
+        "RUST_INTEGRITY_REJECTED"
+      ],
+      "passed": true,
+      "returncode": 0
+    },
+    {
+      "case": "truncated_bytes",
+      "observed": [
+        "RUST_INTEGRITY_REJECTED"
+      ],
+      "passed": true,
+      "returncode": 0
+    },
+    {
+      "case": "oversized_bytes",
+      "observed": [
+        "RUST_INTEGRITY_REJECTED"
+      ],
+      "passed": true,
+      "returncode": 0
+    },
+    {
+      "case": "empty_bytes",
+      "observed": [
+        "RUST_INTEGRITY_REJECTED"
+      ],
+      "passed": true,
+      "returncode": 0
+    },
+    {
+      "case": "restored_control",
+      "observed": [
+        "RUST_VERIFIED_ARTIFACT=PASS",
+        "RUST_EXECUTION_AUTHORITY=DENY",
+        "RUST_OPERATIONAL_EXECUTION=NO"
+      ],
+      "passed": true,
+      "returncode": 0
+    }
+  ],
+  "lean_calls_for_new_fixture": "ZERO_OBSERVED",
+  "operational_execution": false,
+  "rust_binary_sha256": "3d616a974164095f355f859da832eb8bae039e4dede844a16e2f14eeade715bf",
+  "rust_cases_passed": 6,
+  "second_kubo_retrieval": false
+}

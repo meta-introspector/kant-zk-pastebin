@@ -1,0 +1,39 @@
+{
+  "observed_license": {
+    "license": "GNU AGPL version 3",
+    "repository": "lean-workers-union",
+    "scope": "License observed at inspected commit; not a blanket license for other sources."
+  },
+  "repositories": [
+    {
+      "inspected_commit": "13d92d97b9b89f9af94a35cb70436035bd2fd05a",
+      "license_files_found": 0,
+      "repository": "kant-zk-pastebin",
+      "source_redistributed": false
+    },
+    {
+      "inspected_commit": "909707edfc08ca7623eaea0604dbd55000b6fba3",
+      "license_files_found": 0,
+      "repository": "kant-lean-worker",
+      "source_redistributed": false
+    },
+    {
+      "inspected_commit": "760c602ae10bcb35461a4b3adc3268c6e92478b3",
+      "license_files_found": 0,
+      "repository": "lean-worker-jmikedupont2",
+      "source_redistributed": false
+    },
+    {
+      "inspected_commit": "e4807bc7ac130c07e0820c076ac07238822f75ec",
+      "license_files_found": 1,
+      "repository": "lean-workers-union",
+      "source_redistributed": false
+    },
+    {
+      "inspected_commit": "88347029b915ca86f8accaf5f000f0aeaef883ea",
+      "license_files_found": 0,
+      "repository": "task-runner",
+      "source_redistributed": false
+    }
+  ]
+}
